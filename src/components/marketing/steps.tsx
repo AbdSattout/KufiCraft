@@ -1,3 +1,4 @@
+import { RATIO_PRESETS, ratioLabel } from "@/lib/canvas/model";
 import { KufiSvg } from "./kufi/kufi-svg";
 import { medallion } from "./kufi/compositions";
 import { Reveal } from "./reveal";
@@ -18,16 +19,16 @@ const STEPS: Step[] = [
     name: "ارسم على الشبكة",
     body: "انقر على الخلايا التي تريد أن ينزل فيها الحبر، خليّةً بعد خليّة.",
     items: 40,
-    ratio: 0.25,
+    ratio: RATIO_PRESETS[0].ratio,
     grid: true,
     tone: "mk-steps__tile--first",
     height: "var(--mk-step-tile-1)",
   },
   {
     name: "اضبط النسبة والأشكال",
-    body: "حرّك نسبة الحبر بين 25% و75%، وبدّل شكل الخلية بين الأشكال التسعة.",
+    body: "اختر نسبة الحبر من 1:1 إلى 1:5، وبدّل شكل الخلية بين الأشكال التسعة.",
     items: null,
-    ratio: 0.5,
+    ratio: RATIO_PRESETS[1].ratio,
     grid: false,
     tone: "mk-steps__tile--second",
     height: "var(--mk-step-tile-2)",
@@ -36,7 +37,7 @@ const STEPS: Step[] = [
     name: "صدّر أو شارك",
     body: "صدّر لوحتك بملف SVG أو صورة PNG، جاهزة للطباعة أو للنشر.",
     items: null,
-    ratio: 0.75,
+    ratio: RATIO_PRESETS[2].ratio,
     grid: false,
     tone: "mk-steps__tile--third",
     height: "var(--mk-step-tile-3)",
@@ -73,7 +74,7 @@ export function Steps() {
                   }
                   ratio={step.ratio}
                   grid={step.grid}
-                  label={`${step.name}: الميدالية بنسبة حبر ${Math.round(step.ratio * 100)}%`}
+                  label={`${step.name}: الميدالية بنسبة حبر ${ratioLabel(step.ratio)}`}
                   className="h-full"
                 />
               </div>

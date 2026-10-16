@@ -166,7 +166,7 @@ const NESTED = [
 export const nested: Piece = {
   id: "nested",
   name: "إطارات متداخلة",
-  note: "شبكة مربعة 16×16 · نسبة 75%",
+  note: "شبكة مربعة 16×16 · نسبة 1:3",
   spec: { kind: "square", cells: 16 },
   ratio: 0.75,
   items: tiles(NESTED),
@@ -189,7 +189,7 @@ function latticeMap(): string[] {
 export const lattice: Piece = {
   id: "lattice",
   name: "مشربية",
-  note: "شبكة مربعة 14×14 · نسبة 50%",
+  note: "شبكة مربعة 14×14 · نسبة 1:1",
   spec: { kind: "square", cells: 14 },
   ratio: 0.5,
   items: tiles(latticeMap()),
@@ -199,7 +199,7 @@ export const lattice: Piece = {
 export const ornament: Piece = {
   id: "ornament",
   name: "حلية",
-  note: "شبكة مربعة 13×13 · نسبة 50% · دوائر وأرباع",
+  note: "شبكة مربعة 13×13 · نسبة 1:1 · دوائر وأرباع",
   spec: { kind: "square", cells: 13 },
   ratio: 0.5,
   items: [
@@ -224,7 +224,7 @@ export const ornament: Piece = {
 export const rosette: Piece = {
   id: "rosette",
   name: "زخرفة مشعّة",
-  note: "شبكة دائرية 5 مناطق · نسبة 75%",
+  note: "شبكة دائرية 5 مناطق · نسبة 1:3",
   spec: { kind: "radial", bands: 5 },
   ratio: 0.75,
   items: [
@@ -241,7 +241,7 @@ export const rosette: Piece = {
 export const arcade: Piece = {
   id: "arcade",
   name: "محراب",
-  note: "شبكة مربعة 16×16 · نسبة 75%",
+  note: "شبكة مربعة 16×16 · نسبة 1:3",
   spec: { kind: "square", cells: 16 },
   ratio: 0.75,
   items: [
