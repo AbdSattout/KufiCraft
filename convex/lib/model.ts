@@ -99,6 +99,28 @@ export const MAX_NAME_LENGTH = 120;
 export const MAX_THUMBNAIL_LENGTH = 24_000;
 /** Colours are stored as CSS strings (`oklch(…)`, `#rrggbb`, `transparent`); anything longer is truncated. */
 export const MAX_COLOR_LENGTH = 32;
+/**
+ * Item keys are identity: two items with the same `k` are the same item. An
+ * oversized key is **rejected** on write (not truncated — truncation would
+ * silently merge distinct items). Generated keys (`tileKey`, `lineKey`,
+ * `archKey`) stay far below this.
+ */
+export const MAX_KEY_LENGTH = 64;
+
+/**
+ * Largest legal grid index for a cell size `base`, in viewBox units.
+ *
+ * Indices are cell (square) or band (circular) numbers: a point inside the
+ * `VIEWBOX_SIZE` square never needs an index above `VIEWBOX_SIZE / base`.
+ * Because `base ∈ [4, 100]` the universal ceiling is `VIEWBOX_SIZE / 4 = 250`.
+ * A non-finite / non-positive `base` falls back to that ceiling.
+ */
+export function maxGridIndex(base: number): number {
+  if (!Number.isFinite(base) || base <= 0) {
+    return Math.floor(VIEWBOX_SIZE / 4);
+  }
+  return Math.floor(VIEWBOX_SIZE / base);
+}
 
 /** Default palette. */
 export const DEFAULT_INK = "#1a1a2e";
