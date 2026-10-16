@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import {
   Copy,
   EllipsisVertical,
+  FileJson,
   FolderOpen,
   Pencil,
   Trash2,
@@ -54,6 +55,7 @@ import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { mutationErrorMessage } from "@/components/dashboard/errors";
 import { formatItemCount, formatUpdatedAt } from "@/components/dashboard/format";
+import { useExportProjectFile } from "@/components/dashboard/project-files";
 
 type ProjectSummary = FunctionReturnType<typeof api.projects.list>[number];
 
@@ -62,6 +64,7 @@ export function ProjectCard({ project }: { project: ProjectSummary }) {
   const renameProject = useMutation(api.projects.rename);
   const duplicateProject = useMutation(api.projects.duplicate);
   const removeProject = useMutation(api.projects.remove);
+  const exportFile = useExportProjectFile();
 
   const [renderedAt] = useState(() => Date.now());
   const [renameOpen, setRenameOpen] = useState(false);
@@ -70,6 +73,7 @@ export function ProjectCard({ project }: { project: ProjectSummary }) {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isDuplicating, setIsDuplicating] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
 
   const projectHref = `/app/${project._id}`;
 
@@ -103,6 +107,20 @@ export function ProjectCard({ project }: { project: ProjectSummary }) {
       toast.error(mutationErrorMessage(error, "تعذّر نسخ اللوحة"));
     } finally {
       setIsDuplicating(false);
+    }
+  }
+
+  async function handleExport() {
+    if (isExporting) return;
+    setIsExporting(true);
+    try {
+      // The card only has a summary — fetch the full document before writing.
+      await exportFile(project._id, project.name);
+      toast.success("تم تصدير الملف");
+    } catch (error) {
+      toast.error(mutationErrorMessage(error, "تعذّر تصدير الملف"));
+    } finally {
+      setIsExporting(false);
     }
   }
 
@@ -184,6 +202,13 @@ export function ProjectCard({ project }: { project: ProjectSummary }) {
               >
                 <Copy className="size-4" />
                 نسخ
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                disabled={isExporting}
+                onClick={() => void handleExport()}
+              >
+                <FileJson className="size-4" />
+                تصدير الملف
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
