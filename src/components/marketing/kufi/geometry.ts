@@ -3,7 +3,8 @@
  *
  * It follows the cell/zone rules of `docs/CANVAS.md` §1–3: a 1000×1000 viewBox,
  * square cells of `base`, circular bands of `base` split into 36 sectors of 10°,
- * the ink/space split at `ratio` (0.25…0.75), 2-bit quadrant fragments
+ * the ink/space split at `ratio` (ink ≥ space, 1:1 … 1:5), 2-bit quadrant
+ * fragments
  * (`q`), full-thickness merged lines and arcs stroked at `ratio · base`.
  *
  * It deliberately does **not** import `src/lib/canvas/**`: the engine is written

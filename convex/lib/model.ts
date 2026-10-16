@@ -82,6 +82,15 @@ export function snapRatio(value: number): number {
   return best;
 }
 
+/** Label of the preset a value snaps to, written the way designers do (`1:3`). */
+export function ratioLabel(value: number): string {
+  const wanted = snapRatio(value);
+  for (const preset of RATIO_PRESETS) {
+    if (preset.ratio === wanted) return preset.label;
+  }
+  return RATIO_PRESETS[0].label;
+}
+
 /** Angular divisions of the circular grid (10° sectors). */
 export const CIRCULAR_SECTORS = 36;
 export const CIRCULAR_ANGULAR_UNIT = (2 * Math.PI) / CIRCULAR_SECTORS;

@@ -1,3 +1,4 @@
+import { RATIO_PRESETS } from "@/lib/canvas/model";
 import { cn } from "@/lib/utils";
 import { KufiSvg } from "./kufi/kufi-svg";
 import {
@@ -31,8 +32,8 @@ const CAPABILITIES: Capability[] = [
     figureFirst: false,
   },
   {
-    title: "نسبة حبر قابلة للتخصيص",
-    body: "حرّك النسبة بين 25% و75% فتتغيّر سماكة الحبر في اللوحة كلها دفعةً واحدة.",
+    title: "خمس نسب حبر للنص",
+    body: "اختر النسبة التي تعمل بها — من 1:1 إلى 1:5 — فتتغيّر سماكة الحبر في اللوحة كلها دفعةً واحدة.",
     figure: "ratios",
     dock: "start",
     figureFirst: true,
@@ -91,8 +92,13 @@ function Figure({ kind, dock }: { kind: FigureKind; dock: "start" | "end" }) {
         </>
       ) : null}
       {kind === "ratios"
-        ? ratioCells([0.25, 0.5, 0.75]).map((cell) => (
-            <KufiSvg key={cell.id} piece={cell} label={cell.note} className="h-full w-1/3" />
+        ? ratioCells(RATIO_PRESETS.map((preset) => preset.ratio)).map((cell) => (
+            <KufiSvg
+              key={cell.id}
+              piece={cell}
+              label={cell.note}
+              className="h-full w-1/5"
+            />
           ))
         : null}
       {kind === "merged" ? <KufiSvg piece={mergedRun} fit="slice" className="h-full w-full" /> : null}

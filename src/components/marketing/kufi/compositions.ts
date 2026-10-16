@@ -8,6 +8,7 @@
  * fragment of that cell (see `LEGEND`).
  */
 
+import { ratioLabel } from "@/lib/canvas/model";
 import type {
   FragmentShape,
   GridSpec,
@@ -261,12 +262,12 @@ export const arcade: Piece = {
 
 /* ---------------------------------------------------------------- glyphs -- */
 
-/** One cell, drawn at the given ratios — the ink-ratio control's own picture. */
+/** One cell, drawn at each of the given ratios — the ink-ratio control's own picture. */
 export function ratioCells(ratios: number[]): Piece[] {
   return ratios.map((ratio, index) => ({
     id: `cell-${index}`,
     name: "خلية",
-    note: `نسبة ${Math.round(ratio * 100)}%`,
+    note: `نسبة ${ratioLabel(ratio)}`,
     spec: { kind: "square", cells: 1 },
     ratio,
     items: [{ t: "tile", i: 0, j: 0, q: 0 }],

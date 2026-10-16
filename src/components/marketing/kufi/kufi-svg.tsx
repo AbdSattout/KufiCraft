@@ -11,7 +11,7 @@ import {
 
 type KufiSvgProps = {
   piece: Piece;
-  /** Ink ratio (0.25–0.75). Defaults to the ratio the piece was drawn with. */
+  /** Ink ratio, one of the five presets (1:1 … 1:5). Defaults to the piece's own. */
   ratio?: number;
   /** Draw only part of the piece — used to show the same figure mid-drawing. */
   items?: Item[];

@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { DirectionProvider } from "@base-ui/react/direction-provider";
-import { Slider } from "@/components/ui/slider";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { RATIO_PRESETS } from "@/lib/canvas/model";
 import { KufiSvg } from "./kufi-svg";
 import { medallion, solar } from "./compositions";
 
@@ -14,20 +14,26 @@ const GRIDS = [
 
 type GridValue = (typeof GRIDS)[number]["value"];
 
+/** 1:1, the widest ink ratio — the medallion's opening frame. */
+const OPENING_RATIO = RATIO_PRESETS[0].label;
+
 /**
  * The hero's one live control: the ink ratio and the grid kind, driving the
  * drawing above them. This panel is a fragment of the editor, so it carries
- * `data-ui` and the product's own control conventions inside.
+ * `data-ui` and the product's own control conventions inside — and the ratio
+ * is one of the five presets kufi is drawn in (1:1 … 1:5), never a free value.
  */
 export function RatioInstrument() {
-  const [ratio, setRatio] = useState(50);
+  const [ratio, setRatio] = useState(OPENING_RATIO);
   const [grid, setGrid] = useState<GridValue>("square");
   const piece = grid === "square" ? medallion : solar;
+  const preset =
+    RATIO_PRESETS.find((option) => option.label === ratio) ?? RATIO_PRESETS[0];
 
   return (
     // Base UI takes its direction from this provider, not from the document, so
-    // the panel declares it: without it the arrow keys move the thumb the
-    // opposite way to the track the reader sees.
+    // the panel declares it: without it the arrow keys move through a group the
+    // opposite way to the order the reader sees.
     <DirectionProvider direction="rtl">
       <div
         data-ui=""
@@ -36,57 +42,73 @@ export function RatioInstrument() {
         <div className="mk-stage__frame">
           <KufiSvg
             piece={piece}
-            ratio={ratio / 100}
+            ratio={preset.ratio}
             grid
-            label={`${piece.name}: ${piece.note} بنسبة حبر ${ratio}%`}
+            label={`${piece.name}: ${piece.note} بنسبة حبر ${preset.label}`}
             className="h-full"
           />
         </div>
 
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-4">
-          <div className="flex min-w-40 grow items-center gap-3">
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
             <span
               id="mk-ratio-label"
               className="mk-small shrink-0 text-foreground"
             >
               نسبة الحبر
             </span>
-            <Slider
-              aria-labelledby="mk-ratio-label"
-              min={25}
-              max={75}
-              step={5}
-              value={[ratio]}
-              onValueChange={(value) => {
-                setRatio(Array.isArray(value) ? value[0] : value);
+            <ToggleGroup
+              value={[preset.label]}
+              onValueChange={(values) => {
+                const next = values[0];
+                if (next) setRatio(next);
               }}
-              className="grow"
-            />
-            <span className="mk-small w-9 shrink-0 text-end text-foreground tabular-nums">
-              {ratio}%
-            </span>
+              multiple={false}
+              variant="outline"
+              size="sm"
+              aria-labelledby="mk-ratio-label"
+            >
+              {RATIO_PRESETS.map((option) => (
+                <ToggleGroupItem
+                  key={option.label}
+                  value={option.label}
+                  aria-label={`نسبة الحبر ${option.label}`}
+                >
+                  {option.label}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
           </div>
 
-          <ToggleGroup
-            value={[grid]}
-            onValueChange={(values) => {
-              const next = values[0];
-              if (next === "square" || next === "circular") setGrid(next);
-            }}
-            multiple={false}
-            variant="outline"
-            aria-label="نوع الشبكة"
-          >
-            {GRIDS.map((option) => (
-              <ToggleGroupItem
-                key={option.value}
-                value={option.value}
-                aria-label={`شبكة ${option.label}`}
-              >
-                {option.label}
-              </ToggleGroupItem>
-            ))}
-          </ToggleGroup>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+            <span
+              id="mk-grid-label"
+              className="mk-small shrink-0 text-foreground"
+            >
+              نوع الشبكة
+            </span>
+            <ToggleGroup
+              value={[grid]}
+              onValueChange={(values) => {
+                const next = values[0];
+                if (next === "square" || next === "circular") setGrid(next);
+              }}
+              multiple={false}
+              variant="outline"
+              size="sm"
+              aria-labelledby="mk-grid-label"
+            >
+              {GRIDS.map((option) => (
+                <ToggleGroupItem
+                  key={option.value}
+                  value={option.value}
+                  aria-label={`شبكة ${option.label}`}
+                >
+                  {option.label}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+          </div>
         </div>
       </div>
     </DirectionProvider>
