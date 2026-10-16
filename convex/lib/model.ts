@@ -189,7 +189,7 @@ export type CanvasItem = TileItem | LineItem | ArchItem;
 
 export interface ProjectConfig {
   gridType: GridType;
-  /** Ink fraction per cell, MIN_RATIO..MAX_RATIO. */
+  /** Ink fraction per cell — one of `RATIO_PRESETS` (`1:1` … `1:5`). */
   ratio: number;
   /** Cell size in viewBox units. */
   base: number;
