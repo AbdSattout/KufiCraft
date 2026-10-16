@@ -51,8 +51,10 @@ by exactly one wave member; if you need a change there, ask instead of editing.
    immediately (it is git-ignored, but every checkout needs it).
 2. **Do not** run `bunx convex dev`, `convex deploy` or `bunx auth generate`
    unless your brief explicitly grants it — the dev deployment is shared.
-3. `bunx tsc --noEmit` must pass before you report back. Run your own tests
-   (`bun run test`) and, for UI work, `bun run build`.
+3. `bunx tsc --noEmit` must pass before you report back. **Run `bunx next typegen`
+   first in a fresh checkout** — `LayoutProps<"/">` and route types live in
+   `.next/types`, which a new worktree does not have yet. Then
+   `bun run lint`, `bun run test`, and `bun run build` for UI work.
 4. The docs are the contract: `docs/CANVAS.md`, `docs/BACKEND.md`, `docs/AUTH.md`,
    `docs/UI.md`. Deviating is fine **only** if you update the doc in the same
    branch and call it out in your report.

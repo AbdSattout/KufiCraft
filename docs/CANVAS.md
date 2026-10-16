@@ -112,7 +112,44 @@ the reference is ambiguous:
   with a fixed light background; must stay ≤ 24 000 characters — reduce
   precision (`crypto`-free `toFixed(1)`) and skip the `k`/metadata attributes.
 
-## 6. Tests (`src/lib/canvas/*.test.ts`, vitest)
+## 6. Resolved decisions (engine, wave 1)
+
+Where the reference apps were incomplete or silent, the engine fixed the
+following — the editor/export must not contradict them:
+
+* `hamza1` / `hamza2`: a hook and its mirror, band thickness `min(w,h)/3`
+  (the old app had no hamza path to port).
+* `arc`: band thickness `min(w,h)/2`, bulging outward.
+* `arch` on the square grid: `d = 0` bulges up when horizontal and to the
+  **left** when vertical (consistency choice); circular arches ignore `d`.
+* Non-square shapes on a circular grid are fitted into the slice frame with the
+  local `+x` axis pointing outward along the radius.
+* `zoneRect` is square-grid only; circular tiles use `circularSlice` /
+  `sectorPath`.
+* A `LineItem` that is diagonal (invalid by the model) falls back to its
+  bounding-box rect instead of throwing — the editor must prevent creating one.
+
+## 7. Quick start for consumers
+
+```ts
+import { itemPath, renderSvg, renderThumbnail } from "@/lib/canvas/geometry";
+import { pointToAnchor } from "@/lib/canvas/grid";
+import { strokeToItems, toOps } from "@/lib/canvas/ops";
+
+// editor: pointer → anchor → items → backend batch
+const anchor = pointToAnchor(config, viewBoxPoint);
+const ops = toOps({ items: [...current, ...strokeToItems(config, anchors, { mergeLines: config.mergeLines })], previous: current });
+await applyOps({ projectId, ops });
+
+// dashboard/export: SVG string
+const svg = renderThumbnail(config, items);   // ≤ 24 000 chars
+const full = renderSvg(config, items, { grid: config.showGrid });
+```
+
+
+## 8. Test coverage (engine, wave 1)
+
+The suite (`bun run test`, 68 tests) covers:
 
 * zone rects for all 4 `q` values at `ratio` 0.5 and 0.75.
 * circular slice math incl. wrap-around sectors (e.g. `j=35` → `j=0`).
