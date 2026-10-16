@@ -9,7 +9,7 @@ import { components } from "./_generated/api";
 import type { DataModel } from "./_generated/dataModel";
 import { query } from "./_generated/server";
 import authConfig from "./auth.config";
-import { signUpEmail, verifySignUpContextToken } from "./authFlows";
+import { signUpEmail, verifySignUpContextToken, PASSKEY_EMAIL_DOMAIN } from "./authFlows";
 import authSchema from "./betterAuth/schema";
 
 /**
@@ -50,9 +50,33 @@ const applySessionCookie = setSessionCookie as unknown as (
   session: Parameters<typeof setSessionCookie>[1],
 ) => Promise<void>;
 
-export const createAuthOptions = (ctx: GenericCtx<DataModel>) => {
-  const siteUrl = process.env.SITE_URL ?? "http://localhost:3000";
-  const rpID = process.env.PASSKEY_RP_ID ?? "localhost";
+/**
+ * Values the schema-generation shim may supply so `bunx auth generate` works
+ * without deployment env. **Never** passed at request time: a live request must
+ * fail closed rather than bind passkeys to a guessed origin.
+ */
+export interface AuthOriginOverrides {
+  siteUrl?: string;
+  rpID?: string;
+}
+
+/** Reads a required deployment env var, failing closed when it is unset. */
+function requireAuthEnv(name: "SITE_URL" | "PASSKEY_RP_ID"): string {
+  const value = process.env[name];
+  if (!value || value.trim().length === 0) {
+    throw new Error(
+      `${name} is not set — KufiCraft auth fails closed instead of silently falling back to localhost. Set it on the Convex deployment (see docs/AUTH.md).`,
+    );
+  }
+  return value;
+}
+
+export const createAuthOptions = (
+  ctx: GenericCtx<DataModel>,
+  overrides?: AuthOriginOverrides,
+) => {
+  const siteUrl = overrides?.siteUrl ?? requireAuthEnv("SITE_URL");
+  const rpID = overrides?.rpID ?? requireAuthEnv("PASSKEY_RP_ID");
   return {
     appName: "KufiCraft",
     baseURL: siteUrl,
@@ -60,6 +84,27 @@ export const createAuthOptions = (ctx: GenericCtx<DataModel>) => {
     database: authComponent.adapter(ctx),
     // KufiCraft is passkey-only: no passwords, no email flows.
     emailAndPassword: { enabled: false },
+    /**
+     * Explicit rate limiting: Better Auth only enables its limiter when
+     * `NODE_ENV === "production"`, so without this block the unauthenticated
+     * `/passkey/*` endpoints were effectively unmetered.
+     *
+     * Storage stays at the default (`memory`) because no secondary storage is
+     * configured — the in-memory store needs no `rateLimit` table, so **no auth
+     * schema regeneration and no deployment change** is required. It is
+     * per-isolate best-effort; docs/AUTH.md records that limitation.
+     */
+    rateLimit: {
+      enabled: true,
+      window: 60,
+      max: 100,
+      customRules: {
+        /** Mints a `user` row per call — the most expensive public path. */
+        "/passkey/generate-register-options": { window: 60, max: 10 },
+        "/passkey/verify-registration": { window: 60, max: 20 },
+        "/passkey/generate-authenticate-options": { window: 60, max: 20 },
+      },
+    },
     plugins: [
       passkey({
         rpID,
@@ -85,8 +130,23 @@ export const createAuthOptions = (ctx: GenericCtx<DataModel>) => {
                 message: "انتهت صلاحية طلب إنشاء الحساب. أعد المحاولة من جديد.",
               });
             }
+            const email = signUpEmail(payload.nonce);
+            const existing =
+              await endpointCtx.context.internalAdapter.findUserByEmail(email);
+            if (existing) {
+              /**
+               * The context token is **not single-use by design**, but the
+               * account it mints is: creating it twice would hit the adapter's
+               * unique-email constraint and surface an opaque 500. Detect the
+               * repeat here and fail with a clean Arabic 4xx instead
+               * (docs/AUTH.md).
+               */
+              throw new APIError("BAD_REQUEST", {
+                message: "تم استخدام طلب إنشاء الحساب مسبقًا. ابدأ من جديد.",
+              });
+            }
             const user = await endpointCtx.context.internalAdapter.createUser(
-              { name: payload.name, email: signUpEmail(payload.nonce) },
+              { name: payload.name, email },
               { method: "passkey" },
             );
             return {
@@ -125,8 +185,10 @@ export const createAuthOptions = (ctx: GenericCtx<DataModel>) => {
   } satisfies BetterAuthOptions;
 };
 
-export const createAuth = (ctx: GenericCtx<DataModel>) =>
-  betterAuth(createAuthOptions(ctx));
+export const createAuth = (
+  ctx: GenericCtx<DataModel>,
+  overrides?: AuthOriginOverrides,
+) => betterAuth(createAuthOptions(ctx, overrides));
 
 /** Current user profile, or null when signed out. */
 export const getCurrentUser = query({
@@ -134,10 +196,14 @@ export const getCurrentUser = query({
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return null;
+    const email = identity.email ?? null;
     return {
       id: identity.subject,
       name: identity.name ?? null,
-      email: identity.email ?? null,
+      // Login-less accounts carry a synthetic `<nonce>@passkey.local`
+      // address; never expose it (docs/AUTH.md).
+      email:
+        email !== null && email.endsWith(PASSKEY_EMAIL_DOMAIN) ? null : email,
       image: identity.pictureUrl ?? null,
     };
   },
