@@ -78,46 +78,42 @@ New worktrees/checkouts must copy it: `cp /home/abd/Coding/kuficraft/.env.local 
 
 ## Rate limiting and abuse controls
 
-Better Auth only enables its limiter automatically when
-`NODE_ENV === "production"`, so `createAuthOptions` sets an explicit `rateLimit`
-block (`enabled: true`, global `60 s / 100`). The unauthenticated `/passkey/*`
-endpoints get tighter per-path rules:
+**The limiter is off** (`rateLimit: { enabled: false }` in `createAuthOptions`) —
+explicitly `false`, not simply omitted, because Better Auth enables its limiter by
+itself when `NODE_ENV === "production"`.
 
-| path | window | max |
-| --- | --- | --- |
-| `/passkey/generate-register-options` | 60 s | 10 |
-| `/passkey/verify-registration` | 60 s | 20 |
-| `/passkey/generate-authenticate-options` | 60 s | 20 |
+It was written, measured, and then removed because it could not do the job:
 
-Rules are keyed **without** the `/api/auth` prefix — Better Auth normalises the
-path before looking a rule up. The first row matters most: every call mints a
-`user` row (see the onboarding section).
+* **It cannot key on a user.** Better Auth builds every bucket key as
+  `createRateLimitKey(ip, path)` → `"<ip>|<path>"`; there is no user dimension,
+  so "limit per user" is not expressible.
+* **The IP it sees is not the visitor's.** Through the Next proxy Convex
+  overwrites the forwarding headers with its own peer, so buckets read
+  `35.173.223.1|/passkey/generate-authenticate-options` — a Vercel **egress** IP
+  that every visitor shares, and Vercel spreads invocations over a pool of them.
+  It therefore throttled innocent visitors who happened to share an egress IP
+  while an abuser rotated. (Direct `*.convex.site` calls *are* keyed on the true
+  client IP and unspoofable — but that is the same reachable endpoint, so it buys
+  nothing on its own.)
+* **The path worth protecting is pre-auth.** `passkey/generate-register-options`
+  mints a `user` row before the authenticator answers, but it runs before any
+  account exists — there is no user id to key on there either.
+* **It cost something.** With `storage: "database"` every auth request paid a
+  component read + write for that non-protection; with the default in-memory
+  store it measured *zero* limiting (a 110-request burst against a 100/60 s rule
+  produced no 429s at all, because Convex spreads HTTP across isolates).
 
-### What it does and does not give you
+Measured on dev, same 15-request burst: with the limiter enabled and
+database-backed → 429s; with `enabled: false` → 15 × 400 and no new counter rows.
+The `rateLimit` table created while the database store was in use still exists in
+the deployment with stale rows; nothing writes to it.
 
-* **Counters live in the database** (`storage: "database"`), not in the default
-  in-memory store. Convex spreads HTTP requests across isolates, so a
-  per-isolate counter measured *no* limiting at all: a 110-request burst against
-  the 100/60 s global rule returned zero 429s with memory storage, and 99 429s
-  with the database store. The counters therefore have to be shared, which means
-  the auth schema owns a `rateLimit` table (`key`, `count`, `lastRequest`) and
-  `bunx auth generate` + a deployment push create it.
-* **Shared and durable.** A counter survives isolate restarts and is visible to
-  every isolate; the trade-off is one component read + write per auth request.
-* **Keyed on the IP the platform exposes, which is not always the browser's.**
-  Better Auth keys each bucket `"<ip>|<path>"`. Direct calls to
-  `*.convex.site` are keyed on the true client IP (unspoofable, and the
-  Convex deployment is publicly reachable, so that path is the meaningful one).
-  Requests through the Next proxy are **not**: Convex overwrites the forwarding
-  headers with its own peer, so production buckets read
-  `35.173.223.1|/passkey/generate-authenticate-options` — a Vercel **egress**
-  IP that every user shares, spread across a pool of egress IPs. The aggregate
-  caps are therefore looser than the table above, and two users behind one
-  egress IP can throttle each other. This is deliberately **not** "fixed" by
-  having the proxy pass the client IP in a custom header and trusting it: the
-  key would then be client-spoofable, and a direct caller could rotate buckets
-  at will — strictly worse than an approximate shared bucket.
-* **The context token is not single-use by design.** Its only job is to prove
+Doing abuse control properly, if it is ever needed, means bot verification on the
+sign-up form (Cloudflare Turnstile) or a **global** cap on minting sign-up
+contexts — not IP rate limiting; see § Known follow-ups.
+
+One thing the limiter was never responsible for is still enforced:
+**the context token is not single-use by design.** Its only job is to prove
   "this client asked for an account with this name seconds ago". `resolveUser` is
   the real gate: a missing/invalid/expired/tampered token is rejected with the
   Arabic "انتهت صلاحية طلب إنشاء الحساب" **400**, and a *repeat* (the derived
@@ -140,10 +136,11 @@ bunx tsc --noEmit
 The shim `convex/betterAuth/auth.ts` exists only so the CLI can load the
 options without a request context.)
 
-Editing the `rateLimit` block is part of the options, so it uses the same flow:
-`storage: "database"` means the auth schema owns a `rateLimit` table, and a
-regeneration + push that omits it breaks every auth request with
-“table not found”.
+Editing `rateLimit` in `createAuthOptions` needs this flow only when it changes
+the schema — i.e. when `storage: "database"` is switched back on, since that
+makes the auth schema own a `rateLimit` table, and a regeneration + push that
+omits it breaks every auth request with “table not found”. The current
+`rateLimit: { enabled: false }` has no table.
 
 ## Passkey-first onboarding (the product requirement)
 
@@ -233,4 +230,16 @@ redesign, so it is left open rather than half-done:
    page would send (`/signup` links nowhere cross-origin). Accepted as-is: the
    token is 5-minute, single-purpose, and not a session credential. Moving it to
    a header would need a custom endpoint or a plugin patch.
+4. **No abuse control on the public sign-up path.** With the limiter off (see
+   § Rate limiting) nothing meters `passkey/generate-register-options`, so an
+   unauthenticated caller can mint `user` rows bounded only by their own effort.
+   The two honest fixes, in order of preference:
+   * **Bot verification on `/signup`** — Cloudflare Turnstile in front of the
+     form, verified server-side before the context token is minted. Stops
+     scripted abuse without penalising real visitors (and Convex cannot see the
+     client IP, so a challenge is the only reliable signal).
+   * **A global mint cap** — count `createSignUpContext` mints in a window in a
+     normal app table and refuse past a limit. It is IP-agnostic, so it cannot be
+     dodged by rotating, at the cost of a sign-up-wide ceiling an attacker could
+     exhaust on purpose.
 

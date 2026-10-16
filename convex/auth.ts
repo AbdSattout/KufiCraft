@@ -119,29 +119,28 @@ export const createAuthOptions = (
     // KufiCraft is passkey-only: no passwords, no email flows.
     emailAndPassword: { enabled: false },
     /**
-     * Explicit rate limiting: Better Auth only enables its limiter when
-     * `NODE_ENV === "production"`, so without this block the unauthenticated
-     * `/passkey/*` endpoints were effectively unmetered.
+     * Rate limiting is **off on purpose**, and this is an explicit `false`
+     * rather than an omitted key: Better Auth turns its limiter on by itself
+     * when `NODE_ENV === "production"`, so deleting the block would quietly
+     * re-enable the in-memory limiter.
      *
-     * Storage is the **database** (the auth component's own `rateLimit` table)
-     * rather than the default in-memory store: Convex spreads http requests
-     * over many isolates, so a per-isolate counter measured zero effective
-     * limiting — a 110-request burst against a 100/60 s rule produced no 429.
-     * The counters therefore have to live where every isolate can see them.
-     * `bunx auth generate` + a deployment push create the table.
+     * Why off — measured, not assumed (docs/AUTH.md § Rate limiting):
+     *  - Better Auth can only key a bucket by `"<ip>|<path>"`
+     *    (`createRateLimitKey`), so there is no way to limit a *user*.
+     *  - Through the Next proxy Convex sees Vercel's egress IP, not the
+     *    browser's, so every user shares a bucket: the limits do not constrain
+     *    an abuser (a Vercel egress pool spreads requests) but they do let one
+     *    visitor throttle every other visitor.
+     *  - The one path worth protecting — `passkey/generate-register-options`,
+     *    which mints a `user` row before the authenticator answers — is
+     *    pre-auth by definition, so it has no user id to key on either.
+     * With `storage: "database"` every auth request also paid a component
+     * read + write for that non-protection. If abuse control is needed later,
+     * the honest fixes are bot verification on the sign-up form (Turnstile) or
+     * a global cap on minting sign-up contexts; both are recorded in
+     * docs/AUTH.md § Known follow-ups.
      */
-    rateLimit: {
-      enabled: true,
-      storage: "database",
-      window: 60,
-      max: 100,
-      customRules: {
-        /** Mints a `user` row per call — the most expensive public path. */
-        "/passkey/generate-register-options": { window: 60, max: 10 },
-        "/passkey/verify-registration": { window: 60, max: 20 },
-        "/passkey/generate-authenticate-options": { window: 60, max: 20 },
-      },
-    },
+    rateLimit: { enabled: false },
     plugins: [
       passkey({
         rpID,
