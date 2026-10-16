@@ -29,6 +29,7 @@ backend) · Better Auth (passkeys, local-install component) · Bun · vitest.
 | --- | --- | --- |
 | 1 | A auth & account UX · B canvas engine + tests · D dashboard · F landing | delegated, parallel worktrees |
 | 2 | E editor (needs B+A merged) · C backend tests (convex-test) | delegated after wave 1 lands |
+| 2.5 | editor settings persistence (localStorage) · `.kuficraft` export/import (`docs/FORMAT.md`) | delegated after E lands |
 | 3 | reviews (`convex-reviewer`, `better-auth-security`), QA, deploy docs | delegated + orchestrator |
 
 ## File ownership (avoid collisions)
@@ -74,16 +75,22 @@ by exactly one wave member; if you need a change there, ask instead of editing.
 
 ## Deploy plan (after wave 3)
 
-1. Convex **prod** deployment (`bunx convex deploy`) with its own
-   `BETTER_AUTH_SECRET`, `SITE_URL`, `PASSKEY_RP_ID`.
-2. Hosting decision (user): Vercel vs Cloudflare — the app is a standard Next.js
-   Node app with two env vars; both work.
+1. Convex **prod** deployment `acrobatic-pika-276` — functions pushed, env vars
+   set (`SITE_URL=https://kuficraft.vercel.app`,
+   `PASSKEY_RP_ID=kuficraft.vercel.app`), auth routes verified.
+2. Vercel project `kuficraft` (git-connected to `AbdSattout/KufiCraft@main`):
+   production env vars must point at the prod Convex deployment
+   (`NEXT_PUBLIC_CONVEX_URL`, `NEXT_PUBLIC_CONVEX_SITE_URL`) plus
+   `NEXT_PUBLIC_SITE_URL=https://kuficraft.vercel.app`; see `docs/DEPLOY.md`.
+   Every push to `main` redeploys; run `bunx convex deploy` after convex changes.
 3. Repo visibility (user): currently **private**, `AbdSattout/KufiCraft`.
+4. Custom domain (user): passkeys bind to the origin — decide before inviting
+   users; `PASSKEY_RP_ID` + `SITE_URL` must move together.
 
 ## Open questions for the user
 
-* Hosting target and final domain (needed for `SITE_URL` + `PASSKEY_RP_ID`;
-  passkeys bind to the domain, so switching domains later means re-registering).
+* Custom domain (and whether `www` is used) — passkey re-registration is needed
+  if it changes later.
 * Repo visibility (private → public).
-* Whether to keep the old KufiCraft org/site around for migration of existing
-  artworks (old data lives in browser localStorage of the old site).
+* Whether to build an SVG-markup importer to rescue old KufiCraft localStorage
+  artworks (the old apps never stored JSON — see `docs/FORMAT.md` § Legacy).

@@ -37,8 +37,13 @@ slugs, Arabic UI text.
   stored SVG thumbnail (render `project.thumbnail` with `dangerouslySetInnerHTML`
   inside a fixed aspect wrapper, `pointer-events-none`), name, item count and a
   relative “آخر تعديل” time (Arabic).
-* Card actions (dropdown + keyboard): فتح، إعادة تسمية، نسخ، حذف (confirm
-  dialog). Rename is an inline dialog with the name pre-filled.
+* Card actions (dropdown + keyboard): فتح، إعادة تسمية، نسخ، **تصدير الملف**
+  (`.kuficraft`, see `docs/FORMAT.md`)، حذف (confirm dialog). Rename is an inline
+  dialog with the name pre-filled.
+* **Import**: an `استيراد ملف` button in the dashboard header **and** drag-and-drop
+  of `.kuficraft` files anywhere on the page (with a visible drop overlay while
+  dragging). Import always creates a new project and opens its editor; validation
+  errors surface as Arabic toasts (`docs/FORMAT.md` defines the rules).
 * “لوحة جديدة” opens a dialog: الاسم, نوع الشبكة (مربعة/دائرية), نسبة الحبر
   (slider 25–75% with a live mini preview of one cell), then creates via
   `api.projects.create` and navigates to the editor.
@@ -80,8 +85,22 @@ Persistence: every completed gesture → one `api.projects.applyOps` call with a
 optimistic local overlay for in-flight ops; undo/redo = local stack of item
 batches (≤ 50 entries) replayed as `replace` ops.
 
-Exports: SVG (string from `renderSvg`), PNG (canvas → `toBlob`), and share via
-`updateThumbnail` after each committed gesture (throttled to ≥ 2 s).
+Exports (from the top bar menu `تصدير`): SVG (string from `renderSvg`), PNG
+(canvas → `toBlob`), **ملف KufiCraft (`.kuficraft`)** via
+`src/lib/kuficraft-file.ts` (`docs/FORMAT.md`), and share via `updateThumbnail`
+after each committed gesture (throttled to ≥ 2 s).
+
+Settings persistence (localStorage, per browser, no server round-trip):
+
+* `kuficraft.editor-prefs.v1` — tool, active shape, rotation, arch bulge, zoom,
+  showGrid, mergeLines, colour swatches history (last ≤ 8 ink colours).
+  Loaded synchronously when the editor mounts and applied to the toolbar so the
+  app “opens the way you left it”. Project `config` stays authoritative for
+  rendering; UI prefs only decide the toolbar defaults and tool behaviour.
+* `kuficraft.last-config.v1` — the last committed project config, used as the
+  default in the dashboard’s «لوحة جديدة» dialog and for new projects.
+* Both keys are versioned and validated on read (corrupt/stale values fall back
+  to model defaults, never throw).
 
 Keyboard: `Delete`/`Backspace` remove, `Ctrl+Z` / `Ctrl+Shift+Z` undo/redo,
 digits `1…9` pick a shape, `E` eraser, `P` pen, `A` arch, `V` select.

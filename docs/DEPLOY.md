@@ -5,7 +5,10 @@
 | piece | where | notes |
 | --- | --- | --- |
 | Convex **dev** deployment | `adamant-dragon-860` (team `abdsat`, project `kuficraft`) | `NEXT_PUBLIC_CONVEX_URL=https://adamant-dragon-860.convex.cloud`, site `…convex.site` |
+| Convex **prod** deployment | `acrobatic-pika-276` | functions pushed, env vars set, `https://acrobatic-pika-276.convex.cloud` / `.convex.site` |
 | Dev env vars | set on the dev deployment | `BETTER_AUTH_SECRET`, `SITE_URL=http://localhost:3000`, `PASSKEY_RP_ID=localhost` |
+| Prod env vars | set on the prod deployment | `BETTER_AUTH_SECRET`, `SITE_URL=https://kuficraft.vercel.app`, `PASSKEY_RP_ID=kuficraft.vercel.app` |
+| Vercel | project `kuficraft` → https://kuficraft.vercel.app | git-connected to `AbdSattout/KufiCraft@main` |
 | Git repo | `git@github.com:AbdSattout/KufiCraft.git` (private) | branch `main` |
 
 `.env.local` (git-ignored) holds `CONVEX_DEPLOYMENT`, `NEXT_PUBLIC_CONVEX_URL`,
@@ -24,34 +27,40 @@ Passkeys in development require `http://localhost:3000` (WebAuthn allows
 `localhost` over HTTP; any other host needs HTTPS) and
 `PASSKEY_RP_ID=localhost`.
 
-## Production
+## Production (current setup)
 
-### 1. Convex
+### 1. Convex — done
 
 ```bash
-bunx convex deploy         # creates/uses the production deployment for the project
+bunx convex deploy          # pushes functions to the prod deployment acrobatic-pika-276
 ```
 
-Then set production-only env vars (they must NOT be the dev values):
+Prod-only env vars (already set; re-set only when the domain changes):
 
 ```bash
 bunx convex env set --prod BETTER_AUTH_SECRET "$(openssl rand -base64 32)"
-bunx convex env set --prod SITE_URL "https://<your-domain>"
-bunx convex env set --prod PASSKEY_RP_ID "<your-domain>"   # bare host, no scheme
+bunx convex env set --prod SITE_URL "https://kuficraft.vercel.app"
+bunx convex env set --prod PASSKEY_RP_ID "kuficraft.vercel.app"   # bare host, no scheme
 bunx convex env set --prod --list
 ```
 
-### 2. Hosting (decision pending)
+Run `bunx convex deploy` after **every** merge that touches `convex/`.
 
-The app is a standard Next.js server app; anything that runs `next build` /
-`next start` works.
+### 2. Vercel — env vars to confirm
 
-* **Vercel** — zero config; set `NEXT_PUBLIC_CONVEX_URL`, `NEXT_PUBLIC_CONVEX_SITE_URL`
-  (prod values) and `NEXT_PUBLIC_SITE_URL=https://<domain>` in the project env.
-  Preview deployments should point at the dev Convex deployment.
-* **Cloudflare Workers/Pages** — needs `@opennextjs/cloudflare`; the auth proxy
-  route and Convex client work unchanged. More setup work (Workers runtime
-  instead of Node, no `openssl`), so prefer Vercel unless there is a reason.
+The Vercel project currently proxies auth through the **dev** deployment; switch
+it to the prod URLs (Project → Settings → Environment Variables, Production):
+
+| variable | value |
+| --- | --- |
+| `NEXT_PUBLIC_CONVEX_URL` | `https://acrobatic-pika-276.convex.cloud` |
+| `NEXT_PUBLIC_CONVEX_SITE_URL` | `https://acrobatic-pika-276.convex.site` |
+| `NEXT_PUBLIC_SITE_URL` | `https://kuficraft.vercel.app` |
+
+Preview deployments: point them at the dev deployment values if you want
+previews to share dev data; note that passkeys do **not** work on preview URLs
+(the RP ID only covers `kuficraft.vercel.app`). Redeploy after changing env vars
+(`vercel --prod` or “Redeploy” in the dashboard).
 
 ### 3. Domain and passkeys (important)
 
