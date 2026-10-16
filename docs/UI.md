@@ -47,7 +47,8 @@ slugs, Arabic UI text.
   dragging). Import always creates a new project and opens its editor; validation
   errors surface as Arabic toasts (`docs/FORMAT.md` defines the rules).
 * “لوحة جديدة” opens a dialog: الاسم, نوع الشبكة (مربعة/دائرية), نسبة الحبر
-  (slider 25–75% with a live mini preview of one cell), then creates via
+  (five preset buttons `1:1`…`1:5` with a live mini preview of one cell), then
+  creates via
   `api.projects.create` and navigates to the editor.
 * Empty state: illustrated with a small SVG kufi motif + CTA.
 * Loading: skeletons in the card grid shape. All queries via Convex hooks
@@ -72,7 +73,8 @@ Shape palette (applies to the next drawn tiles and to the current selection):
 square, circle, triangle, quadrant, semicircle, hexagon, arc, hamza1, hamza2
 (+ rotation button cycling `r`, + “شكل” reset to square).
 
-Settings panel: نسبة الحبر slider (25–75%, live re-render), حجم الخلية
+Settings panel: نسبة الحبر as the five presets `1:1`…`1:5` (live re-render),
+حجم الخلية
 (`base`), لون الحبر (color input + swatch row), لون الورقة (background),
 إظهار الشبكة (toggle), دمج الخطوط (toggle), نوع الشبكة (square/circular —
 switching warns that existing items may look odd), مسح الكل (confirm).

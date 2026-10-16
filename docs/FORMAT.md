@@ -47,7 +47,8 @@ apps never had (see “Legacy” below).
   2. `version` must be a known integer (`1`) → else
      `"إصدار الملف غير مدعوم"`;
   3. `config` is sanitized and clamped with the same semantics as the backend
-     (`sanitizeConfig`: `ratio ∈ [0.25, 0.75]`, `base ∈ [4, 100]`,
+     (`sanitizeConfig`: `ratio` snapped to the nearest `RATIO_PRESETS` value,
+     `base ∈ [4, 100]`,
      `gridType ∈ {square, circular}`, unknown fields dropped);
   4. `items` are structurally validated against the model (type discriminants
      `tile`/`line`/`arch`, key shape, finite coordinates), key-deduped, and

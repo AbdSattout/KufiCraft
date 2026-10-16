@@ -39,19 +39,62 @@ export const VIEWBOX_SIZE = 1000;
 /** Default cell / radial-band size in viewBox units. */
 export const DEFAULT_BASE = 10;
 
-/** Default ink fraction of each cell (0.75 = المتساوية القديمة 1/4 : 3/4). */
-export const DEFAULT_RATIO = 0.75;
+/** One of the five ratios a square-kufi designer works in, as `space:ink`. */
+export interface RatioPreset {
+  /** Parts of space (always 1 in the classic scale). */
+  space: number;
+  /** Parts of ink. */
+  ink: number;
+  /** Ink fraction of a cell: `ink / (space + ink)`. */
+  ratio: number;
+  /** Label as designers write it. */
+  label: string;
+}
 
-/** Allowed ratio range. 0.5 = متساوية (1/2 : 1/2). */
-export const MIN_RATIO = 0.25;
-export const MAX_RATIO = 0.75;
+/**
+ * The ratio axis is **not** continuous: kufi is drawn in `1:1 … 1:5`
+ * (space:ink), so ink is never smaller than space. `docs/CANVAS.md` §2.
+ */
+export const RATIO_PRESETS: readonly RatioPreset[] = [
+  { space: 1, ink: 1, ratio: 1 / 2, label: "1:1" },
+  { space: 1, ink: 2, ratio: 2 / 3, label: "1:2" },
+  { space: 1, ink: 3, ratio: 3 / 4, label: "1:3" },
+  { space: 1, ink: 4, ratio: 4 / 5, label: "1:4" },
+  { space: 1, ink: 5, ratio: 5 / 6, label: "1:5" },
+];
+
+/** Default ink fraction of each cell — 1:3 (the old app's «1/4 : 3/4»). */
+export const DEFAULT_RATIO = 3 / 4;
+
+/** Smallest and largest preset; every stored ratio is one of the five. */
+export const MIN_RATIO = RATIO_PRESETS[0].ratio;
+export const MAX_RATIO = RATIO_PRESETS[RATIO_PRESETS.length - 1].ratio;
+
+/** Nearest preset to `value` — the only legal values on the ratio axis. */
+export function snapRatio(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_RATIO;
+  let best = RATIO_PRESETS[0].ratio;
+  for (const preset of RATIO_PRESETS) {
+    if (Math.abs(preset.ratio - value) < Math.abs(best - value)) {
+      best = preset.ratio;
+    }
+  }
+  return best;
+}
 
 /** Angular divisions of the circular grid (10° sectors). */
 export const CIRCULAR_SECTORS = 36;
 export const CIRCULAR_ANGULAR_UNIT = (2 * Math.PI) / CIRCULAR_SECTORS;
 
-/** Hard limits enforced by the backend. */
-export const MAX_ITEMS = 20_000;
+/**
+ * Hard limits enforced by the backend.
+ *
+ * Convex caps **every** array value at 8192 elements (values in documents,
+ * function arguments and return values alike), so `items` cannot hold more
+ * than that no matter what the handler allows — a larger cap would fail
+ * mid-write with a raw system error instead of an Arabic message.
+ */
+export const MAX_ITEMS = 8192;
 export const MAX_NAME_LENGTH = 120;
 export const MAX_THUMBNAIL_LENGTH = 24_000;
 /** Colours are stored as CSS strings (`oklch(…)`, `#rrggbb`, `transparent`); anything longer is truncated. */

@@ -38,9 +38,12 @@ touches documents whose `userId === identity.subject`:
 
 ## Limits & conventions
 
-* `MAX_ITEMS = 20_000` (exceeding it throws), `MAX_NAME_LENGTH = 120`,
+* `MAX_ITEMS = 8_192` (exceeding it throws; Convex caps every array value at
+  8 192 elements, so a larger cap could only fail with a raw system error),
+  `MAX_NAME_LENGTH = 120`,
   `MAX_THUMBNAIL_LENGTH = 24_000`, `MAX_COLOR_LENGTH = 32` (ink/background are
-  CSS strings and are **truncated**, not rejected), `ratio ∈ [0.25, 0.75]`,
+  CSS strings and are **truncated**, not rejected), `ratio` is one of
+  `RATIO_PRESETS` (`1:1` … `1:5`),
   `base ∈ [4, 100]`.
 * `duplicate` reserves room for the `" (نسخة)"` suffix before truncating the
   base name, so a name at the cap never loses the suffix.

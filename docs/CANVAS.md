@@ -18,7 +18,9 @@
 
 ## 2. Zone rule (the heart of square kufic)
 
-Each cell (or circular slice) is split per axis at `config.ratio` (0.25…0.75):
+Each cell (or circular slice) is split per axis at `config.ratio`, which is one
+of the five presets in `RATIO_PRESETS` (`1:1`, `1:2`, `1:3`, `1:4`, `1:5` in
+space:ink notation → ink fraction `1/2`, `2/3`, `3/4`, `4/5`, `5/6`):
 
 | axis position | square | circular |
 | --- | --- | --- |
@@ -31,8 +33,10 @@ Each cell (or circular slice) is split per axis at `config.ratio` (0.25…0.75):
 * bit 1 (`2`) → **y / angular** axis is in the space zone
 
 So `q = 0` is the big ink-ink fragment, `q = 3` is the small
-space-space fragment. The old app's “1/4 : 3/4” is `ratio = 0.75`;
-“متساوية” is `ratio = 0.5`.
+space-space fragment. Ratios are named the way designers write them: `1:3` is
+the old app's “1/4 : 3/4” (`ratio = 0.75`) and `1:1` is “متساوية”
+(`ratio = 0.5`). Ink is never the smaller part, so `ratio ≥ 1/2`, and the
+backend snaps anything else to the nearest preset (`snapRatio`).
 
 The **zone rect** of a tile = intersection of the two chosen zones
 (square: a rect; circular: an annular sector).
