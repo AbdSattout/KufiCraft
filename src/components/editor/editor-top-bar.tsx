@@ -101,6 +101,7 @@ export function EditorTopBar({
         variant="ghost"
         size="icon-sm"
         aria-label={MESSAGES.backToDashboardHint}
+        nativeButton={false}
         render={<Link href="/app" />}
       >
         <ArrowRight />
