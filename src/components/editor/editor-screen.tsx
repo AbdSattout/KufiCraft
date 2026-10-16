@@ -71,6 +71,7 @@ function Panels({ editor }: { editor: EditorController }) {
       <ShapePanel
         style={editor.style}
         inkColor={editor.config.ink}
+        recentSwatches={editor.inkSwatches}
         selectionCount={editor.selection.length}
         selectShape={editor.selectShape}
         rotateShape={editor.rotateShape}
@@ -236,6 +237,7 @@ export function EditorScreen() {
         redo={editor.redo}
         exportSvg={editor.exportSvg}
         exportPng={editor.exportPng}
+        exportFile={editor.exportFile}
         onOpenSettings={() => setSettingsOpen(true)}
       />
 

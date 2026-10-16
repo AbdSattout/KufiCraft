@@ -3,9 +3,9 @@
 /**
  * KufiCraft — project settings panel.
  *
- * Ink ratio (live 25–75 %), cell size, ink / paper colours, grid + merge
- * toggles, the grid-type switch (warned, because existing items are
- * re-interpreted) and “مسح الكل” behind a confirm dialog.
+ * Ink ratio as the five presets `1:1`…`1:5` (live re-render), cell size, ink /
+ * paper colours, grid + merge toggles, the grid-type switch (warned, because
+ * existing items are re-interpreted) and “مسح الكل” behind a confirm dialog.
  */
 
 import { useState } from "react";
@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,12 +25,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import {
-  MAX_RATIO,
-  MIN_RATIO,
-  VIEWBOX_SIZE,
-} from "@/lib/canvas/model";
+import { RATIO_PRESETS, VIEWBOX_SIZE } from "@/lib/canvas/model";
 import type { GridType, ProjectConfig } from "@/lib/canvas/model";
+import { ratioPresetLabel } from "@/lib/editor-prefs";
 import { MESSAGES } from "./messages";
 import { INK_SWATCHES, PAPER_SWATCHES, formatCount, swatchLabel } from "./editor-palette";
 import { ColourField, PanelSection, SliderField } from "./editor-controls";
@@ -96,15 +94,28 @@ export function SettingsPanel({
   return (
     <>
       <PanelSection title={MESSAGES.inkRatio}>
-        <SliderField
-          label={MESSAGES.inkRatio}
-          value={Math.round(config.ratio * 100)}
-          min={Math.round(MIN_RATIO * 100)}
-          max={Math.round(MAX_RATIO * 100)}
-          suffix="%"
-          onPreview={(value) => previewConfig({ ratio: value / 100 })}
-          onCommit={(value) => patchConfig({ ratio: value / 100 })}
-        />
+        <ToggleGroup
+          aria-label={MESSAGES.inkRatio}
+          variant="outline"
+          spacing={0}
+          className="w-full"
+          value={[ratioPresetLabel(config.ratio)]}
+          onValueChange={(next) => {
+            const preset = RATIO_PRESETS.find((entry) => entry.label === next[0]);
+            if (preset) patchConfig({ ratio: preset.ratio });
+          }}
+        >
+          {RATIO_PRESETS.map((preset) => (
+            <ToggleGroupItem
+              key={preset.label}
+              value={preset.label}
+              className="flex-1 tabular-nums"
+              aria-label={`${MESSAGES.inkRatio} ${preset.label}`}
+            >
+              {preset.label}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
       </PanelSection>
 
       <PanelSection title={MESSAGES.cellSize}>
