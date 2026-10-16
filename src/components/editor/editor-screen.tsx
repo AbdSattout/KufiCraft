@@ -1,0 +1,296 @@
+"use client";
+
+/**
+ * KufiCraft — editor screen (`/app/[projectId]`).
+ *
+ * Owns the whole page: the signed-out redirect, the invalid / loading /
+ * missing states, and the editor layout itself — top bar, tool rail (RTL:
+ * vertical on the primary edge, horizontal above nothing on mobile), canvas
+ * and the settings column, which collapses into a bottom sheet on phones
+ * (docs/UI.md §Editor, quality bar).
+ *
+ * The Convex document never crosses this file: everything comes from the
+ * controller in `use-editor.ts`, and selection keys are resolved to items
+ * once, here, so the memoised canvas layers receive stable arrays.
+ */
+
+import Link from "next/link";
+import { useParams, useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import { useConvexAuth } from "convex/react";
+import { ArrowRight, FileQuestion } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Spinner } from "@/components/ui/spinner";
+import type { CanvasItem } from "@/lib/canvas/model";
+import { MESSAGES } from "./messages";
+import { useEditor } from "./use-editor";
+import type { EditorController } from "./use-editor";
+import { CanvasStage } from "./canvas-stage";
+import { EditorTopBar } from "./editor-top-bar";
+import { ToolRail } from "./editor-tool-rail";
+import { ShapePanel } from "./editor-shape-panel";
+import { SettingsPanel } from "./editor-settings-panel";
+
+const EMPTY_ITEMS: readonly CanvasItem[] = [];
+const RAIL_PLACEHOLDERS = [0, 1, 2, 3];
+const PANEL_PLACEHOLDERS = [0, 1, 2];
+
+/** Resolves selection keys to items, keeping the empty case referentially stable. */
+function resolveItems(
+  byKey: ReadonlyMap<string, CanvasItem>,
+  keys: readonly string[],
+): readonly CanvasItem[] {
+  if (keys.length === 0) return EMPTY_ITEMS;
+  const resolved: CanvasItem[] = [];
+  for (const key of keys) {
+    const item = byKey.get(key);
+    if (item) resolved.push(item);
+  }
+  return resolved;
+}
+
+/** Both panels, shared by the desktop column and the mobile sheet. */
+function Panels({ editor }: { editor: EditorController }) {
+  return (
+    <>
+      <ShapePanel
+        style={editor.style}
+        inkColor={editor.config.ink}
+        selectionCount={editor.selection.length}
+        selectShape={editor.selectShape}
+        rotateShape={editor.rotateShape}
+        setDrawColor={editor.setDrawColor}
+        resetDrawColor={editor.resetDrawColor}
+        recolourSelection={editor.recolourSelection}
+        duplicateSelection={editor.duplicateSelection}
+        deleteSelection={editor.deleteSelection}
+      />
+      <SettingsPanel
+        config={editor.config}
+        itemsCount={editor.items.length}
+        patchConfig={editor.patchConfig}
+        previewConfig={editor.previewConfig}
+        clearAll={editor.clearAll}
+      />
+    </>
+  );
+}
+
+/** Skeleton shell: also the route's Suspense fallback (`useParams` suspends). */
+export function EditorLoading() {
+  return (
+    <div className="flex h-dvh flex-col bg-background" aria-busy="true">
+      <div className="flex h-14 shrink-0 items-center gap-2 border-b border-border/70 px-2 sm:px-3">
+        <Skeleton className="size-7 rounded-lg" />
+        <Skeleton className="h-7 w-40" />
+        <div className="ms-auto flex items-center gap-1">
+          <Skeleton className="size-7 rounded-lg" />
+          <Skeleton className="size-7 rounded-lg" />
+          <Skeleton className="size-7 rounded-lg" />
+        </div>
+      </div>
+
+      <div className="flex min-h-0 flex-1">
+        <div className="hidden w-16 shrink-0 flex-col gap-1.5 border-e border-border/70 p-1.5 md:flex">
+          {RAIL_PLACEHOLDERS.map((index) => (
+            <Skeleton key={index} className="h-12 w-full" />
+          ))}
+        </div>
+        <div className="flex min-h-0 flex-1 items-center justify-center p-3 sm:p-5">
+          <Skeleton className="aspect-square w-full max-w-[min(100%,calc(100svh-14rem))] rounded-sm" />
+        </div>
+        <div className="hidden w-72 shrink-0 flex-col gap-4 border-s border-border/70 p-4 md:flex">
+          {PANEL_PLACEHOLDERS.map((index) => (
+            <Skeleton key={index} className="h-28 w-full" />
+          ))}
+        </div>
+      </div>
+
+      <span role="status" aria-live="polite" className="sr-only">
+        {MESSAGES.loading}
+      </span>
+    </div>
+  );
+}
+
+function Redirecting() {
+  return (
+    <div className="grid h-dvh place-items-center bg-background p-6">
+      <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Spinner aria-hidden />
+        {MESSAGES.redirecting}
+      </p>
+    </div>
+  );
+}
+
+function StateScreen({
+  title,
+  description,
+}: {
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="grid h-dvh place-items-center bg-background p-6">
+      <Empty className="max-w-md">
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <FileQuestion />
+          </EmptyMedia>
+          <EmptyTitle>{title}</EmptyTitle>
+          <EmptyDescription>{description}</EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent>
+          <Button variant="outline" render={<Link href="/app" />}>
+            <ArrowRight />
+            {MESSAGES.backToDashboard}
+          </Button>
+        </EmptyContent>
+      </Empty>
+    </div>
+  );
+}
+
+export function EditorScreen() {
+  const params = useParams<{ projectId?: string | string[] }>();
+  const router = useRouter();
+  const { isAuthenticated, isLoading: authLoading } = useConvexAuth();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  const routeParam = params.projectId;
+  const projectId =
+    typeof routeParam === "string" ? routeParam : (routeParam?.[0] ?? null);
+
+  const editor = useEditor(projectId, !authLoading && isAuthenticated);
+
+  useEffect(() => {
+    if (!authLoading && !isAuthenticated) router.replace("/signin");
+  }, [authLoading, isAuthenticated, router]);
+
+  const itemByKey = useMemo(() => {
+    const map = new Map<string, CanvasItem>();
+    for (const item of editor.items) map.set(item.k, item);
+    return map;
+  }, [editor.items]);
+
+  const selectionItems = useMemo(
+    () => resolveItems(itemByKey, editor.selection),
+    [itemByKey, editor.selection],
+  );
+  const eraseItems = useMemo(
+    () => resolveItems(itemByKey, editor.previewKeys),
+    [itemByKey, editor.previewKeys],
+  );
+
+  if (!authLoading && !isAuthenticated) return <Redirecting />;
+
+  if (editor.status === "invalid") {
+    return (
+      <StateScreen
+        title={MESSAGES.invalidLink}
+        description={MESSAGES.invalidLinkBody}
+      />
+    );
+  }
+  if (editor.status === "loading") return <EditorLoading />;
+  if (editor.status === "missing") {
+    return (
+      <StateScreen
+        title={MESSAGES.missingTitle}
+        description={MESSAGES.missingBody}
+      />
+    );
+  }
+
+  const panels = <Panels editor={editor} />;
+
+  return (
+    <div className="flex h-dvh flex-col overflow-hidden bg-background">
+      <EditorTopBar
+        name={editor.name}
+        rename={editor.rename}
+        saving={editor.saving}
+        canUndo={editor.canUndo}
+        canRedo={editor.canRedo}
+        undo={editor.undo}
+        redo={editor.redo}
+        exportSvg={editor.exportSvg}
+        exportPng={editor.exportPng}
+        onOpenSettings={() => setSettingsOpen(true)}
+      />
+
+      <div className="flex min-h-0 flex-1">
+        <ToolRail
+          orientation="vertical"
+          tool={editor.tool}
+          setTool={editor.setTool}
+          bulge={editor.bulge}
+          setBulge={editor.setBulge}
+          className="hidden md:flex"
+        />
+
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <CanvasStage
+            config={editor.config}
+            items={editor.items}
+            selectionItems={selectionItems}
+            previewItems={editor.previewItems}
+            eraseItems={eraseItems}
+            marquee={editor.marquee}
+            ghost={editor.ghost}
+            tool={editor.tool}
+            zoom={editor.zoom}
+            setZoom={editor.setZoom}
+            surfaceRef={editor.surfaceRef}
+            onPointerDown={editor.onPointerDown}
+            onPointerMove={editor.onPointerMove}
+            onPointerUp={editor.onPointerUp}
+            onPointerCancel={editor.onPointerCancel}
+          />
+          <ToolRail
+            orientation="horizontal"
+            tool={editor.tool}
+            setTool={editor.setTool}
+            bulge={editor.bulge}
+            setBulge={editor.setBulge}
+            className="md:hidden"
+          />
+        </main>
+
+        <aside
+          aria-label={MESSAGES.settings}
+          className="hidden w-72 shrink-0 flex-col overflow-y-auto border-s border-border/70 bg-background md:flex"
+        >
+          <div className="flex flex-col gap-5 p-4">{panels}</div>
+        </aside>
+      </div>
+
+      <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <SheetContent side="bottom" className="max-h-[85svh]">
+          <SheetHeader>
+            <SheetTitle>{MESSAGES.settings}</SheetTitle>
+          </SheetHeader>
+          <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 pb-6">
+            {panels}
+          </div>
+        </SheetContent>
+      </Sheet>
+    </div>
+  );
+}
