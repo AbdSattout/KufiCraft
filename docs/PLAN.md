@@ -57,8 +57,8 @@ backend) · Better Auth (passkeys, local-install component) · Bun · vitest.
 | orchestrator | `src/app/layout.tsx`, `src/app/globals.css`, `package.json`, `convex/lib/model.ts`, `convex/schema.ts`, `convex/projects.ts`, `docs/**` |
 | A (auth) | `convex/auth.ts`, `convex/betterAuth/**`, `src/lib/auth-*.ts`, `src/components/convex-client-provider.tsx`, `src/app/(auth)/**`, `src/components/auth/**`, `src/app/api/auth/**` |
 | B (engine) | `src/lib/canvas/**` (except `model.ts`) |
-| D (dashboard) | `src/app/(app)/app/**` (dashboard only), `src/components/dashboard/**` |
-| E (editor) | `src/app/(app)/app/[projectId]/**`, `src/components/editor/**`, `src/components/canvas/**` |
+| D (dashboard) | `src/app/app/**` (dashboard only), `src/components/dashboard/**` |
+| E (editor) | `src/app/app/[projectId]/**`, `src/components/editor/**`, `src/components/canvas/**` |
 | F (landing) | `src/app/(marketing)/**`, `src/components/marketing/**` |
 
 Shared files (`layout.tsx`, `site-header.tsx`) are edited by the orchestrator or

@@ -10,7 +10,9 @@
 | `/app` | auth | dashboard: “لوحاتي” |
 | `/app/[projectId]` | auth | editor |
 
-Route groups: `src/app/(marketing)/`, `src/app/(auth)/`, `src/app/(app)/`.
+Route groups: `src/app/(marketing)/` (landing) and `src/app/(auth)/`
+(`/signin`, `/signup`). The authenticated screens live in a plain
+`src/app/app/` folder — no route group, so the folder name and the URL agree.
 All copy is **Arabic**, `dir="rtl"` comes from the root layout. Latin route
 slugs, Arabic UI text.
 
