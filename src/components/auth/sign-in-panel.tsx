@@ -72,21 +72,19 @@ function SignInCard() {
     if (autoFillStarted.current) return;
     autoFillStarted.current = true;
     if (!webAuthnSupported()) return;
-    let active = true;
     void (async () => {
       // Conditional UI: browsers offer saved passkeys straight from the
       // autofill dropdown of the `username webauthn` input below. The promise
       // settles only when a passkey is picked, so failures here stay silent —
       // the button is the flow that reports real errors.
       const result = await authClient.signIn.passkey({ autoFill: true });
-      if (!active) return;
       if (result?.data?.session) {
+        // No unmount guard here on purpose: the session atom update can
+        // unmount this card before the promise continuation runs, and the
+        // redirect must still happen.
         hardNavigate("/app");
       }
     })();
-    return () => {
-      active = false;
-    };
   }, []);
 
   async function handlePasskeySignIn() {
