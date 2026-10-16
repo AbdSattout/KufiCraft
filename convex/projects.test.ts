@@ -11,12 +11,15 @@ import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
 import {
   DEFAULT_PROJECT_CONFIG,
+  DEFAULT_RATIO,
   MAX_COLOR_LENGTH,
   MAX_ITEMS,
+  MAX_KEY_LENGTH,
   MAX_NAME_LENGTH,
   MAX_RATIO,
   MAX_THUMBNAIL_LENGTH,
   MIN_RATIO,
+  RATIO_PRESETS,
 } from "./lib/model";
 import type {
   CanvasItem,
@@ -56,6 +59,7 @@ const USER_B = { subject: "user-b" };
 const AUTH_REQUIRED = "يجب تسجيل الدخول أولًا";
 const NOT_FOUND = "المشروع غير موجود";
 const ITEMS_LIMIT = "تجاوزت اللوحة الحد الأقصى للعناصر";
+const KEY_TOO_LONG = "مفتاح العنصر أطول من الحد المسموح";
 const UNTITLED = "لوحة بلا عنوان";
 
 const newTest = () => convexTest(schema, modules);
@@ -693,6 +697,35 @@ describe("updateThumbnail", () => {
     );
     expect(doc.thumbnail).toBeNull();
   });
+
+  it("does not bump updatedAt", async () => {
+    const t = newTest();
+    const asA = t.withIdentity(USER_A);
+    const projectId = await createProject(t, USER_A);
+    // Pin updatedAt to a known value so any bump is visible.
+    await t.run(async (ctx) => {
+      await ctx.db.patch("projects", projectId, { updatedAt: 1234 });
+    });
+    const before = required(
+      await asA.query(api.projects.get, { projectId }),
+      "project should exist",
+    );
+
+    await asA.mutation(api.projects.updateThumbnail, {
+      projectId,
+      thumbnail: "<svg><g/></svg>",
+    });
+
+    const after = required(
+      await asA.query(api.projects.get, { projectId }),
+      "project should still exist",
+    );
+    // docs/BACKEND.md: thumbnails are derived from edits whose applyOps batch
+    // already bumped updatedAt; the thumbnail write itself must not.
+    expect(after.updatedAt).toBe(before.updatedAt);
+    expect(after.updatedAt).toBe(1234);
+    expect(after.thumbnail).toBe("<svg><g/></svg>");
+  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -821,6 +854,11 @@ describe("applyOps", () => {
   });
 
   it("accepts exactly MAX_ITEMS items", async () => {
+    // NOTE: `convex-test` is an in-memory fake — it does not enforce Convex's
+    // real per-value limits (a real deployment caps every array at 8192
+    // elements), so these tests may hand a mutation more items than the
+    // production runtime would accept. That is deliberate: it exercises the
+    // handler's own guard.
     const t = newTest();
     const asA = t.withIdentity(USER_A);
     const projectId = await createProject(t, USER_A);
@@ -867,6 +905,38 @@ describe("applyOps", () => {
       ITEMS_LIMIT,
     );
 
+    const after = required(
+      await asA.query(api.projects.get, { projectId }),
+      "project should still exist",
+    );
+    expect(after).toEqual(before);
+  });
+
+  it("enforces the limit on the add path too", async () => {
+    const t = newTest();
+    const asA = t.withIdentity(USER_A);
+    const projectId = await createProject(t, USER_A);
+    const full: CanvasItem[] = Array.from({ length: MAX_ITEMS }, (_, index) =>
+      tile(`k${index}`),
+    );
+    await asA.mutation(api.projects.applyOps, {
+      projectId,
+      ops: [{ type: "replace", items: full }],
+    });
+    const before = required(
+      await asA.query(api.projects.get, { projectId }),
+      "project should exist",
+    );
+
+    await expectConvexError(
+      asA.mutation(api.projects.applyOps, {
+        projectId,
+        ops: [{ type: "add", items: [tile("one-too-many")] }],
+      }),
+      ITEMS_LIMIT,
+    );
+
+    // A rejected `add` must roll back: the full document is byte-identical.
     const after = required(
       await asA.query(api.projects.get, { projectId }),
       "project should still exist",
@@ -954,5 +1024,231 @@ describe("ownership isolation", () => {
       asA.mutation(api.projects.rename, { projectId, name: "لاحقًا" }),
       NOT_FOUND,
     );
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* config sanitisation (M1)                                            */
+/* ------------------------------------------------------------------ */
+
+describe("config sanitisation", () => {
+  it("snaps the ratio to the nearest preset, including NaN and ties", async () => {
+    const t = newTest();
+    const asA = t.withIdentity(USER_A);
+    const rain = await createProject(t, USER_A, "نسبة", {
+      ratio: Number.NaN,
+    });
+    const zero = await createProject(t, USER_A, "صفر", { ratio: 0 });
+    const half = await createProject(t, USER_A, "نصف", { ratio: 0.6 });
+    const tie =
+      (RATIO_PRESETS[1].ratio + RATIO_PRESETS[2].ratio) / 2;
+    const tied = await createProject(t, USER_A, "تعادل", { ratio: tie });
+
+    const ratios = await Promise.all(
+      [rain, zero, half, tied].map(async (projectId) =>
+        required(
+          await asA.query(api.projects.get, { projectId }),
+          "project should exist",
+        ).config.ratio,
+      ),
+    );
+    expect(ratios[0]).toBe(DEFAULT_RATIO);
+    expect(ratios[1]).toBe(MIN_RATIO);
+    expect(ratios[2]).toBe(RATIO_PRESETS[1].ratio);
+    // Exactly between two presets snaps down (strict `<` keeps the lower one).
+    expect(ratios[3]).toBe(RATIO_PRESETS[1].ratio);
+  });
+
+  it("snaps the ratio on updateConfig as well", async () => {
+    const t = newTest();
+    const asA = t.withIdentity(USER_A);
+    const projectId = await createProject(t, USER_A);
+    await asA.mutation(api.projects.updateConfig, {
+      projectId,
+      patch: { ratio: Number.POSITIVE_INFINITY },
+    });
+    const doc = required(
+      await asA.query(api.projects.get, { projectId }),
+      "project should exist",
+    );
+    expect(doc.config.ratio).toBe(DEFAULT_RATIO);
+  });
+
+  it("clamps a NaN/Infinity base to the low/high bound", async () => {
+    const t = newTest();
+    const asA = t.withIdentity(USER_A);
+    const rain = await createProject(t, USER_A, "قاعدة", { base: Number.NaN });
+    const huge = await createProject(t, USER_A, "ضخمة", {
+      base: Number.POSITIVE_INFINITY,
+    });
+    const tiny = await createProject(t, USER_A, "ضئيلة", {
+      base: Number.NEGATIVE_INFINITY,
+    });
+
+    const bases = await Promise.all(
+      [rain, huge, tiny].map(async (projectId) =>
+        required(
+          await asA.query(api.projects.get, { projectId }),
+          "project should exist",
+        ).config.base,
+      ),
+    );
+    expect(bases[0]).toBe(4);
+    expect(bases[1]).toBe(100);
+    expect(bases[2]).toBe(4);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* item sanitisation (M1/M2)                                           */
+/* ------------------------------------------------------------------ */
+
+describe("item sanitisation", () => {
+  it("stores finite, integer, in-range coordinates", async () => {
+    const t = newTest();
+    const asA = t.withIdentity(USER_A);
+    const projectId = await createProject(t, USER_A, "إحداثيات");
+
+    // Default base is 10 → the largest legal index is 1000 / 10 = 100.
+    const items: CanvasItem[] = [
+      tile("nan", Number.NaN, Number.NaN),
+      tile("inf", Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY),
+      tile("frac", 2.9, 3.1),
+      tile("over", 9999, 9999),
+      { t: "line", k: "line", i1: Number.NaN, j1: 1.9, i2: Number.POSITIVE_INFINITY, j2: 1000 },
+      { t: "arch", k: "arch", i1: -5, j1: 4.7, i2: 3, j2: 2, d: 1 },
+    ];
+    await asA.mutation(api.projects.applyOps, {
+      projectId,
+      ops: [{ type: "add", items }],
+    });
+
+    const doc = required(
+      await asA.query(api.projects.get, { projectId }),
+      "project should exist",
+    );
+    const byKey = new Map(doc.items.map((item) => [item.k, item]));
+    expect(byKey.get("nan")).toMatchObject({ i: 0, j: 0 });
+    expect(byKey.get("inf")).toMatchObject({ i: 100, j: 0 });
+    expect(byKey.get("frac")).toMatchObject({ i: 2, j: 3 });
+    expect(byKey.get("over")).toMatchObject({ i: 100, j: 100 });
+    expect(byKey.get("line")).toMatchObject({
+      i1: 0,
+      j1: 1,
+      i2: 100,
+      j2: 100,
+    });
+    expect(byKey.get("arch")).toMatchObject({ i1: 0, j1: 4, i2: 3, j2: 2, d: 1 });
+  });
+
+  it("uses the configured base to size the legal coordinate range", async () => {
+    const t = newTest();
+    const asA = t.withIdentity(USER_A);
+    const projectId = await createProject(t, USER_A, "قاعدة كبيرة", {
+      base: 100,
+    });
+    await asA.mutation(api.projects.applyOps, {
+      projectId,
+      ops: [{ type: "add", items: [tile("far", 500, 500)] }],
+    });
+    const doc = required(
+      await asA.query(api.projects.get, { projectId }),
+      "project should exist",
+    );
+    // base 100 → 1000 / 100 = 10.
+    expect(doc.items[0]).toMatchObject({ i: 10, j: 10 });
+  });
+
+  it("caps an item colour to MAX_COLOR_LENGTH", async () => {
+    const t = newTest();
+    const asA = t.withIdentity(USER_A);
+    const projectId = await createProject(t, USER_A, "ألوان العناصر");
+    const long = `#${"a".repeat(MAX_COLOR_LENGTH + 20)}`;
+
+    await asA.mutation(api.projects.applyOps, {
+      projectId,
+      ops: [
+        {
+          type: "add",
+          items: [tile("colored", 0, 0, 0, { c: long })],
+        },
+      ],
+    });
+
+    const doc = required(
+      await asA.query(api.projects.get, { projectId }),
+      "project should exist",
+    );
+    expect(doc.items[0]?.c).toBe(long.slice(0, MAX_COLOR_LENGTH));
+  });
+
+  it("rejects an oversized key with an Arabic error and no write", async () => {
+    const t = newTest();
+    const asA = t.withIdentity(USER_A);
+    const projectId = await createProject(t, USER_A, "مفاتيح");
+    const before = required(
+      await asA.query(api.projects.get, { projectId }),
+      "project should exist",
+    );
+
+    await expectConvexError(
+      asA.mutation(api.projects.applyOps, {
+        projectId,
+        ops: [
+          {
+            type: "add",
+            items: [tile("k".repeat(MAX_KEY_LENGTH + 1))],
+          },
+        ],
+      }),
+      KEY_TOO_LONG,
+    );
+
+    const after = required(
+      await asA.query(api.projects.get, { projectId }),
+      "project should still exist",
+    );
+    expect(after).toEqual(before);
+  });
+
+  it("repairs a document written before this contract on its next write", async () => {
+    const t = newTest();
+    const asA = t.withIdentity(USER_A);
+    const projectId = await createProject(t, USER_A, "قديمة", { base: 10 });
+    // A document stored before the sanitisation contract: NaN / fractional
+    // coordinates and an oversized colour are schema-valid `v.number()` /
+    // `v.string()` values, so they can already be in the table.
+    await t.run(async (ctx) => {
+      await ctx.db.patch("projects", projectId, {
+        items: [
+          {
+            t: "tile",
+            k: "legacy",
+            i: Number.NaN,
+            j: 4.5,
+            q: 0,
+            c: "z".repeat(MAX_COLOR_LENGTH + 10),
+          },
+        ],
+        itemCount: 1,
+      });
+    });
+
+    await asA.mutation(api.projects.applyOps, {
+      projectId,
+      ops: [{ type: "add", items: [tile("fresh", 1, 1)] }],
+    });
+
+    const doc = required(
+      await asA.query(api.projects.get, { projectId }),
+      "project should exist",
+    );
+    const legacy = doc.items.find((item) => item.k === "legacy");
+    expect(legacy).toMatchObject({
+      i: 0,
+      j: 4,
+      c: "z".repeat(MAX_COLOR_LENGTH),
+    });
+    expect(doc.itemCount).toBe(2);
   });
 });
