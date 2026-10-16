@@ -8,8 +8,8 @@ import { createAuth } from "../auth";
  */
 export const auth = createAuth({} as Parameters<typeof createAuth>[0], {
   // Schema generation is a local, deployment-less operation: supply the
-  // origins explicitly so `requireAuthEnv` (fail-closed at request time) does
-  // not need deployment env here.
+  // origins explicitly so the request-time env assertion in `createAuth`
+  // (docs/AUTH.md § Environment) never needs deployment env here.
   siteUrl: "http://localhost:3000",
   rpID: "localhost",
 });

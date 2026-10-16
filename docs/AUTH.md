@@ -60,11 +60,17 @@ Deployment env vars (set — `bunx convex env list`):
 | `SITE_URL` | `http://localhost:3000` | `https://kuficraft.vercel.app` |
 | `PASSKEY_RP_ID` | `localhost` | `kuficraft.vercel.app` |
 
-`SITE_URL` and `PASSKEY_RP_ID` are **required**: `createAuthOptions` fails
-closed (`requireAuthEnv`) when either is unset, instead of silently binding
-passkeys to `localhost`. The only caller allowed to supply fallbacks is the
-schema-generation shim `convex/betterAuth/auth.ts` (see below), which runs
-without deployment env.
+`SITE_URL` and `PASSKEY_RP_ID` are **required for a live request**: `createAuth`
+asserts both (`assertAuthOrigins`) on every real request and fails closed rather
+than binding passkeys to `localhost`. The assertion cannot live in
+`createAuthOptions`, because the library evaluates that factory **at module
+load** — `createApi` derives the auth tables from it and `registerRoutes` builds
+a throwaway instance — and module load also happens in Convex's module-analysis
+phase, which has **no deployment env**. A throw there fails the entire push
+(`InvalidModules`) before anything is deployed, so the factory degrades to a
+localhost fallback on that path only; the request path (a real action context)
+never gets it. `convex/betterAuth/auth.ts` passes explicit origins for the same
+reason: `bunx auth generate` runs without deployment env.
 
 `.env.local` (git-ignored): `CONVEX_DEPLOYMENT`, `NEXT_PUBLIC_CONVEX_URL`,
 `NEXT_PUBLIC_CONVEX_SITE_URL`, `NEXT_PUBLIC_SITE_URL=http://localhost:3000`.
@@ -89,15 +95,15 @@ path before looking a rule up. The first row matters most: every call mints a
 
 ### What it does and does not give you
 
-* **Storage stays in-memory (the default).** No secondary storage is configured,
-  so counters live inside each Convex isolate. There is **no `rateLimit` table**,
-  which is why this change needs **no auth schema regeneration and no deployment
-  change** (see "Changing auth options" below).
-* **Best-effort, per isolate.** Convex can run many isolates and counters do not
-  survive an isolate restart, so under real load the effective limit can be
-  higher than the numbers above. Treat this as abuse friction, not a hard quota;
-  a shared store (Convex or Redis as secondary storage) is the follow-up if you
-  need one.
+* **Counters live in the database** (`storage: "database"`), not in the default
+  in-memory store. Convex spreads HTTP requests across isolates, so a
+  per-isolate counter measured *no* limiting at all: a 110-request burst against
+  the 100/60 s global rule returned zero 429s with memory storage, and 99 429s
+  with the database store. The counters therefore have to be shared, which means
+  the auth schema owns a `rateLimit` table (`key`, `count`, `lastRequest`) and
+  `bunx auth generate` + a deployment push create it.
+* **Shared and durable.** A counter survives isolate restarts and is visible to
+  every isolate; the trade-off is one component read + write per auth request.
 * **Unknown client IPs share one bucket.** The limiter keys on the request IP, so
   requests with no usable IP fall into a single bucket and throttle each other
   instead of an attacker.
@@ -124,9 +130,10 @@ bunx tsc --noEmit
 The shim `convex/betterAuth/auth.ts` exists only so the CLI can load the
 options without a request context.)
 
-Editing the `rateLimit` block alone does **not** need this flow: with the default
-in-memory storage there is no `rateLimit` table, so the generated schema is
-unchanged and there is nothing to regenerate or push.
+Editing the `rateLimit` block is part of the options, so it uses the same flow:
+`storage: "database"` means the auth schema owns a `rateLimit` table, and a
+regeneration + push that omits it breaks every auth request with
+“table not found”.
 
 ## Passkey-first onboarding (the product requirement)
 

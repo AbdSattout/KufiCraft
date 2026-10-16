@@ -52,31 +52,65 @@ const applySessionCookie = setSessionCookie as unknown as (
 
 /**
  * Values the schema-generation shim may supply so `bunx auth generate` works
- * without deployment env. **Never** passed at request time: a live request must
- * fail closed rather than bind passkeys to a guessed origin.
+ * without deployment env. **Never** passed by a live request: one must fail
+ * closed rather than bind passkeys to a guessed origin.
  */
 export interface AuthOriginOverrides {
   siteUrl?: string;
   rpID?: string;
 }
 
-/** Reads a required deployment env var, failing closed when it is unset. */
-function requireAuthEnv(name: "SITE_URL" | "PASSKEY_RP_ID"): string {
-  const value = process.env[name];
-  if (!value || value.trim().length === 0) {
-    throw new Error(
-      `${name} is not set — KufiCraft auth fails closed instead of silently falling back to localhost. Set it on the Convex deployment (see docs/AUTH.md).`,
-    );
-  }
-  return value;
+/**
+ * The library evaluates the options factory **at module load**, not only per
+ * request: `createApi` (convex/betterAuth/adapter.ts) derives the auth tables
+ * from `createAuthOptions({})`, and `registerRoutes` builds a throwaway
+ * instance to read the base path. That evaluation also runs during Convex's
+ * module-analysis phase, which has **no deployment env** — a throw there fails
+ * the whole push (`InvalidModules`) before anything is deployed, so the origin
+ * must degrade to a fallback for that path. A live request carries a real
+ * action context, and `createAuth` is where it fails closed.
+ */
+const MODULE_LOAD_FALLBACK = {
+  siteUrl: "http://localhost:3000",
+  rpID: "localhost",
+} as const;
+
+/** Deployment env, trimmed; `undefined` when unset or blank. */
+function authEnv(name: "SITE_URL" | "PASSKEY_RP_ID"): string | undefined {
+  const value = process.env[name]?.trim();
+  return value !== undefined && value.length > 0 ? value : undefined;
+}
+
+/**
+ * Fails closed for a live request: a deployment that never set these must not
+ * bind passkeys to a guessed origin (docs/AUTH.md § Environment). The only
+ * context without them is the library's own module-load evaluation, which is
+ * detected by the action context it does not have.
+ */
+function assertAuthOrigins(): void {
+  const missing = (["SITE_URL", "PASSKEY_RP_ID"] as const).filter(
+    (name) => authEnv(name) === undefined,
+  );
+  if (missing.length === 0) return;
+  throw new Error(
+    `${missing.join(" and ")} ${missing.length > 1 ? "are" : "is"} not set — KufiCraft auth fails closed instead of silently falling back to localhost. Set ${missing.length > 1 ? "them" : "it"} on the Convex deployment (see docs/AUTH.md).`,
+  );
+}
+
+/** A real http-action context exposes `runQuery`; the module-load `{}` does not. */
+function isLiveRequest(ctx: unknown): boolean {
+  const candidate = ctx as { runQuery?: unknown } | null;
+  return typeof candidate?.runQuery === "function";
 }
 
 export const createAuthOptions = (
   ctx: GenericCtx<DataModel>,
   overrides?: AuthOriginOverrides,
 ) => {
-  const siteUrl = overrides?.siteUrl ?? requireAuthEnv("SITE_URL");
-  const rpID = overrides?.rpID ?? requireAuthEnv("PASSKEY_RP_ID");
+  const siteUrl =
+    overrides?.siteUrl ?? authEnv("SITE_URL") ?? MODULE_LOAD_FALLBACK.siteUrl;
+  const rpID =
+    overrides?.rpID ?? authEnv("PASSKEY_RP_ID") ?? MODULE_LOAD_FALLBACK.rpID;
   return {
     appName: "KufiCraft",
     baseURL: siteUrl,
@@ -89,13 +123,16 @@ export const createAuthOptions = (
      * `NODE_ENV === "production"`, so without this block the unauthenticated
      * `/passkey/*` endpoints were effectively unmetered.
      *
-     * Storage stays at the default (`memory`) because no secondary storage is
-     * configured — the in-memory store needs no `rateLimit` table, so **no auth
-     * schema regeneration and no deployment change** is required. It is
-     * per-isolate best-effort; docs/AUTH.md records that limitation.
+     * Storage is the **database** (the auth component's own `rateLimit` table)
+     * rather than the default in-memory store: Convex spreads http requests
+     * over many isolates, so a per-isolate counter measured zero effective
+     * limiting — a 110-request burst against a 100/60 s rule produced no 429.
+     * The counters therefore have to live where every isolate can see them.
+     * `bunx auth generate` + a deployment push create the table.
      */
     rateLimit: {
       enabled: true,
+      storage: "database",
       window: 60,
       max: 100,
       customRules: {
@@ -188,7 +225,13 @@ export const createAuthOptions = (
 export const createAuth = (
   ctx: GenericCtx<DataModel>,
   overrides?: AuthOriginOverrides,
-) => betterAuth(createAuthOptions(ctx, overrides));
+) => {
+  // Overrides mean the deployment-less schema shim (`bunx auth generate`) or a
+  // test; anything else that is not a real request is the library building its
+  // throwaway instance at module load.
+  if (overrides === undefined && isLiveRequest(ctx)) assertAuthOrigins();
+  return betterAuth(createAuthOptions(ctx, overrides));
+};
 
 /** Current user profile, or null when signed out. */
 export const getCurrentUser = query({

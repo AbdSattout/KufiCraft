@@ -3,7 +3,7 @@
  * To regenerate the schema, from your project root:
  *
  *   cd convex/betterAuth
- *   npx auth generate --output /home/abd/Coding/kuficraft/convex/betterAuth/schema.ts
+ *   npx auth generate
  *
  * To customize the schema, generate to an alternate file and import
  * the table definitions to your schema file. See
@@ -85,6 +85,12 @@ export const tables = {
     createdAt: v.number(),
     expiresAt: v.optional(v.union(v.null(), v.number())),
   }),
+  rateLimit: defineTable({
+    key: v.string(),
+    count: v.number(),
+    lastRequest: v.number(),
+  })
+    .index("key", ["key"]),
 };
 
 const schema = defineSchema(tables);
