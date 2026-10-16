@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { Noto_Kufi_Arabic, IBM_Plex_Sans_Arabic } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
+import { ConvexClientProvider } from "@/components/convex-client-provider";
+import { Toaster } from "@/components/ui/sonner";
 
 const kufi = Noto_Kufi_Arabic({
   subsets: ["arabic"],
@@ -44,7 +46,12 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       dir="rtl"
       className={cn("font-sans antialiased", kufi.variable, plex.variable)}
     >
-      <body>{children}</body>
+      <body>
+        <ConvexClientProvider>
+          {children}
+          <Toaster position="top-center" dir="rtl" richColors />
+        </ConvexClientProvider>
+      </body>
     </html>
   );
 }

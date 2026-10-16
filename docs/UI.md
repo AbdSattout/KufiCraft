@@ -26,6 +26,9 @@ slugs, Arabic UI text.
   geometry, no gradients, no shadows beyond `shadow-sm`. Artwork is the hero.
 * Icons: `lucide-react`. Buttons/inputs/dialogs come from `src/components/ui/*`
   (shadcn, RTL-enabled) — do not invent parallel primitives.
+* **These primitives are Base UI based (`@base-ui/react`), not Radix.** Compose
+  with the `render` prop — `<Button render={<Link href="/app" />}>لوحاتي</Button>` —
+  menu items take `onClick`, and `asChild` does **not** exist.
 * Motion: 150–200 ms ease-out, `tw-animate-css` utilities; nothing bouncy.
 
 ## Dashboard (`/app`)
