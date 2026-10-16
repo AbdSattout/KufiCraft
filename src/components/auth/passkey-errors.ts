@@ -49,9 +49,10 @@ export function passkeyErrorMessage(
 }
 
 /**
- * Message for anything thrown while talking to Convex. `ConvexError` payloads
- * hold the Arabic string from `convex/authFlows.ts`; plain `Error`s keep their
- * message as a last resort.
+ * Message for anything thrown while talking to Convex. A `ConvexError` payload
+ * holds the Arabic string from `convex/authFlows.ts`; every other failure
+ * degrades to the Arabic fallback. Raw `Error#message` values are
+ * English/internal and must never reach a toast.
  */
 export function unexpectedErrorMessage(cause: unknown): string {
   if (typeof cause === "object" && cause !== null && "data" in cause) {
@@ -66,9 +67,6 @@ export function unexpectedErrorMessage(cause: unknown): string {
     ) {
       return data.message.trim();
     }
-  }
-  if (cause instanceof Error && cause.message.trim().length > 0) {
-    return cause.message;
   }
   return FALLBACK_MESSAGE;
 }

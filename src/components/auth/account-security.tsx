@@ -93,6 +93,8 @@ export function AccountSecurity({ userName }: { userName: string }) {
   const [signOutBusy, setSignOutBusy] = useState(false);
 
   const items = passkeys ?? [];
+  /** With passkeys only and no recovery, deleting the last one locks you out. */
+  const isOnlyPasskey = items.length <= 1;
 
   async function handleAddPasskey() {
     if (addBusy) return;
@@ -151,6 +153,8 @@ export function AccountSecurity({ userName }: { userName: string }) {
   async function handleDelete() {
     const target = deleteTarget;
     if (!target || deleteBusy) return;
+    // UI guard: the only passkey cannot be deleted (see the dialog copy).
+    if (isOnlyPasskey) return;
     setDeleteBusy(true);
     setActionError(null);
     try {
@@ -353,9 +357,9 @@ export function AccountSecurity({ userName }: { userName: string }) {
             <AlertDialogTitle>حذف مفتاح المرور؟</AlertDialogTitle>
             <AlertDialogDescription>
               سيُحذف «{deleteTarget ? passkeyLabel(deleteTarget) : ""}» نهائيًا
-              ولا يمكن استخدامه للدخول بعد ذلك.
-              {items.length <= 1
-                ? " هذا مفتاحك الوحيد — ستفقد الوصول إلى حسابك."
+              ولا يمكن استخدامه للدخول بعد ذلك.{" "}
+              {isOnlyPasskey
+                ? "لا يمكن حذف مفتاحك الوحيد — أضف مفتاحًا آخر أولًا حتى لا تفقد الوصول إلى حسابك."
                 : ""}
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -367,7 +371,7 @@ export function AccountSecurity({ userName }: { userName: string }) {
                 event.preventDefault();
                 void handleDelete();
               }}
-              disabled={deleteBusy}
+              disabled={deleteBusy || isOnlyPasskey}
               aria-busy={deleteBusy}
             >
               {deleteBusy ? <Spinner /> : null}
