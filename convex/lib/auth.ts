@@ -17,11 +17,3 @@ export async function requireUserId(
   }
   return identity.subject;
 }
-
-/** Same as `requireUserId` but returns null instead of throwing. */
-export async function getUserId(
-  ctx: QueryCtx | MutationCtx,
-): Promise<string | null> {
-  const identity = await ctx.auth.getUserIdentity();
-  return identity?.subject ?? null;
-}
