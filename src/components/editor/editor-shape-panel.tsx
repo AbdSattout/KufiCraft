@@ -33,6 +33,8 @@ function ShapeGlyph({ shape }: { shape: TileShape }) {
 export interface ShapePanelProps {
   style: DrawStyle;
   inkColor: string;
+  /** Recent ink colours (most-recent-first) shown ahead of the defaults. */
+  recentSwatches: readonly string[];
   selectionCount: number;
   selectShape: (shape: TileShape) => void;
   rotateShape: () => void;
@@ -46,6 +48,7 @@ export interface ShapePanelProps {
 export function ShapePanel({
   style,
   inkColor,
+  recentSwatches,
   selectionCount,
   selectShape,
   rotateShape,
@@ -56,6 +59,17 @@ export function ShapePanel({
   deleteSelection,
 }: ShapePanelProps) {
   const drawColor = style.color ?? inkColor;
+  const swatches = useMemo(() => {
+    const seen = new Set<string>();
+    const merged: string[] = [];
+    for (const color of [...recentSwatches, ...INK_SWATCHES]) {
+      const key = color.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(color);
+    }
+    return merged;
+  }, [recentSwatches]);
 
   return (
     <>
@@ -108,7 +122,7 @@ export function ShapePanel({
         <ColourField
           label={MESSAGES.drawColor}
           value={drawColor}
-          colors={INK_SWATCHES}
+          colors={swatches}
           onPick={setDrawColor}
           labelFor={(color) => swatchLabel(MESSAGES.drawColor, color)}
           action={

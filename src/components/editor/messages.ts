@@ -27,6 +27,8 @@ export const MESSAGES = {
   export: "تصدير",
   exportSvg: "تصدير SVG",
   exportPng: "تصدير PNG",
+  exportFile: "ملف KufiCraft (.kuficraft)",
+  itemsLimit: "تجاوزت اللوحة الحد الأقصى للعناصر",
   settings: "الإعدادات",
   tools: "الأدوات",
   shapes: "الأشكال",

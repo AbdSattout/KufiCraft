@@ -16,10 +16,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { toast } from "sonner";
+import { MAX_ITEMS } from "@/lib/canvas/model";
 import type { CanvasItem, ProjectConfig, TileShape } from "@/lib/canvas/model";
 import type { Id } from "../../../convex/_generated/dataModel";
 import {
-  DEFAULT_STYLE,
+  MAX_ZOOM,
+  MIN_ZOOM,
+  loadEditorPrefs,
+  rememberInkSwatch,
+  saveEditorPrefs,
+  saveLastConfig,
+} from "@/lib/editor-prefs";
+import { downloadProjectFile } from "@/lib/kuficraft-file";
+import {
   IDLE_GESTURE,
   clientToViewBox,
   clampToCanvas,
@@ -55,12 +64,14 @@ import type { HistoryEntry, HistoryState } from "./history";
 import { shortcutFor } from "./shortcuts";
 import { useEditorDocument } from "./use-editor-document";
 import { downloadPng, downloadSvg } from "./export";
-import { errorMessage } from "./messages";
+import { MESSAGES, errorMessage } from "./messages";
 import type { Rect } from "@/lib/canvas/geometry";
 
-export const MIN_ZOOM = 0.5;
-export const MAX_ZOOM = 2;
+export { MAX_ZOOM, MIN_ZOOM } from "@/lib/editor-prefs";
 export const ZOOM_STEP = 0.25;
+
+/** Quiet period before the last committed config is remembered for new boards. */
+export const LAST_CONFIG_DELAY_MS = 400;
 
 export type EditorStatus =
   | "invalid"
@@ -83,6 +94,8 @@ export interface EditorController {
   tool: Tool;
   setTool: (tool: Tool) => void;
   style: DrawStyle;
+  /** Recent ink colours, most-recent-first (from the persisted prefs). */
+  inkSwatches: readonly string[];
   selectShape: (shape: TileShape) => void;
   rotateShape: () => void;
   setDrawColor: (color: string) => void;
@@ -121,6 +134,8 @@ export interface EditorController {
 
   exportSvg: () => void;
   exportPng: () => void;
+  /** Downloads the full document as a `.kuficraft` file (docs/FORMAT.md). */
+  exportFile: () => void;
 }
 
 export function useEditor(
@@ -136,13 +151,23 @@ export function useEditor(
   const document = useEditorDocument(projectId, enabled);
   const { config, items, commitItems } = document;
 
-  const [tool, setToolState] = useState<Tool>("pen");
-  const [style, setStyle] = useState<DrawStyle>(DEFAULT_STYLE);
-  const [bulge, setBulge] = useState<0 | 1>(0);
+  // Prefs are read synchronously on mount so the editor opens the way the
+  // designer left it; the project `config` stays authoritative for rendering.
+  const [initialPrefs] = useState(() => loadEditorPrefs());
+  const [tool, setToolState] = useState<Tool>(initialPrefs.tool);
+  const [style, setStyle] = useState<DrawStyle>({
+    shape: initialPrefs.shape,
+    rotation: initialPrefs.rotation,
+    color: undefined,
+  });
+  const [bulge, setBulge] = useState<0 | 1>(initialPrefs.bulge);
+  const [inkSwatches, setInkSwatches] = useState<readonly string[]>(
+    initialPrefs.inkSwatches,
+  );
   const [selectionState, setSelectionState] = useState<readonly string[]>([]);
   const [gesture, setGesture] = useState<Gesture>(IDLE_GESTURE);
   const [history, setHistory] = useState<HistoryState>(EMPTY_HISTORY);
-  const [zoom, setZoomState] = useState(1);
+  const [zoom, setZoomState] = useState(initialPrefs.zoom);
   const labelRef = useRef("رسم");
 
   const surfaceRef = useRef<HTMLDivElement | null>(null);
@@ -171,6 +196,11 @@ export function useEditor(
   /** Commits a new item list with one history entry (no-op when identical). */
   const applyCommit = useCallback(
     (next: readonly CanvasItem[], label: string, nextSelection?: readonly string[]) => {
+      if (next.length > MAX_ITEMS) {
+        // Stop before the server rejects the write mid-gesture (docs/BACKEND.md).
+        toast.error(MESSAGES.itemsLimit);
+        return;
+      }
       if (itemsEqual(next, items)) {
         if (nextSelection !== undefined) setSelectionState(nextSelection);
         return;
@@ -271,6 +301,7 @@ export function useEditor(
 
   const setDrawColor = useCallback((color: string) => {
     setStyle((previous) => ({ ...previous, color }));
+    setInkSwatches((previous) => rememberInkSwatch(previous, color));
   }, []);
 
   const resetDrawColor = useCallback(() => {
@@ -279,6 +310,7 @@ export function useEditor(
 
   const recolourSelection = useCallback(
     (color: string) => {
+      setInkSwatches((previous) => rememberInkSwatch(previous, color));
       applyCommit(recolourItems(config, items, selection, color), "تلوين", selection);
     },
     [applyCommit, config, items, selection],
@@ -417,9 +449,58 @@ export function useEditor(
     });
   }, [config, document.name, items]);
 
+  const exportFile = useCallback(() => {
+    downloadProjectFile({ name: document.name, config, items });
+  }, [config, document.name, items]);
+
   const setZoom = useCallback((next: number) => {
     setZoomState(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, next)));
   }, []);
+
+  /* ---------------------------------------------------------------- */
+  /* Preferences (localStorage, best-effort)                           */
+  /* ---------------------------------------------------------------- */
+
+  // One write per discrete change — never from a pointer-move handler. Gated
+  // on a loaded document so a loading / missing project cannot clobber the
+  // remembered config fields with model defaults.
+  useEffect(() => {
+    if (!enabled || document.status !== "ready") return;
+    saveEditorPrefs({
+      tool,
+      shape: style.shape,
+      rotation: style.rotation,
+      bulge,
+      zoom,
+      showGrid: config.showGrid,
+      mergeLines: config.mergeLines,
+      ratio: config.ratio,
+      inkSwatches: [...inkSwatches],
+    });
+  }, [
+    bulge,
+    config.mergeLines,
+    config.ratio,
+    config.showGrid,
+    document.status,
+    enabled,
+    inkSwatches,
+    style.rotation,
+    style.shape,
+    tool,
+    zoom,
+  ]);
+
+  // The last committed config becomes the dashboard's «لوحة جديدة» default;
+  // debounced so dragging the cell-size slider settles before it is stored.
+  useEffect(() => {
+    if (!enabled || document.status !== "ready") return;
+    const timer = window.setTimeout(
+      () => saveLastConfig(config),
+      LAST_CONFIG_DELAY_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [config, document.status, enabled]);
 
   const status: EditorStatus = !valid
     ? "invalid"
@@ -440,6 +521,7 @@ export function useEditor(
     tool,
     setTool,
     style,
+    inkSwatches,
     selectShape,
     rotateShape,
     setDrawColor,
@@ -471,5 +553,6 @@ export function useEditor(
     ghost: gesture.kind === "move",
     exportSvg,
     exportPng,
+    exportFile,
   };
 }

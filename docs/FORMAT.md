@@ -51,8 +51,10 @@ apps never had (see “Legacy” below).
      `base ∈ [4, 100]`,
      `gridType ∈ {square, circular}`, unknown fields dropped);
   4. `items` are structurally validated against the model (type discriminants
-     `tile`/`line`/`arch`, key shape, finite coordinates), key-deduped, and
-     capped at `MAX_ITEMS` (excess dropped, with a warning toast);
+     `tile`/`line`/`arch`, a non-empty string key, finite coordinates),
+     key-deduped; items that fail validation are dropped (only model fields are
+     kept), and the list is capped at `MAX_ITEMS` (excess dropped, with a
+     warning toast);
   5. `name` is trimmed/collapsed like the backend and capped at
      `MAX_NAME_LENGTH`.
 * Implemented in **one module** — `src/lib/kuficraft-file.ts` — used by both the

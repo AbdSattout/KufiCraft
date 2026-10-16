@@ -13,6 +13,7 @@ import {
   ArrowRight,
   Download,
   FileDown,
+  FileJson,
   ImageDown,
   Redo2,
   SlidersHorizontal,
@@ -80,6 +81,7 @@ export interface EditorTopBarProps {
   redo: () => void;
   exportSvg: () => void;
   exportPng: () => void;
+  exportFile: () => void;
   onOpenSettings: () => void;
 }
 
@@ -93,6 +95,7 @@ export function EditorTopBar({
   redo,
   exportSvg,
   exportPng,
+  exportFile,
   onOpenSettings,
 }: EditorTopBarProps) {
   return (
@@ -163,6 +166,10 @@ export function EditorTopBar({
             <DropdownMenuItem onClick={exportPng}>
               <ImageDown />
               {MESSAGES.exportPng}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={exportFile}>
+              <FileJson />
+              {MESSAGES.exportFile}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

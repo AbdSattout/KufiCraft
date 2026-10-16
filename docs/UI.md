@@ -97,7 +97,8 @@ after each committed gesture (throttled to ≥ 2 s).
 Settings persistence (localStorage, per browser, no server round-trip):
 
 * `kuficraft.editor-prefs.v1` — tool, active shape, rotation, arch bulge, zoom,
-  showGrid, mergeLines, colour swatches history (last ≤ 8 ink colours).
+  showGrid, mergeLines, the active ratio preset, colour swatches history
+  (last ≤ 8 ink colours).
   Loaded synchronously when the editor mounts and applied to the toolbar so the
   app “opens the way you left it”. Project `config` stays authoritative for
   rendering; UI prefs only decide the toolbar defaults and tool behaviour.

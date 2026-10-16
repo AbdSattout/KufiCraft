@@ -9,9 +9,10 @@ import { api } from "../../../convex/_generated/api";
 import {
   DEFAULT_PROJECT_CONFIG,
   MAX_NAME_LENGTH,
-  MAX_RATIO,
-  MIN_RATIO,
+  RATIO_PRESETS,
+  snapRatio,
   type GridType,
+  type ProjectConfig,
 } from "../../../convex/lib/model";
 import { Button } from "@/components/ui/button";
 import {
@@ -25,19 +26,12 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Slider } from "@/components/ui/slider";
 import { Spinner } from "@/components/ui/spinner";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { mutationErrorMessage } from "@/components/dashboard/errors";
+import { loadLastConfig, ratioPresetLabel } from "@/lib/editor-prefs";
 
-const MIN_PERCENT = Math.round(MIN_RATIO * 100);
-const MAX_PERCENT = Math.round(MAX_RATIO * 100);
-
-function percentFromRatio(ratio: number): number {
-  return Math.min(MAX_PERCENT, Math.max(MIN_PERCENT, Math.round(ratio * 100)));
-}
-
-/** Two rectangles illustrating ink (القلم) vs space (الفراغ) inside one cell. */
+/** One cell illustrating ink (القلم) vs space (الفراغ) at the given ratio. */
 function InkRatioPreview({ ratio }: { ratio: number }) {
   const ink = Math.round(ratio * 100);
   return (
@@ -64,20 +58,22 @@ export function NewProjectDialog({
   const router = useRouter();
   const createProject = useMutation(api.projects.create);
   const [name, setName] = useState("");
+  /** Last committed config (localStorage) — the dialog's default. */
+  const [defaults, setDefaults] = useState<ProjectConfig>(DEFAULT_PROJECT_CONFIG);
   const [gridType, setGridType] = useState<GridType>(
     DEFAULT_PROJECT_CONFIG.gridType,
   );
-  const [inkPercent, setInkPercent] = useState(() =>
-    percentFromRatio(DEFAULT_PROJECT_CONFIG.ratio),
-  );
+  const [ratio, setRatio] = useState(DEFAULT_PROJECT_CONFIG.ratio);
   const [isCreating, setIsCreating] = useState(false);
 
   function handleOpenChange(nextOpen: boolean) {
     if (!nextOpen && isCreating) return;
     if (nextOpen) {
+      const last = loadLastConfig() ?? DEFAULT_PROJECT_CONFIG;
       setName("");
-      setGridType(DEFAULT_PROJECT_CONFIG.gridType);
-      setInkPercent(percentFromRatio(DEFAULT_PROJECT_CONFIG.ratio));
+      setDefaults(last);
+      setGridType(last.gridType);
+      setRatio(snapRatio(last.ratio));
     }
     onOpenChange(nextOpen);
   }
@@ -89,11 +85,7 @@ export function NewProjectDialog({
     try {
       const projectId = await createProject({
         name: name.trim(),
-        config: {
-          ...DEFAULT_PROJECT_CONFIG,
-          gridType,
-          ratio: inkPercent / 100,
-        },
+        config: { ...defaults, gridType, ratio },
       });
       onOpenChange(false);
       router.push(`/app/${projectId}`);
@@ -152,30 +144,36 @@ export function NewProjectDialog({
           </div>
 
           <div className="grid gap-3">
-            <div className="flex items-center justify-between gap-2">
-              <Label id="new-project-ink-ratio-label">نسبة الحبر</Label>
-              <span className="text-sm tabular-nums text-muted-foreground">
-                {inkPercent}٪
-              </span>
-            </div>
-            <Slider
+            <Label id="new-project-ink-ratio-label">نسبة الحبر</Label>
+            <ToggleGroup
               aria-labelledby="new-project-ink-ratio-label"
-              min={MIN_PERCENT}
-              max={MAX_PERCENT}
-              step={1}
-              value={[inkPercent]}
-              onValueChange={(value) => {
-                const nextPercent = Array.isArray(value) ? value[0] : value;
-                if (typeof nextPercent === "number") {
-                  setInkPercent(Math.round(nextPercent));
-                }
+              variant="outline"
+              spacing={0}
+              className="w-full"
+              value={[ratioPresetLabel(ratio)]}
+              onValueChange={(nextValue) => {
+                const preset = RATIO_PRESETS.find(
+                  (entry) => entry.label === nextValue[0],
+                );
+                if (preset) setRatio(preset.ratio);
               }}
-            />
+            >
+              {RATIO_PRESETS.map((preset) => (
+                <ToggleGroupItem
+                  key={preset.label}
+                  value={preset.label}
+                  className="flex-1 tabular-nums"
+                  aria-label={`نسبة الحبر ${preset.label}`}
+                >
+                  {preset.label}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
             <div className="flex items-center gap-3 rounded-lg bg-muted/60 p-3">
-              <InkRatioPreview ratio={inkPercent / 100} />
+              <InkRatioPreview ratio={ratio} />
               <p className="text-xs leading-relaxed text-muted-foreground">
-                يوضّح الرسم نسبة القلم إلى الفراغ داخل الخلية: كلما زادت، صارت
-                الحروف أكثف.
+                يوضّح الرسم نسبة القلم إلى الفراغ داخل الخلية عند {ratioPresetLabel(ratio)}:
+                كلما زاد الرقم، صارت الحروف أكثف.
               </p>
             </div>
           </div>
