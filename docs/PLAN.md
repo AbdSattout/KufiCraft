@@ -35,20 +35,43 @@ backend) · Better Auth (passkeys, local-install component) · Bun · vitest.
 
 **Wave 2 — done and merged into `main`**
 
-* C `t3/d25ec469` backend contract tests (42 convex-test cases, split vitest
-  projects) + the post-merge backend fixes (`MAX_COLOR_LENGTH`, `duplicate`).
+* C `t3/d25ec469` backend contract tests (convex-test) + the post-merge backend
+  fixes (`MAX_COLOR_LENGTH`, `duplicate`).
 * E `t3/9192986c` editor (`/app/[projectId]`, shared `CanvasPreview`, tools,
-  selection, history, export; 44 new tests). 156 tests total on `main`.
+  selection, history, export; 44 new tests).
 
-**Wave 2.5 — in flight** (worktree agent: editor prefs + `.kuficraft` file)
-**Wave 3 — in flight** (review agents: Convex backend, passkey auth security)
+**Wave 2.5 — done and merged into `main`** (`t3/a2267529`)
+
+* Editor preferences + `last-config` in browser storage
+  (`src/lib/editor-prefs.ts`); document settings (grid, merge, ratio) stay in the
+  document and `last-config`, never in the prefs.
+* `.kuficraft` v1 export/import (`src/lib/kuficraft-file.ts`, `docs/FORMAT.md`)
+  with a dashboard button and drag-and-drop import.
+* Ratio presets 1:1 … 1:5 in the editor settings panel and the new-project
+  dialog; `RATIO_PRESETS`/`snapRatio`/`ratioLabel` in `convex/lib/model.ts` are
+  the single source of truth (ink is always the larger part, so the range is
+  clamped at 1:1).
+* Client-side `MAX_ITEMS` guard in `applyCommit`.
+
+**Wave 3 — done: reviews applied and deployed**
+
+* The Convex backend review and the passkey/auth security review both returned
+  “ship with fixes”; they landed as `t3/c5319af2` (`1d68328`…`b4a27f2`) plus the
+  orchestrator follow-up `e2d29e0` (analysis-safe origin guard; rate limiting on
+  the auth component's shared `rateLimit` table — the default in-memory store
+  measured no effect across Convex isolates).
+* `main` (`e2d29e0`) is deployed: prod Convex `acrobatic-pika-276` pushed,
+  Vercel production green, `/`, `/signin`, `/signup`, `/app`, `/api/auth/ok` all
+  200; write path exercised end-to-end against dev (ratio snapping 0.3 → 0.5 and
+  0.9 → 5/6, index clamping, oversized-key rejection, cross-user ownership).
+* **226 tests** — 71 convex-test (`convex/**`), 155 client (`src/**`).
 
 | wave | work | who |
 | --- | --- | --- |
 | 1 | A auth & account UX · B canvas engine + tests · D dashboard · F landing | merged ✅ |
 | 2 | E editor (needs B+A merged) · C backend tests (convex-test) | merged ✅ |
-| 2.5 | editor settings persistence (localStorage) · `.kuficraft` export/import (`docs/FORMAT.md`) | delegated, in flight |
-| 3 | reviews (`convex-reviewer`, `better-auth-security`), browser QA, deploy docs | delegated + orchestrator |
+| 2.5 | editor prefs (browser storage) · `.kuficraft` export/import (`docs/FORMAT.md`) · ratio presets | merged ✅ |
+| 3 | backend + auth reviews and their fixes · write-path QA · prod deploy | done ✅ |
 
 ## File ownership (avoid collisions)
 
@@ -94,10 +117,12 @@ by exactly one wave member; if you need a change there, ask instead of editing.
 ## Deploy plan (after wave 3)
 
 1. Convex **prod** deployment `acrobatic-pika-276` — functions pushed
-   (`bunx convex deploy --yes`, done again after the wave 1 + 2 merges), env vars
+   (`bunx convex deploy --yes`; last run after wave 2.5 + 3, including the auth
+   component's `rateLimit` table), env vars
    set (`SITE_URL=https://kuficraft.vercel.app`,
    `PASSKEY_RP_ID=kuficraft.vercel.app`), auth routes verified live (`/api/auth/ok`
-   → 200, `generate-authenticate-options` → 200 with `rpId: kuficraft.vercel.app`).
+   → 200, `generate-authenticate-options` → 200 with `rpId: kuficraft.vercel.app`,
+   `rateLimit` rows being written with the prod deployment).
 2. Vercel project `kuficraft` (git-connected to `AbdSattout/KufiCraft@main`):
    production env vars point at the prod Convex deployment
    (`NEXT_PUBLIC_CONVEX_URL`, `NEXT_PUBLIC_CONVEX_SITE_URL`) plus

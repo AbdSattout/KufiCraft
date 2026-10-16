@@ -104,9 +104,19 @@ path before looking a rule up. The first row matters most: every call mints a
   `bunx auth generate` + a deployment push create it.
 * **Shared and durable.** A counter survives isolate restarts and is visible to
   every isolate; the trade-off is one component read + write per auth request.
-* **Unknown client IPs share one bucket.** The limiter keys on the request IP, so
-  requests with no usable IP fall into a single bucket and throttle each other
-  instead of an attacker.
+* **Keyed on the IP the platform exposes, which is not always the browser's.**
+  Better Auth keys each bucket `"<ip>|<path>"`. Direct calls to
+  `*.convex.site` are keyed on the true client IP (unspoofable, and the
+  Convex deployment is publicly reachable, so that path is the meaningful one).
+  Requests through the Next proxy are **not**: Convex overwrites the forwarding
+  headers with its own peer, so production buckets read
+  `35.173.223.1|/passkey/generate-authenticate-options` — a Vercel **egress**
+  IP that every user shares, spread across a pool of egress IPs. The aggregate
+  caps are therefore looser than the table above, and two users behind one
+  egress IP can throttle each other. This is deliberately **not** "fixed" by
+  having the proxy pass the client IP in a custom header and trusting it: the
+  key would then be client-spoofable, and a direct caller could rotate buckets
+  at will — strictly worse than an approximate shared bucket.
 * **The context token is not single-use by design.** Its only job is to prove
   "this client asked for an account with this name seconds ago". `resolveUser` is
   the real gate: a missing/invalid/expired/tampered token is rejected with the
