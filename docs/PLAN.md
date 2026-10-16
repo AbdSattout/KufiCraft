@@ -23,14 +23,32 @@ backend) · Better Auth (passkeys, local-install component) · Bun · vitest.
 * Docs: `PLAN.md`, `CANVAS.md`, `BACKEND.md`, `AUTH.md`, `UI.md`,
   `reference/` (old implementations for porting).
 
-**Waves**
+**Wave 1 — done and merged into `main`**
+
+* A `t3/4ac0bfd3` passkey auth + account UX (sign-up without a session via an
+  HMAC context token, sign-in conditional UI, `/signin` account & security).
+  Full browser E2E passed with a Chromium virtual authenticator.
+* B `t3/50cac3fd` canvas engine (geometry, grid, ops, render + 68 tests).
+* D `t3/7f2b8438` dashboard (`/app`: cards, create dialog, empty/loading).
+* F `t3/a73d8263` landing page (`(marketing)` route group) — design-taste skill,
+  own kufi geometry, live ink-ratio instrument, 5 commits.
+
+**Wave 2 — done and merged into `main`**
+
+* C `t3/d25ec469` backend contract tests (42 convex-test cases, split vitest
+  projects) + the post-merge backend fixes (`MAX_COLOR_LENGTH`, `duplicate`).
+* E `t3/9192986c` editor (`/app/[projectId]`, shared `CanvasPreview`, tools,
+  selection, history, export; 44 new tests). 156 tests total on `main`.
+
+**Wave 2.5 — in flight** (worktree agent: editor prefs + `.kuficraft` file)
+**Wave 3 — in flight** (review agents: Convex backend, passkey auth security)
 
 | wave | work | who |
 | --- | --- | --- |
-| 1 | A auth & account UX · B canvas engine + tests · D dashboard · F landing | delegated, parallel worktrees |
-| 2 | E editor (needs B+A merged) · C backend tests (convex-test) | delegated after wave 1 lands |
-| 2.5 | editor settings persistence (localStorage) · `.kuficraft` export/import (`docs/FORMAT.md`) | delegated after E lands |
-| 3 | reviews (`convex-reviewer`, `better-auth-security`), QA, deploy docs | delegated + orchestrator |
+| 1 | A auth & account UX · B canvas engine + tests · D dashboard · F landing | merged ✅ |
+| 2 | E editor (needs B+A merged) · C backend tests (convex-test) | merged ✅ |
+| 2.5 | editor settings persistence (localStorage) · `.kuficraft` export/import (`docs/FORMAT.md`) | delegated, in flight |
+| 3 | reviews (`convex-reviewer`, `better-auth-security`), browser QA, deploy docs | delegated + orchestrator |
 
 ## File ownership (avoid collisions)
 
@@ -75,11 +93,13 @@ by exactly one wave member; if you need a change there, ask instead of editing.
 
 ## Deploy plan (after wave 3)
 
-1. Convex **prod** deployment `acrobatic-pika-276` — functions pushed, env vars
+1. Convex **prod** deployment `acrobatic-pika-276` — functions pushed
+   (`bunx convex deploy --yes`, done again after the wave 1 + 2 merges), env vars
    set (`SITE_URL=https://kuficraft.vercel.app`,
-   `PASSKEY_RP_ID=kuficraft.vercel.app`), auth routes verified.
+   `PASSKEY_RP_ID=kuficraft.vercel.app`), auth routes verified live (`/api/auth/ok`
+   → 200, `generate-authenticate-options` → 200 with `rpId: kuficraft.vercel.app`).
 2. Vercel project `kuficraft` (git-connected to `AbdSattout/KufiCraft@main`):
-   production env vars must point at the prod Convex deployment
+   production env vars point at the prod Convex deployment
    (`NEXT_PUBLIC_CONVEX_URL`, `NEXT_PUBLIC_CONVEX_SITE_URL`) plus
    `NEXT_PUBLIC_SITE_URL=https://kuficraft.vercel.app`; see `docs/DEPLOY.md`.
    Every push to `main` redeploys; run `bunx convex deploy` after convex changes.
