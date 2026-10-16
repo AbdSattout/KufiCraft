@@ -11,6 +11,7 @@ import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
 import {
   DEFAULT_PROJECT_CONFIG,
+  MAX_COLOR_LENGTH,
   MAX_ITEMS,
   MAX_NAME_LENGTH,
   MAX_RATIO,
@@ -269,6 +270,22 @@ describe("create", () => {
     expect(validDoc.config).toEqual(config({ ratio: 0.5, base: 7, gridType: "circular" }));
   });
 
+  it("truncates ink and background to MAX_COLOR_LENGTH characters", async () => {
+    const t = newTest();
+    const long = `oklch(0.5 0.1 200)${"x".repeat(64)}`;
+    expect(long.length).toBeGreaterThan(MAX_COLOR_LENGTH);
+    const projectId = await createProject(t, USER_A, "ألوان", {
+      ink: long,
+      background: long,
+    });
+    const doc = required(
+      await t.withIdentity(USER_A).query(api.projects.get, { projectId }),
+      "project should exist",
+    );
+    expect(doc.config.ink).toBe(long.slice(0, MAX_COLOR_LENGTH));
+    expect(doc.config.background).toBe(long.slice(0, MAX_COLOR_LENGTH));
+  });
+
   it("initialises an empty, unthumbnailed document owned by the caller", async () => {
     const t = newTest();
     const before = Date.now();
@@ -446,6 +463,23 @@ describe("duplicate", () => {
     expect(copy.items).toEqual(original.items);
     expect(copy.itemCount).toBe(original.itemCount);
     expect(copy.thumbnail).toBe(original.thumbnail);
+  });
+
+  it("keeps the (نسخة) suffix when the original name is at the length cap", async () => {
+    const t = newTest();
+    const asA = t.withIdentity(USER_A);
+    const projectId = await createProject(t, USER_A, "ا".repeat(MAX_NAME_LENGTH));
+
+    const copyId = await asA.mutation(api.projects.duplicate, { projectId });
+    const copy = required(
+      await asA.query(api.projects.get, { projectId: copyId }),
+      "copy should exist",
+    );
+    expect(copy.name.endsWith(" (نسخة)")).toBe(true);
+    expect(copy.name.length).toBeLessThanOrEqual(MAX_NAME_LENGTH);
+    expect(copy.name.slice(0, -" (نسخة)".length).trimEnd().length).toBeLessThanOrEqual(
+      MAX_NAME_LENGTH - " (نسخة)".length,
+    );
   });
 
   it("keeps the copy independent from the original", async () => {

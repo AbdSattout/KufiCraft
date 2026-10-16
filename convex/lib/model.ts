@@ -54,6 +54,8 @@ export const CIRCULAR_ANGULAR_UNIT = (2 * Math.PI) / CIRCULAR_SECTORS;
 export const MAX_ITEMS = 20_000;
 export const MAX_NAME_LENGTH = 120;
 export const MAX_THUMBNAIL_LENGTH = 24_000;
+/** Colours are stored as CSS strings (`oklch(…)`, `#rrggbb`, `transparent`); anything longer is truncated. */
+export const MAX_COLOR_LENGTH = 32;
 
 /** Default palette. */
 export const DEFAULT_INK = "#1a1a2e";

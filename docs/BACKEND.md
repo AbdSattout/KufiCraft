@@ -39,7 +39,14 @@ touches documents whose `userId === identity.subject`:
 ## Limits & conventions
 
 * `MAX_ITEMS = 20_000` (exceeding it throws), `MAX_NAME_LENGTH = 120`,
-  `MAX_THUMBNAIL_LENGTH = 24_000`, `ratio ∈ [0.25, 0.75]`, `base ∈ [4, 100]`.
+  `MAX_THUMBNAIL_LENGTH = 24_000`, `MAX_COLOR_LENGTH = 32` (ink/background are
+  CSS strings and are **truncated**, not rejected), `ratio ∈ [0.25, 0.75]`,
+  `base ∈ [4, 100]`.
+* `duplicate` reserves room for the `" (نسخة)"` suffix before truncating the
+  base name, so a name at the cap never loses the suffix.
+* `updateThumbnail` deliberately does **not** bump `updatedAt` — thumbnails are
+  derived from edits whose `applyOps` batch already bumped it (this keeps
+  dashboard ordering a function of user edits, not thumbnail refreshes).
 * Names are trimmed/collapsed; empty → `"لوحة بلا عنوان"`.
 * Errors are thrown as `ConvexError` with **Arabic** user-facing messages
   (`"يجب تسجيل الدخول أولًا"`, `"المشروع غير موجود"`,

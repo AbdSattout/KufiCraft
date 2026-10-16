@@ -40,7 +40,12 @@ export function SiteHeader() {
         </Link>
 
         <nav className="flex items-center gap-1 text-sm">
-          <Button variant="ghost" size="sm" render={<Link href="/app" />}>
+          <Button
+            variant="ghost"
+            size="sm"
+            nativeButton={false}
+            render={<Link href="/app" />}
+          >
             لوحاتي
           </Button>
         </nav>
@@ -80,11 +85,12 @@ export function SiteHeader() {
               <Button
                 variant="ghost"
                 size="sm"
+                nativeButton={false}
                 render={<Link href="/signin" />}
               >
                 تسجيل الدخول
               </Button>
-              <Button size="sm" render={<Link href="/signup" />}>
+              <Button size="sm" nativeButton={false} render={<Link href="/signup" />}>
                 إنشاء حساب
               </Button>
             </>

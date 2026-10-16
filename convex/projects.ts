@@ -5,6 +5,7 @@ import { ConvexError } from "convex/values";
 import {
   canvasItemValidator,
   projectConfigValidator,
+  MAX_COLOR_LENGTH,
   MAX_ITEMS,
   MAX_NAME_LENGTH,
   MAX_THUMBNAIL_LENGTH,
@@ -36,9 +37,21 @@ function sanitizeConfig(config: ProjectConfig): ProjectConfig {
     ...config,
     ratio: clamp(config.ratio, MIN_RATIO, MAX_RATIO),
     base: clamp(config.base, 4, 100),
-    ink: config.ink.slice(0, 32),
-    background: config.background.slice(0, 32),
+    ink: config.ink.slice(0, MAX_COLOR_LENGTH),
+    background: config.background.slice(0, MAX_COLOR_LENGTH),
   };
+}
+
+const DUPLICATE_SUFFIX = " (نسخة)";
+
+/**
+ * Duplicate names keep their suffix even when the original name sits at the
+ * `MAX_NAME_LENGTH` cap (the suffix is reserved before truncating the base).
+ */
+function duplicateName(raw: string): string {
+  const room = MAX_NAME_LENGTH - DUPLICATE_SUFFIX.length;
+  const base = raw.replace(/\s+/g, " ").trim().slice(0, room).trim();
+  return `${base.length > 0 ? base : "لوحة بلا عنوان"}${DUPLICATE_SUFFIX}`;
 }
 
 async function requireOwnedProject(
@@ -156,7 +169,7 @@ export const duplicate = mutation({
     const now = Date.now();
     return await ctx.db.insert("projects", {
       userId,
-      name: sanitizeName(`${project.name} (نسخة)`),
+      name: duplicateName(project.name),
       config: project.config,
       items: project.items,
       itemCount: project.itemCount,
