@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_PROJECT_CONFIG,
   MAX_ITEMS,
@@ -280,7 +280,39 @@ describe("readProjectFile", () => {
 });
 
 describe("downloadProjectFile", () => {
-  it("is exported for the browser call sites", () => {
-    expect(typeof downloadProjectFile).toBe("function");
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("clicks a temporary <a download> with the sanitised file name", () => {
+    const anchor = {
+      href: "",
+      download: "",
+      rel: "",
+      clicks: 0,
+      removed: false,
+      click() {
+        this.clicks += 1;
+      },
+      remove() {
+        this.removed = true;
+      },
+    };
+    const appendChild = vi.fn();
+    vi.stubGlobal("document", {
+      createElement: () => anchor,
+      body: { appendChild },
+    });
+    vi.stubGlobal("window", { setTimeout: () => 0 });
+
+    downloadProjectFile({
+      name: "لوحة الاختبار",
+      config: sampleConfig(),
+      items: sampleItems(),
+    });
+
+    expect(anchor.download).toBe("لوحة-الاختبار.kuficraft");
+    expect(anchor.href.startsWith("blob:")).toBe(true);
+    expect(appendChild).toHaveBeenCalledWith(anchor);
+    expect(anchor.clicks).toBe(1);
+    expect(anchor.removed).toBe(true);
   });
 });
