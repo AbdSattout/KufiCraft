@@ -227,4 +227,10 @@ redesign, so it is left open rather than half-done:
    `ctx.context.adapter.delete` directly, bypassing `deleteWithHooks`, so a
    `hooks.before` guard never runs. Enforcing it server-side needs a custom
    endpoint or a patch around the plugin, verified against the live deployment.
+3. **The sign-up context token travels in a query string.** The plugin's
+   `generate-register-options` is a `GET`, so the token rides in
+   `?context=…` and therefore appears in access logs and in any `Referer` the
+   page would send (`/signup` links nowhere cross-origin). Accepted as-is: the
+   token is 5-minute, single-purpose, and not a session credential. Moving it to
+   a header would need a custom endpoint or a plugin patch.
 
