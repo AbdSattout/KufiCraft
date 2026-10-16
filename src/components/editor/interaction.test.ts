@@ -300,6 +300,26 @@ describe("gesture reducer", () => {
     expect(items.length).toBeGreaterThan(2);
   });
 
+  it("keeps an anchor unique when a bent stroke doubles back", () => {
+    const ctx = context([]);
+    let gesture = startGesture(ctx, { x: 5, y: 5 }, { shift: false }).gesture;
+    // A bent path is not merged into one line, so it stays a tile per anchor.
+    gesture = updateGesture(ctx, gesture, { x: 15, y: 15 });
+    gesture = updateGesture(ctx, gesture, { x: 25, y: 5 });
+    // Doubling back re-sweeps the run from the stroke's first anchor; the cell
+    // the pointer is standing on must not join the stroke a second time.
+    gesture = updateGesture(ctx, gesture, { x: 15, y: 5 });
+
+    const previewKeys = previewItems(ctx, gesture).map((item) => item.k);
+    expect(new Set(previewKeys).size).toBe(previewKeys.length);
+
+    const commitKeys = (finishGesture(ctx, gesture).commit?.items ?? []).map(
+      (item) => item.k,
+    );
+    expect(new Set(commitKeys).size).toBe(commitKeys.length);
+    expect(new Set(previewKeys)).toEqual(new Set(commitKeys));
+  });
+
   it("applies the draw style to new items", () => {
     const ctx = context([], {
       style: { shape: "hexagon", rotation: 3, color: "#00ff00" },

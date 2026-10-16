@@ -176,6 +176,11 @@ function sameCell(a: Cell, b: Cell): boolean {
   return a.i === b.i && a.j === b.j;
 }
 
+/** Identity of an anchor — the same key the engine gives its fragment. */
+function anchorKey(anchor: Anchor): string {
+  return tileKey(anchor.i, anchor.j, anchor.q);
+}
+
 function wrapSector(j: number): number {
   return ((j % CIRCULAR_SECTORS) + CIRCULAR_SECTORS) % CIRCULAR_SECTORS;
 }
@@ -912,7 +917,19 @@ export function updateGesture(
       const last = gesture.anchors[gesture.anchors.length - 1];
       if (sameCell(last, anchor) && last.q === anchor.q) return gesture;
       const swept = anchorsBetween(gesture.anchors[0], anchor).slice(1);
-      return { kind: "pen", anchors: [...gesture.anchors, ...swept] };
+      // Changing direction re-sweeps the run from the stroke's first anchor, so
+      // cells the stroke already owns can come back around. An anchor's key is
+      // its identity (`docs/CANVAS.md` §3): keeping a second copy would draw the
+      // fragment twice and break uniqueness of the overlay's React keys.
+      const taken = new Set(gesture.anchors.map(anchorKey));
+      const fresh = swept.filter((candidate) => {
+        const key = anchorKey(candidate);
+        if (taken.has(key)) return false;
+        taken.add(key);
+        return true;
+      });
+      if (fresh.length === 0) return gesture;
+      return { kind: "pen", anchors: [...gesture.anchors, ...fresh] };
     }
     case "erase": {
       const hit = hitTest(ctx.config, ctx.items, canvasPoint);
