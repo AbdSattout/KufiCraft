@@ -12,6 +12,9 @@ Verified live on `https://adamant-dragon-860.convex.site` (dev deployment):
 | `GET /api/auth/passkey/generate-authenticate-options` | real WebAuthn challenge ✅ → **`@simplewebauthn/server` runs in Convex V8** |
 | `GET /api/auth/passkey/list-user-passkeys` | `401 UNAUTHORIZED` (expected without a session) |
 | `GET http://localhost:3000/api/auth/ok` | proxied through Next.js ✅ |
+| Action `authFlows:createSignUpContext` | mints the sign-up context token; `ConvexError` Arabic for names outside 1–60 chars |
+| `GET /api/auth/passkey/generate-register-options?context=…` | 200 challenge/rp/user for a valid minted context; **400** Arabic messages for missing/invalid/expired/tampered tokens |
+| `POST /api/auth/passkey/verify-registration` | 200 in a real browser (Chromium virtual authenticator E2E): session cookie set, redirect to `/app`, passkey listed, rename/delete/sign-out/sign-in all pass |
 
 ## Pinned versions (do not bump without checking `peerDependencies`)
 
@@ -26,7 +29,8 @@ Verified live on `https://adamant-dragon-860.convex.site` (dev deployment):
 
 | file | role |
 | --- | --- |
-| `convex/auth.ts` | `authComponent` (client with local schema), `createAuthOptions`, `createAuth`, `getCurrentUser` |
+| `convex/auth.ts` | `authComponent` (client with local schema), `createAuthOptions` (with the passkey `resolveUser`/`afterVerification` hooks), `createAuth`, `getCurrentUser` |
+| `convex/authFlows.ts` | sign-up context token (HMAC mint/verify) + public `createSignUpContext` action |
 | `convex/auth.config.ts` | Convex auth provider config |
 | `convex/convex.config.ts` | registers the **local** `./betterAuth/convex.config` |
 | `convex/betterAuth/convex.config.ts` | component definition |
@@ -35,6 +39,8 @@ Verified live on `https://adamant-dragon-860.convex.site` (dev deployment):
 | `convex/betterAuth/adapter.ts` | adapter functions (`create`/`findOne`/… ) from the local schema |
 | `convex/http.ts` | `authComponent.registerRoutes(http, createAuth)` → mounts `/api/auth/*` |
 | `src/lib/auth-client.ts` | `createAuthClient({ plugins: [convexClient(), passkeyClient()] })` |
+| `src/app/(auth)/{layout,signin,signup}` | Arabic RTL sign-up (`name → passkey`) and sign-in/account routes |
+| `src/components/auth/**` | sign-up form, sign-in panel (conditional UI), account & security card, passkey error mapping, `require-auth` guard |
 | `src/lib/auth-server.ts` | `convexBetterAuthNextJs(...)` helpers (`getToken`, `preloadAuthQuery`, …) |
 | `src/app/api/auth/[...all]/route.ts` | `export const { GET, POST } = handler` (proxies to Convex) |
 | `src/components/convex-client-provider.tsx` | `ConvexBetterAuthProvider` (client) |
@@ -72,27 +78,39 @@ options without a request context.)
 ## Passkey-first onboarding (the product requirement)
 
 Sign-in/sign-up must work **without** passwords, email or OAuth:
-“choose a name → create a passkey → you are in”. Required design:
+“choose a name → create a passkey → you are in”. Implemented shape:
 
-1. **Sign-up**: `passkey()` with
-   `registration: { requireSession: false, resolveUser: ... }`.
-   `resolveUser` validates a signed, short-lived context token (HMAC with
-   `BETTER_AUTH_SECRET`) that the client obtained from a Convex action, then
-   returns/creates the user for the WebAuthn ceremony.
-   *Preferred (chosen) shape*: a Convex action mints the token for a pending
-   name; `resolveUser` creates the user row through the component adapter and
-   returns `{ id, name }`; the client then calls
-   `authClient.passkey.addPasskey({ name, context, createSession: true })`.
-   Verify with the real API from `node_modules/@better-auth/passkey/dist/index.mjs`
-   (see `registerPasskey`/`resolveUser`).
-2. **Sign-in**: `authClient.signIn.passkey({ autoFill: true })`, with
-   conditional UI (`autocomplete="username webauthn"`) on the name field.
-3. **Management**: list / rename / delete passkeys
-   (`authClient.passkey.listUserPasskeys` / `deletePasskey`), sign-out, and a
-   guard for protected routes.
-4. Behaviour **must be verified against the live dev deployment** (HTTP + real
-   ceremony is browser-only; at minimum assert the option/verification endpoints
-   return the expected statuses and shapes via curl or a test).
+1. **Sign-up** (`/signup`, name only — no session, no email):
+   * The form calls the Convex action `authFlows:createSignUpContext({ name })`.
+     The action mints a context token: base64url JSON `{name, expiresAt,
+     nonce}` signed with HMAC-SHA256 over `BETTER_AUTH_SECRET` (TTL 5 min,
+     name 1–60 chars; verification requires all three fields).
+   * The client calls `authClient.passkey.addPasskey({ name, context })`.
+     `@better-auth/passkey@1.6.33` has **no** client-side `createSession`
+     option — any doc claiming otherwise is wrong.
+   * Server-side, `registration.resolveUser` (`convex/auth.ts`) verifies the
+     token and creates the user through the component adapter with a synthetic
+     unique email (`<nonce>@passkey.local`, method `passkey`).
+   * `registration.afterVerification` creates the session via
+     `internalAdapter.createSession(user.id)` and writes the cookie with
+     `setSessionCookie` from `better-auth/cookies`, because
+     `verify-registration` returns 200 but does **not** create a session by
+     itself.
+   * The client full-page-navigates to `/app` after the ceremony — the passkey
+     client never fires `$sessionSignal` on registration.
+2. **Sign-in** (`/signin`): `authClient.signIn.passkey({ autoFill: true })`
+   with conditional UI (`autocomplete="username webauthn"` on the name field)
+   — the chosen passkey signs in straight from the browser dropdown — plus an
+   explicit button flow with real error reporting. Both paths end with a
+   full-page navigation, not client routing: the session atom update can
+   unmount the card before the promise continuation runs.
+3. **Management**: `/signin` renders the account & security card when a session
+   exists — list / rename / delete passkeys and sign-out
+   (`authClient.passkey.*`); `require-auth` guards protected routes.
+4. Behaviour **is verified against the live dev deployment**: HTTP checks for
+   every option/verify endpoint plus a real-browser Chromium virtual
+   authenticator E2E (sign-up → account → rename → sign-out → conditional-UI
+   sign-in → button sign-in → delete).
 
 ## Gotchas (learned the hard way)
 
@@ -103,5 +121,11 @@ Sign-in/sign-up must work **without** passwords, email or OAuth:
 * The generated schema must include the `passkey` table (it does) — otherwise the
   plugin will fail at runtime with “table not found”.
 * `ConvexError` messages are user-facing Arabic strings; toasts display them raw.
+* `verify-registration` does **not** create a session (only `afterVerification`
+  does here); `$sessionSignal` fires on `verify-authentication` only, so
+  post-registration navigation must be a full page load.
+* rpID is port-agnostic, but the plugin's origin check requires the browser
+  origin to equal `SITE_URL` — browser tests from a second dev port need a
+  temporary `SITE_URL` flip (restore it afterwards).
 * Never run two `bunx convex dev` pushes against the same deployment
   simultaneously — coordinate with the orchestrator.

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useQuery, useConvexAuth } from "convex/react";
-import { LogOut, User } from "lucide-react";
+import { KeyRound, LogOut, User } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
@@ -70,6 +70,10 @@ export function SiteHeader() {
                   {user?.name ?? "حسابي"}
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
+                <DropdownMenuItem render={<Link href="/signin" />}>
+                  <KeyRound className="size-4" />
+                  الحساب والأمان
+                </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={() => {
                     void authClient.signOut();
