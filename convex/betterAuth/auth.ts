@@ -6,4 +6,10 @@ import { createAuth } from "../auth";
  *
  *   cd convex/betterAuth && bunx auth generate
  */
-export const auth = createAuth({} as Parameters<typeof createAuth>[0]);
+export const auth = createAuth({} as Parameters<typeof createAuth>[0], {
+  // Schema generation is a local, deployment-less operation: supply the
+  // origins explicitly so `requireAuthEnv` (fail-closed at request time) does
+  // not need deployment env here.
+  siteUrl: "http://localhost:3000",
+  rpID: "localhost",
+});

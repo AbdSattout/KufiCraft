@@ -19,18 +19,42 @@ import { action } from "./_generated/server";
 /** How long a client may take between requesting the token and starting registration. */
 const CONTEXT_TOKEN_TTL_MS = 5 * 60 * 1000;
 
-/** Matches MAX_DISPLAY_NAME_LENGTH on the client form. */
-export const MAX_DISPLAY_NAME_LENGTH = 60;
-
 type SignUpContextPayload = {
   name: string;
   expiresAt: number;
   nonce: string;
 };
 
-/** Collapses whitespace and enforces the length bound; null when unusable. */
+/** Matches MAX_DISPLAY_NAME_LENGTH on the client form. */
+export const MAX_DISPLAY_NAME_LENGTH = 60;
+
+/** Synthetic email domain for login-less accounts — never shown or sent to. */
+export const PASSKEY_EMAIL_DOMAIN = "@passkey.local";
+
+/**
+ * Control / format characters that must never survive into a display name:
+ * C0 + C1 controls (their whitespace members — `\t`, `\n`, `\r` — are *not*
+ * listed, so they collapse to a space instead of gluing words together), the
+ * soft hyphen, the Arabic letter mark, zero-width and bidi marks
+ * (`U+200B–U+200F`), bidi embeddings/overrides (`U+202A–U+202E`), invisibles
+ * and bidi isolates (`U+2060–U+2069`), and the BOM. Without this a name such as
+ * `"عبد"` + `U+202E` renders reversed or invisible and can impersonate another
+ * user; `\s` does not match any of them.
+ */
+const FORBIDDEN_NAME_CHARS =
+  /[\u0000-\u0008\u000E-\u001F\u007F-\u009F\u00AD\u061C\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/g;
+
+/**
+ * Normalises a display name: NFC, strips control/format characters, then
+ * trims and collapses whitespace. Null when it is empty or over the length
+ * bound. Used both when minting and when verifying a sign-up context token.
+ */
 export function normalizeDisplayName(raw: string): string | null {
-  const name = raw.trim().replace(/\s+/g, " ");
+  const name = raw
+    .normalize("NFC")
+    .replace(FORBIDDEN_NAME_CHARS, "")
+    .replace(/\s+/g, " ")
+    .trim();
   if (name.length === 0 || name.length > MAX_DISPLAY_NAME_LENGTH) return null;
   return name;
 }
@@ -40,7 +64,7 @@ export function normalizeDisplayName(raw: string): string | null {
  * unique `email` on `user`; nothing else in the app reads or shows it.
  */
 export function signUpEmail(nonce: string): string {
-  return `${nonce}@passkey.local`;
+  return `${nonce}${PASSKEY_EMAIL_DOMAIN}`;
 }
 
 function bytesToBase64Url(bytes: Uint8Array): string {

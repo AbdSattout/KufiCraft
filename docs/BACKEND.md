@@ -11,7 +11,8 @@ Backend is **live** on the dev deployment `adamant-dragon-860`
   `config` (`projectConfigValidator`), `items` (`canvasItemValidator[]`, deduped
   by key, last item renders on top), `itemCount`, `thumbnail` (compact SVG string
   or `null`), `createdAt`, `updatedAt`.
-  Indexes: `by_user`, `by_user_and_updated`.
+  Index: `by_user_and_updated` (its `userId` prefix also serves
+  "all of one user's projects", so no separate `by_user` index is needed).
 * Auth tables live inside the `betterAuth` component — never query them directly.
 
 ## Functions
@@ -21,13 +22,13 @@ touches documents whose `userId === identity.subject`:
 
 | function | args | returns |
 | --- | --- | --- |
-| `list` | — | summaries (no `items`), newest first |
+| `list` | — | summaries (no `items`), newest first, capped at `LIST_LIMIT` documents |
 | `get` | `{ projectId }` | full doc, or `null` if not found/not owner |
 | `create` | `{ name, config }` | new id |
 | `rename` | `{ projectId, name }` | — |
 | `remove` | `{ projectId }` | — |
-| `duplicate` | `{ projectId }` | new id (name + `(نسخة)`) |
-| `updateConfig` | `{ projectId, patch }` | — (partial merge, clamped) |
+| `duplicate` | `{ projectId }` | new id (name + `(نسخة)`, items re-sanitised) |
+| `updateConfig` | `{ projectId, patch }` | — (partial merge, sanitised) |
 | `updateThumbnail` | `{ projectId, thumbnail }` | — (stores `null` when > 24 000 chars) |
 | `applyOps` | `{ projectId, ops }` | `{ itemCount, updatedAt }` |
 
@@ -38,22 +39,48 @@ touches documents whose `userId === identity.subject`:
 
 ## Limits & conventions
 
-* `MAX_ITEMS = 8_192` (exceeding it throws; Convex caps every array value at
-  8 192 elements, so a larger cap could only fail with a raw system error),
-  `MAX_NAME_LENGTH = 120`,
-  `MAX_THUMBNAIL_LENGTH = 24_000`, `MAX_COLOR_LENGTH = 32` (ink/background are
-  CSS strings and are **truncated**, not rejected), `ratio` is one of
-  `RATIO_PRESETS` (`1:1` … `1:5`),
-  `base ∈ [4, 100]`.
+* `MAX_ITEMS = 8_192`, enforced on **every** path that can add items — the
+  `add` and `replace` branches of `applyOps` and the copy in `duplicate` — via
+  `enforceItemLimit`, which throws the Arabic limit error. `create` starts empty
+  (`items: []`), so it cannot exceed it. Exceeding the cap throws *before* the
+  `ctx.db.patch`, so the mutation rolls back and the document is untouched.
+  (Convex itself caps every array value at 8 192 elements, so a larger cap could
+  only ever fail with a raw system error.)
+* `MAX_NAME_LENGTH = 120`,
+  `MAX_THUMBNAIL_LENGTH = 24_000`, `MAX_COLOR_LENGTH = 32` (ink/background and
+  an item's `c` are CSS strings and are **truncated**, not rejected),
+  `MAX_KEY_LENGTH = 64` (an item's `k` is **rejected** with the Arabic error
+  when longer — truncating a key would silently merge distinct items),
+  `ratio` is one of `RATIO_PRESETS` (`1:1` … `1:5`), `base ∈ [4, 100]`.
+* `list` is a bounded scan: `.take(LIST_LIMIT)` with `LIST_LIMIT = 100`
+  (newest first). `items` live in the same document as the summary, so Convex
+  reads the full document — including every item — just to project the summary.
+  The ceiling is therefore *100 full documents per `list` call*. The structural
+  fix (move `items` into their own per-project table / chunk them so summaries
+  are cheap) is a known limitation, deliberately **not** attempted here.
+* **Write sanitisation** (`sanitizeItem` / `sanitizeConfig` in
+  `convex/projects.ts`) runs on every write path, so a document stored under an
+  older contract is normalised (repaired) the next time it is written:
+  * item coordinates (`i`/`j`, `i1`/`j1`/`i2`/`j2`) are made finite, integer
+    (`Math.trunc`) and clamped to `0 … maxGridIndex(base)`
+    (`= floor(VIEWBOX_SIZE / base)`, at most `VIEWBOX_SIZE / 4 = 250` for
+    `base = 4`). On a circular grid the sector axis (`j`/`j1`/`j2`) is capped at
+    `CIRCULAR_SECTORS - 1 = 35`. `NaN` → `0`, `+Infinity` → the bound it points
+    at (a bare `Math.min/max` propagates `NaN` and would store a non-value).
+  * an item colour `c` is sliced to `MAX_COLOR_LENGTH`.
+  * the `ratio` in `config` is snapped to the nearest `RATIO_PRESETS` entry
+    (`snapRatio`; `NaN` → `DEFAULT_RATIO`).
 * `duplicate` reserves room for the `" (نسخة)"` suffix before truncating the
   base name, so a name at the cap never loses the suffix.
 * `updateThumbnail` deliberately does **not** bump `updatedAt` — thumbnails are
   derived from edits whose `applyOps` batch already bumped it (this keeps
   dashboard ordering a function of user edits, not thumbnail refreshes).
+  Asserted by `convex/projects.test.ts`.
 * Names are trimmed/collapsed; empty → `"لوحة بلا عنوان"`.
 * Errors are thrown as `ConvexError` with **Arabic** user-facing messages
   (`"يجب تسجيل الدخول أولًا"`, `"المشروع غير موجود"`,
-  `"تجاوزت اللوحة الحد الأقصى للعناصر"`) — show `error.data` in a `sonner` toast.
+  `"تجاوزت اللوحة الحد الأقصى للعناصر"`, `"مفتاح العنصر أطول من الحد المسموح"`)
+  — show `error.data` in a `sonner` toast.
 * Validators are shared with the client from `convex/lib/model.ts`; the client
   imports them via `@/lib/canvas/model`. **Never** duplicate a validator.
 * Thin handlers only — no business logic that belongs in the engine.
