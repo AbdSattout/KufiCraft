@@ -1,0 +1,87 @@
+# KufiCraft — plan, waves and working agreement
+
+Arabic-first, RTL web app for designing **square kufic** (الكوفي المربع) on a
+square or circular grid, with customisable ink ratio, 9 fragment shapes,
+auto-merge to lines, per-item colour/shape/rotation, live sync and export.
+Replaces the old localStorage-only KufiCraft. Stack: Next.js 16 (App Router,
+Turbopack) · React 19 · Tailwind v4 + shadcn (RTL) · Convex (realtime DB +
+backend) · Better Auth (passkeys, local-install component) · Bun · vitest.
+
+## Status
+
+**Wave 0 — done (orchestrator)**
+
+* Project scaffolded on Next.js 16.4.2, shadcn initialized with RTL, 35 UI
+  components vendored, theme (paper/ink/saffron oklch) + Arabic fonts wired.
+* `convex/lib/model.ts` — the shared canvas model/validators (**the contract**),
+  client alias at `src/lib/canvas/model.ts`.
+* Backend live: `projects` table + 9 functions (`convex/projects.ts`), pushed to
+  dev deployment `adamant-dragon-860` (team `abdsat`, project `kuficraft`).
+* Better Auth (passkey-only, local install) live: schema generated, env vars set,
+  `@simplewebauthn/server` verified running in Convex's V8 runtime,
+  `/api/auth/*` proxied by Next and answering.
+* Docs: `PLAN.md`, `CANVAS.md`, `BACKEND.md`, `AUTH.md`, `UI.md`,
+  `reference/` (old implementations for porting).
+
+**Waves**
+
+| wave | work | who |
+| --- | --- | --- |
+| 1 | A auth & account UX · B canvas engine + tests · D dashboard · F landing | delegated, parallel worktrees |
+| 2 | E editor (needs B+A merged) · C backend tests (convex-test) | delegated after wave 1 lands |
+| 3 | reviews (`convex-reviewer`, `better-auth-security`), QA, deploy docs | delegated + orchestrator |
+
+## File ownership (avoid collisions)
+
+| owner | files |
+| --- | --- |
+| orchestrator | `src/app/layout.tsx`, `src/app/globals.css`, `package.json`, `convex/lib/model.ts`, `convex/schema.ts`, `convex/projects.ts`, `docs/**` |
+| A (auth) | `convex/auth.ts`, `convex/betterAuth/**`, `src/lib/auth-*.ts`, `src/components/convex-client-provider.tsx`, `src/app/(auth)/**`, `src/components/auth/**`, `src/app/api/auth/**` |
+| B (engine) | `src/lib/canvas/**` (except `model.ts`) |
+| D (dashboard) | `src/app/(app)/app/**` (dashboard only), `src/components/dashboard/**` |
+| E (editor) | `src/app/(app)/app/[projectId]/**`, `src/components/editor/**`, `src/components/canvas/**` |
+| F (landing) | `src/app/(marketing)/**`, `src/components/marketing/**` |
+
+Shared files (`layout.tsx`, `site-header.tsx`) are edited by the orchestrator or
+by exactly one wave member; if you need a change there, ask instead of editing.
+
+## Rules for agents
+
+1. Work in the assigned worktree/branch. `cp /home/abd/Coding/kuficraft/.env.local .`
+   immediately (it is git-ignored, but every checkout needs it).
+2. **Do not** run `bunx convex dev`, `convex deploy` or `bunx auth generate`
+   unless your brief explicitly grants it — the dev deployment is shared.
+3. `bunx tsc --noEmit` must pass before you report back. Run your own tests
+   (`bun run test`) and, for UI work, `bun run build`.
+4. The docs are the contract: `docs/CANVAS.md`, `docs/BACKEND.md`, `docs/AUTH.md`,
+   `docs/UI.md`. Deviating is fine **only** if you update the doc in the same
+   branch and call it out in your report.
+5. No `any`, no `@ts-ignore`, no unused code, no TODOs left behind.
+   Arabic copy for every user-visible string; numbers/Latin inline where natural.
+6. Commit in small logical commits with the prefix `feat(<area>):` / `fix(…)` /
+   `test(…)`; end your report with: branch, files touched, commands run,
+   what you verified, what you could not verify, and any contract change.
+
+## Definition of done (per wave item)
+
+* Typecheck + lint + its own tests green; feature verified against the dev
+  deployment by the owner where possible (curl/HTTP or Playwright-less manual
+  script), otherwise explicitly reported as unverified.
+* No new dependencies without orchestrator approval.
+* Doc updated when a contract changed.
+
+## Deploy plan (after wave 3)
+
+1. Convex **prod** deployment (`bunx convex deploy`) with its own
+   `BETTER_AUTH_SECRET`, `SITE_URL`, `PASSKEY_RP_ID`.
+2. Hosting decision (user): Vercel vs Cloudflare — the app is a standard Next.js
+   Node app with two env vars; both work.
+3. Repo visibility (user): currently **private**, `AbdSattout/KufiCraft`.
+
+## Open questions for the user
+
+* Hosting target and final domain (needed for `SITE_URL` + `PASSKEY_RP_ID`;
+  passkeys bind to the domain, so switching domains later means re-registering).
+* Repo visibility (private → public).
+* Whether to keep the old KufiCraft org/site around for migration of existing
+  artworks (old data lives in browser localStorage of the old site).

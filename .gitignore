@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# convex local temp build dir (CONVEX_TMPDIR)
+.convex-tmp
