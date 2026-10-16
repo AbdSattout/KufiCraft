@@ -16,6 +16,10 @@ Verified live on `https://adamant-dragon-860.convex.site` (dev deployment):
 | `GET /api/auth/passkey/generate-register-options?context=…` | 200 challenge/rp/user for a valid minted context; **400** Arabic messages for missing/invalid/expired/tampered tokens |
 | `POST /api/auth/passkey/verify-registration` | 200 in a real browser (Chromium virtual authenticator E2E): session cookie set, redirect to `/app`, passkey listed, rename/delete/sign-out/sign-in all pass |
 
+Behaviour beyond the endpoints above is covered by `convex/**` unit tests;
+everything about the live deployment that a unit test cannot reach is marked
+"unverified" below.
+
 ## Pinned versions (do not bump without checking `peerDependencies`)
 
 * `better-auth@1.6.33` and `@better-auth/passkey@1.6.33` — the Convex component
@@ -53,12 +57,57 @@ Deployment env vars (set — `bunx convex env list`):
 | var | dev value | prod |
 | --- | --- | --- |
 | `BETTER_AUTH_SECRET` | random 32B base64 | new random value |
-| `SITE_URL` | `http://localhost:3000` | `https://<prod-domain>` |
-| `PASSKEY_RP_ID` | `localhost` | bare domain, e.g. `kuficraft.app` |
+| `SITE_URL` | `http://localhost:3000` | `https://kuficraft.vercel.app` |
+| `PASSKEY_RP_ID` | `localhost` | `kuficraft.vercel.app` |
+
+`SITE_URL` and `PASSKEY_RP_ID` are **required**: `createAuthOptions` fails
+closed (`requireAuthEnv`) when either is unset, instead of silently binding
+passkeys to `localhost`. The only caller allowed to supply fallbacks is the
+schema-generation shim `convex/betterAuth/auth.ts` (see below), which runs
+without deployment env.
 
 `.env.local` (git-ignored): `CONVEX_DEPLOYMENT`, `NEXT_PUBLIC_CONVEX_URL`,
 `NEXT_PUBLIC_CONVEX_SITE_URL`, `NEXT_PUBLIC_SITE_URL=http://localhost:3000`.
 New worktrees/checkouts must copy it: `cp /home/abd/Coding/kuficraft/.env.local .`
+
+## Rate limiting and abuse controls
+
+Better Auth only enables its limiter automatically when
+`NODE_ENV === "production"`, so `createAuthOptions` sets an explicit `rateLimit`
+block (`enabled: true`, global `60 s / 100`). The unauthenticated `/passkey/*`
+endpoints get tighter per-path rules:
+
+| path | window | max |
+| --- | --- | --- |
+| `/passkey/generate-register-options` | 60 s | 10 |
+| `/passkey/verify-registration` | 60 s | 20 |
+| `/passkey/generate-authenticate-options` | 60 s | 20 |
+
+Rules are keyed **without** the `/api/auth` prefix — Better Auth normalises the
+path before looking a rule up. The first row matters most: every call mints a
+`user` row (see the onboarding section).
+
+### What it does and does not give you
+
+* **Storage stays in-memory (the default).** No secondary storage is configured,
+  so counters live inside each Convex isolate. There is **no `rateLimit` table**,
+  which is why this change needs **no auth schema regeneration and no deployment
+  change** (see "Changing auth options" below).
+* **Best-effort, per isolate.** Convex can run many isolates and counters do not
+  survive an isolate restart, so under real load the effective limit can be
+  higher than the numbers above. Treat this as abuse friction, not a hard quota;
+  a shared store (Convex or Redis as secondary storage) is the follow-up if you
+  need one.
+* **Unknown client IPs share one bucket.** The limiter keys on the request IP, so
+  requests with no usable IP fall into a single bucket and throttle each other
+  instead of an attacker.
+* **The context token is not single-use by design.** Its only job is to prove
+  "this client asked for an account with this name seconds ago". `resolveUser` is
+  the real gate: a missing/invalid/expired/tampered token is rejected with the
+  Arabic "انتهت صلاحية طلب إنشاء الحساب" **400**, and a *repeat* (the derived
+  account already exists) is rejected with the Arabic "تم استخدام طلب إنشاء
+  الحساب مسبقًا. ابدأ من جديد." **400** — a clean 4xx instead of the adapter's
+  opaque unique-email 500.
 
 ## Changing auth options
 
@@ -74,6 +123,10 @@ bunx tsc --noEmit
 (That is the documented local-install flow; `-y` skips the overwrite prompt.
 The shim `convex/betterAuth/auth.ts` exists only so the CLI can load the
 options without a request context.)
+
+Editing the `rateLimit` block alone does **not** need this flow: with the default
+in-memory storage there is no `rateLimit` table, so the generated schema is
+unchanged and there is nothing to regenerate or push.
 
 ## Passkey-first onboarding (the product requirement)
 
@@ -129,3 +182,32 @@ Sign-in/sign-up must work **without** passwords, email or OAuth:
   temporary `SITE_URL` flip (restore it afterwards).
 * Never run two `bunx convex dev` pushes against the same deployment
   simultaneously — coordinate with the orchestrator.
+* Display names are normalised on **both** sides of the token boundary:
+  `normalizeDisplayName` (`convex/authFlows.ts`) applies NFC, strips C0/C1
+  controls (their whitespace members `\t`/`\n`/`\r` are kept, so they collapse
+  rather than glue words together), the soft hyphen, the Arabic letter mark,
+  zero-width/bidi marks (`U+200B–U+200F`), bidi overrides (`U+202A–U+202E`),
+  invisible/bidi isolates (`U+2060–U+2069`) and the BOM, then trims/collapses
+  whitespace and caps at 60 chars. Without this an RTL override could render a
+  name reversed or invisible and impersonate another user; `\s` matches none of
+  those characters. A token minted under the old rules is re-checked on verify.
+
+## Known follow-ups (deliberately not done here)
+
+Each item below was in scope but needed the live stack, a migration, or a
+redesign, so it is left open rather than half-done:
+
+1. **Orphaned `user` rows.** A successful `generate-register-options` call mints
+   a `user` row before the authenticator answers; if the ceremony is never
+   completed, that row — plus its synthetic `<nonce>@passkey.local` email — stays
+   behind. `resolveUser` only reaps the row if the *same* token is replayed. A
+   real fix needs a component-side sweep (a cron deleting accounts with no
+   `passkey` and no `session`), which cannot be exercised against the current
+   adapter surface from a unit test.
+2. **The last-passkey guard is UI-only.** `account-security.tsx` disables delete
+   while one passkey remains (`isOnlyPasskey`) and explains it in Arabic, but the
+   server does not enforce it: `@better-auth/passkey`'s `delete-passkey` calls
+   `ctx.context.adapter.delete` directly, bypassing `deleteWithHooks`, so a
+   `hooks.before` guard never runs. Enforcing it server-side needs a custom
+   endpoint or a patch around the plugin, verified against the live deployment.
+
