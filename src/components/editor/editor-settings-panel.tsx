@@ -25,9 +25,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { RATIO_PRESETS, VIEWBOX_SIZE } from "@/lib/canvas/model";
+import { RATIO_PRESETS, VIEWBOX_SIZE, ratioLabel } from "@/lib/canvas/model";
 import type { GridType, ProjectConfig } from "@/lib/canvas/model";
-import { ratioPresetLabel } from "@/lib/editor-prefs";
 import { MESSAGES } from "./messages";
 import { INK_SWATCHES, PAPER_SWATCHES, formatCount, swatchLabel } from "./editor-palette";
 import { ColourField, PanelSection, SliderField } from "./editor-controls";
@@ -99,7 +98,7 @@ export function SettingsPanel({
           variant="outline"
           spacing={0}
           className="w-full"
-          value={[ratioPresetLabel(config.ratio)]}
+          value={[ratioLabel(config.ratio)]}
           onValueChange={(next) => {
             const preset = RATIO_PRESETS.find((entry) => entry.label === next[0]);
             if (preset) patchConfig({ ratio: preset.ratio });

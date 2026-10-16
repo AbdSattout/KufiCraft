@@ -10,6 +10,7 @@ import {
   DEFAULT_PROJECT_CONFIG,
   MAX_NAME_LENGTH,
   RATIO_PRESETS,
+  ratioLabel,
   snapRatio,
   type GridType,
   type ProjectConfig,
@@ -29,7 +30,7 @@ import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { mutationErrorMessage } from "@/components/dashboard/errors";
-import { loadLastConfig, ratioPresetLabel } from "@/lib/editor-prefs";
+import { loadLastConfig } from "@/lib/editor-prefs";
 
 /** One cell illustrating ink (القلم) vs space (الفراغ) at the given ratio. */
 function InkRatioPreview({ ratio }: { ratio: number }) {
@@ -150,7 +151,7 @@ export function NewProjectDialog({
               variant="outline"
               spacing={0}
               className="w-full"
-              value={[ratioPresetLabel(ratio)]}
+              value={[ratioLabel(ratio)]}
               onValueChange={(nextValue) => {
                 const preset = RATIO_PRESETS.find(
                   (entry) => entry.label === nextValue[0],
@@ -172,8 +173,8 @@ export function NewProjectDialog({
             <div className="flex items-center gap-3 rounded-lg bg-muted/60 p-3">
               <InkRatioPreview ratio={ratio} />
               <p className="text-xs leading-relaxed text-muted-foreground">
-                يوضّح الرسم نسبة القلم إلى الفراغ داخل الخلية عند {ratioPresetLabel(ratio)}:
-                كلما زاد الرقم، صارت الحروف أكثف.
+                يوضّح الرسم نسبة القلم إلى الفراغ داخل الخلية عند{" "}
+                {ratioLabel(ratio)}: كلما كبر الرقم الثاني، صار الحبر أكثف.
               </p>
             </div>
           </div>

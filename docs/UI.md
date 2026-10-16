@@ -97,13 +97,14 @@ after each committed gesture (throttled to ≥ 2 s).
 Settings persistence (localStorage, per browser, no server round-trip):
 
 * `kuficraft.editor-prefs.v1` — tool, active shape, rotation, arch bulge, zoom,
-  showGrid, mergeLines, the active ratio preset, colour swatches history
-  (last ≤ 8 ink colours).
+  colour swatches history (last ≤ 8 ink colours).
   Loaded synchronously when the editor mounts and applied to the toolbar so the
   app “opens the way you left it”. Project `config` stays authoritative for
   rendering; UI prefs only decide the toolbar defaults and tool behaviour.
 * `kuficraft.last-config.v1` — the last committed project config, used as the
-  default in the dashboard’s «لوحة جديدة» dialog and for new projects.
+  default in the dashboard’s «لوحة جديدة» dialog and for new projects. The
+  document settings — grid, merged lines and the ink ratio — are remembered
+  here rather than in the prefs, because they belong to the project.
 * Both keys are versioned and validated on read (corrupt/stale values fall back
   to model defaults, never throw).
 

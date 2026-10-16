@@ -472,16 +472,10 @@ export function useEditor(
       rotation: style.rotation,
       bulge,
       zoom,
-      showGrid: config.showGrid,
-      mergeLines: config.mergeLines,
-      ratio: config.ratio,
       inkSwatches: [...inkSwatches],
     });
   }, [
     bulge,
-    config.mergeLines,
-    config.ratio,
-    config.showGrid,
     document.status,
     enabled,
     inkSwatches,

@@ -4,22 +4,17 @@
  * Two keys, both private to the browser and never sent to the server:
  *
  *   • `kuficraft.editor-prefs.v1` — how the editor opens: tool, shape and
- *     rotation, arch bulge, zoom, the grid/merge toggles, the active ratio
- *     preset and the last few ink colours.
+ *     rotation, arch bulge, zoom and the last few ink colours.
  *   • `kuficraft.last-config.v1` — the last committed project config, used as
- *     the default in the dashboard's «لوحة جديدة» dialog.
+ *     the default in the dashboard's «لوحة جديدة» dialog. The grid, merge and
+ *     ratio settings live here, not in the prefs: they belong to the document,
+ *     and the project itself is authoritative while one is open.
  *
  * Reads are total (corrupt / stale / unknown-version values fall back to the
  * model defaults, never throw) and writes are failure-tolerant (private mode
  * or a full quota must never break the editor).
  */
 
-import {
-  DEFAULT_PROJECT_CONFIG,
-  DEFAULT_RATIO,
-  RATIO_PRESETS,
-  snapRatio,
-} from "@/lib/canvas/model";
 import type { ProjectConfig, TileShape } from "@/lib/canvas/model";
 import { SHAPE_ORDER, TOOL_ORDER } from "@/components/editor/interaction";
 import type { Tool } from "@/components/editor/interaction";
@@ -42,10 +37,6 @@ export interface EditorPrefs {
   rotation: Rotation;
   bulge: 0 | 1;
   zoom: number;
-  showGrid: boolean;
-  mergeLines: boolean;
-  /** Active ratio preset (`RATIO_PRESETS[i].ratio`). */
-  ratio: number;
   /** Recent ink colours, most-recent-first, deduped case-insensitively. */
   inkSwatches: string[];
 }
@@ -56,9 +47,6 @@ export const DEFAULT_EDITOR_PREFS: EditorPrefs = {
   rotation: 0,
   bulge: 0,
   zoom: DEFAULT_ZOOM,
-  showGrid: DEFAULT_PROJECT_CONFIG.showGrid,
-  mergeLines: DEFAULT_PROJECT_CONFIG.mergeLines,
-  ratio: DEFAULT_RATIO,
   inkSwatches: [],
 };
 
@@ -164,18 +152,6 @@ export function loadEditorPrefs(
       : DEFAULT_EDITOR_PREFS.rotation,
     bulge: isBulge(record.bulge) ? record.bulge : DEFAULT_EDITOR_PREFS.bulge,
     zoom: clampZoom(record.zoom),
-    showGrid:
-      typeof record.showGrid === "boolean"
-        ? record.showGrid
-        : DEFAULT_EDITOR_PREFS.showGrid,
-    mergeLines:
-      typeof record.mergeLines === "boolean"
-        ? record.mergeLines
-        : DEFAULT_EDITOR_PREFS.mergeLines,
-    ratio:
-      typeof record.ratio === "number"
-        ? snapRatio(record.ratio)
-        : DEFAULT_EDITOR_PREFS.ratio,
     inkSwatches: normalizeSwatches(record.inkSwatches),
   };
 }
@@ -211,12 +187,4 @@ export function rememberInkSwatch(
 ): string[] {
   if (color.length === 0) return [...swatches];
   return normalizeSwatches([color, ...swatches]);
-}
-
-/** `1:3`-style label of the preset a (possibly stale) ratio belongs to. */
-export function ratioPresetLabel(ratio: number): string {
-  const preset =
-    RATIO_PRESETS.find((entry) => entry.ratio === ratio) ??
-    RATIO_PRESETS.find((entry) => entry.ratio === snapRatio(ratio));
-  return preset?.label ?? RATIO_PRESETS[0].label;
 }

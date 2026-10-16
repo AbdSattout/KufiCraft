@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_PROJECT_CONFIG, RATIO_PRESETS } from "@/lib/canvas/model";
+import { RATIO_PRESETS } from "@/lib/canvas/model";
 import {
   DEFAULT_EDITOR_PREFS,
   EDITOR_PREFS_KEY,
@@ -8,7 +8,6 @@ import {
   type StorageLike,
   loadEditorPrefs,
   loadLastConfig,
-  ratioPresetLabel,
   rememberInkSwatch,
   saveEditorPrefs,
   saveLastConfig,
@@ -52,9 +51,6 @@ describe("editor preferences", () => {
       rotation: 3 as const,
       bulge: 1 as const,
       zoom: 1.25,
-      showGrid: true,
-      mergeLines: false,
-      ratio: RATIO_PRESETS[4].ratio,
       inkSwatches: ["#111827", "#7c2d12"],
     };
     saveEditorPrefs(prefs, storage);
@@ -81,37 +77,24 @@ describe("editor preferences", () => {
         rotation: 7,
         bulge: 2,
         zoom: "big",
-        showGrid: "yes",
-        mergeLines: 3,
-        ratio: "0.75",
         inkSwatches: "red",
       }),
     });
     expect(loadEditorPrefs(storage)).toEqual(DEFAULT_EDITOR_PREFS);
   });
 
-  it("clamps zoom and snaps the ratio to a preset", () => {
+  it("clamps zoom into its range", () => {
     const prefs = loadEditorPrefs(
       new MemoryStorage({
-        [EDITOR_PREFS_KEY]: JSON.stringify({ zoom: 99, ratio: 0.79 }),
+        [EDITOR_PREFS_KEY]: JSON.stringify({ zoom: 99 }),
       }),
     );
     expect(prefs.zoom).toBe(2);
-    expect(prefs.ratio).toBe(RATIO_PRESETS[3].ratio);
 
     const low = loadEditorPrefs(
       new MemoryStorage({ [EDITOR_PREFS_KEY]: JSON.stringify({ zoom: 0.01 }) }),
     );
     expect(low.zoom).toBe(0.5);
-  });
-
-  it("snaps NaN ratios to the default instead of storing them", () => {
-    const prefs = loadEditorPrefs(
-      new MemoryStorage({
-        [EDITOR_PREFS_KEY]: JSON.stringify({ ratio: Number.NaN }),
-      }),
-    );
-    expect(prefs.ratio).toBe(DEFAULT_PROJECT_CONFIG.ratio);
   });
 
   it("keeps at most 8 swatches, most-recent-first, deduped case-insensitively", () => {
@@ -186,11 +169,5 @@ describe("editor preferences", () => {
     expect(next).toHaveLength(MAX_INK_SWATCHES);
     expect(next[0]).toBe("#ffffff");
     expect(next).not.toContain(full[full.length - 1]);
-  });
-
-  it("labels the preset a ratio belongs to", () => {
-    expect(ratioPresetLabel(RATIO_PRESETS[2].ratio)).toBe("1:3");
-    expect(ratioPresetLabel(0.79)).toBe("1:4");
-    expect(ratioPresetLabel(Number.NaN)).toBe("1:3");
   });
 });
