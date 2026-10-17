@@ -180,7 +180,15 @@ export function ShapePanel({
                   </Button>
                 }
               />
-              <DropdownMenuContent align="start">
+              {/*
+                The vendored content defaults to `w-(--anchor-width)` — the
+                trigger is small, so the labels would wrap. Fit the rows
+                instead, bounded by the viewport (Base UI's `--available-width`).
+              */}
+              <DropdownMenuContent
+                align="start"
+                className="w-auto max-w-(--available-width)"
+              >
                 {ARRANGE_ITEMS.map(({ action, label, hint, Icon }) => (
                   <DropdownMenuItem
                     key={action}
