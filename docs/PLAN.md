@@ -1,7 +1,7 @@
 # KufiCraft — plan, waves and working agreement
 
 Arabic-first, RTL web app for designing **square kufic** (الكوفي المربع) on a
-square or circular grid, with customisable ink ratio, 9 fragment shapes,
+square or circular grid, with customisable ink ratio, 10 fragment shapes,
 auto-merge to lines, per-item colour/shape/rotation, live sync and export.
 Replaces the old localStorage-only KufiCraft. Stack: Next.js 16 (App Router,
 Turbopack) · React 19 · Tailwind v4 + shadcn (RTL) · Convex (realtime DB +
@@ -66,12 +66,39 @@ backend) · Better Auth (passkeys, local-install component) · Bun · vitest.
   0.9 → 5/6, index clamping, oversized-key rejection, cross-user ownership).
 * **226 tests** — 71 convex-test (`convex/**`), 155 client (`src/**`).
 
+**Wave 4 — model v2 rewrite (this branch)**
+
+* The item model was rewritten to match the reference app one-to-one: items are
+  **classes** (`KufiItem` → `Tile` / `Line` / `Stroke` / `Arc`), field names are
+  full words (`column`, `zone`, `from`, `points`, …), and the old one-letter
+  names and redundant `arch` type are gone (`docs/CANVAS.md` §3).
+* Tools are **one class each in a registry** (`REGISTRY` in
+  `src/components/editor/tools.ts`): `select | pen | line | eraser | arc`, with
+  the rail icons, labels and shortcuts read from the classes — no `switch (tool)`.
+  Shape ids were renamed (`semi-hexagone` → `pentagon`, `arc` → `curve`, the
+  untitled tenth → `comb`).
+* Pen paints **only the anchors the pointer crossed** (gap fill between the last
+  anchor and the new one, `MAX_PEN_GAP = 8` for a teleport, identity dedup, no
+  hover preview). Line and arc take **click-click as well as drag**; both show
+  the armed start cell as a filled highlight. Arc geometry was ported from
+  `kufi.js` and now exposes direction + size controls with butt/mitre heads.
+* Colour is **per fragment** (`resolvedColor`), so changing the document ink
+  never repaints what is already drawn; the toolbar shape icons respect rotation.
+* The ink ratio now reads `1:1 … 1:5` where **`1:1` is the space-less mono cell**
+  (ink fills the whole cell); `MIN_RATIO`/`MAX_RATIO` are the numeric extremes.
+  The construction grid is two families: whole-cell borders (0.28) plus the
+  stronger inner ink edges (0.55), the latter empty at `1:1`.
+* `.kuficraft` is **format v2** (still reads v1; `docs/FORMAT.md`), the backend
+  validators/sanitisers follow (`docs/BACKEND.md`), and the docs were rewritten
+  in the same branch.
+
 | wave | work | who |
 | --- | --- | --- |
 | 1 | A auth & account UX · B canvas engine + tests · D dashboard · F landing | merged ✅ |
 | 2 | E editor (needs B+A merged) · C backend tests (convex-test) | merged ✅ |
 | 2.5 | editor prefs (browser storage) · `.kuficraft` export/import (`docs/FORMAT.md`) · ratio presets | merged ✅ |
 | 3 | backend + auth reviews and their fixes · write-path QA · prod deploy | done ✅ |
+| 4 | model v2 (item classes · tool registry · pen/line/arc gestures · per-item colour · space-less 1:1 · grid families · file format v2 · docs) | this branch |
 
 ## File ownership (avoid collisions)
 

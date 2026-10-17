@@ -4,160 +4,276 @@
 > same PR (or raise it with the orchestrator). The single source of truth for
 > types/constants/validators is **`convex/lib/model.ts`** (client alias:
 > `src/lib/canvas/model.ts` → re-export).
+>
+> Wave 4 rewrote the item model to match the reference app one-to-one: items are
+> **classes** with full-word JSON field names, every tool is a class in a
+> registry, and the pen paints exactly what the pointer crossed. This doc is the
+> v2 contract.
 
 ## 1. Coordinate system
 
 * SVG `viewBox="0 0 1000 1000"`; origin top-left, `y` grows **downwards**.
-* Square grid: cells of `config.base` units. Cell `(i, j)` covers
-  `x ∈ [i·base, (i+1)·base)`, `y ∈ [j·base, (j+1)·base)` — up to
-  `1000 / base` cells per axis.
-* Circular grid: center `(500, 500)`; band `i` covers radius
-  `[i·base, (i+1)·base)`; sector `j` covers angle
-  `[j·10°, (j+1)·10°)` with `atan2(dy, dx)` normalised to `[0, 2π)`
+* Square grid: cells of `config.base` units. Cell `(column, row)` covers
+  `x ∈ [column·base, (column+1)·base)`, `y ∈ [row·base, (row+1)·base)` — up to
+  `VIEWBOX_SIZE / base` cells per axis.
+* Circular grid: centre `(500, 500)`; band `column` covers radius
+  `[column·base, (column+1)·base)`; sector `row` covers angle
+  `[row·10°, (row+1)·10°)` with `atan2(dy, dx)` normalised to `[0, 2π)`
   (36 sectors, `CIRCULAR_SECTORS`).
 
-## 2. Zone rule (the heart of square kufic)
+## 2. The ratio axis (ink : space)
 
-Each cell (or circular slice) is split per axis at `config.ratio`, which is one
-of the five presets in `RATIO_PRESETS` (`1:1`, `1:2`, `1:3`, `1:4`, `1:5` in
-space:ink notation → ink fraction `1/2`, `2/3`, `3/4`, `4/5`, `5/6`):
+Each cell (or circular slice) is split **per axis** at `config.ratio`, the ink
+fraction of that axis. The ink part comes **first** on both axes (top / left on
+the square grid, inner / counter-clockwise-start on the circular one), exactly
+like the reference app's `rectFromPoint`.
 
-| axis position | square | circular |
-| --- | --- | --- |
-| `< ratio` | ink zone | inner radial zone |
-| `≥ ratio` | space zone | outer radial zone |
+`RATIO_PRESETS` (space:ink) are the only legal values:
 
-`TileItem.q` is a 2-bit quadrant:
+| preset | space | ink | `ratio` | meaning |
+| --- | --- | --- | --- | --- |
+| `1:1` | 0 | 1 | `1` | **space-less cell** — the ink fills the whole cell (the old app's «mono» grid) |
+| `1:2` | 1 | 2 | `2/3` | |
+| `1:3` | 1 | 3 | `3/4` | **default** (`DEFAULT_RATIO`) |
+| `1:4` | 1 | 4 | `4/5` | |
+| `1:5` | 1 | 5 | `5/6` | |
 
-* bit 0 (`1`) → **x / radial** axis is in the space zone
-* bit 1 (`2`) → **y / angular** axis is in the space zone
+* `MIN_RATIO` / `MAX_RATIO` are the numeric extremes of the presets (`2/3` /
+  `1`), not the first and last entries: the list is ordered by *label*, and the
+  space-less `1:1` is the densest cell.
+* The backend snaps anything else with `snapRatio` (nearest preset; non-finite →
+  `DEFAULT_RATIO`) and `ratioLabel` renders the preset the way designers write it.
+* At `ratio = 1` there is no inner edge: `zoneRect`/`circularSlice` give zone 0
+  the whole cell, `pointToAnchor` always returns zone 0, and `gridPaths` leaves
+  the inner (`inkLines`) family **empty** — it would land on the cell borders.
+* Ink is never the smaller part, so every legal ratio is `≥ 2/3`; a stored
+  `ratio: 0.5` (v1 files, old documents) snaps to `2/3` on read.
 
-So `q = 0` is the big ink-ink fragment, `q = 3` is the small
-space-space fragment. Ratios are named the way designers write them: `1:3` is
-the old app's “1/4 : 3/4” (`ratio = 0.75`) and `1:1` is “متساوية”
-(`ratio = 0.5`). Ink is never the smaller part, so `ratio ≥ 1/2`, and the
-backend snaps anything else to the nearest preset (`snapRatio`).
+### Zone rule
 
-The **zone rect** of a tile = intersection of the two chosen zones
-(square: a rect; circular: an annular sector).
+`Zone` is a 2-bit quadrant:
+
+* bit 0 (`1`) → the **x** (square) / **radial** (circular) axis is in the space zone
+* bit 1 (`2`) → the **y** (square) / **angular** (circular) axis is in the space zone
+
+So `zone = 0` is the main ink fragment (the old app's `isMainRect`), `zone = 3`
+is the small space-space fragment. A `TileItem` is one zone fragment; a `line`,
+`stroke` and `arc` always address **whole ink cells** (`Cell`, i.e. zone 0).
 
 ## 3. Items
 
-Defined in `convex/lib/model.ts` — `TileItem | LineItem | ArchItem`, each with a
-stable unique key `k` (`tileKey` / `lineKey` / `archKey`). Keys are the identity:
-adding an item whose key exists is a no-op (backend + engine both rely on this).
+The document is a list of `CanvasItem = TileItem | LineItem | StrokeItem | ArcItem`
+(`convex/lib/model.ts`), each with a stable `key`. **Keys are identity**: adding
+an item whose key already exists replaces it in place (paint-over, the old app's
+recolour behaviour), on the client (`paintItems`) and on the backend
+(`projects.applyOps`).
 
-* **Tile**: one zone fragment, optional `s` (shape, default `square`),
-  optional `c` (colour override), optional `r` (rotation, 0–3 quarter turns).
-* **Line**: straight run between two anchors.
-  * square: covers the inclusive cell run — cells `i1…i2` in row `j` when
-    `j1 === j2` (horizontal) or rows `j1…j2` in column `i` when `i1 === i2`
-    (vertical); full cell thickness (`base`).
-  * circular: annular sector covering bands `i1…i2` across sectors `j1…j2`
-    (shortest angular path, wrap-around allowed), full band thickness.
-* **Arch**: quarter-arc connector (قنطرة) between two anchors on the same
-  row/column. Square: arc from the first anchor's cell centre to the last
-  anchor's cell centre, `d = 0` bulges up, `d = 1` bulges down (SVG coords),
-  drawn as a **stroked** path with `stroke-width = ratio · base`.
-  Circular: an arc at the band mid-radius spanning the sectors, same stroke rule.
+| type | fields | key |
+| --- | --- | --- |
+| `tile` | `column`, `row`, `zone`, `shape?`, `rotation?`, `color?` | `tile:<column>:<row>:<zone>` |
+| `line` | `from`, `to` (`Cell`), `color?` | `line:<c>:<r>><c>:<r>` (cells canonical by column, then row) |
+| `stroke` | `points` (`Cell[]`), `closed?`, `color?` | `stroke:<digest>` (FNV-1a of the point list — a point list is unbounded, a key is not) |
+| `arc` | `from`, `to`, `direction`, `size`, `color?` | `arc:<c>:<r>><c>:<r>\|<direction>\|<size>` |
+
+* `shape` is one of the ten `ShapeId`s (`SHAPE_IDS`), absent = `square`;
+  `rotation` is quarter turns clockwise (`0…3`), absent = 0.
+* `color` is a **per-item** colour: it is always written when an item is created
+  (`resolvedColor(config, color) = color ?? config.ink`), so changing
+  `config.ink` later never repaints what is already on the board. Absent means
+  the item was authored before v2 or edited without a colour.
+* A `line` is an axis-aligned bar of ink: a legal `line` shares one row **or**
+  one column; a diagonal (or a 3+-point run) is a `stroke` polyline.
+  `Arc.isSupported` accepts the same row / column / 45° diagonal cases.
+
+### Item classes (`src/lib/canvas/items.ts`)
+
+The data model above is what is stored; in the engine every item is a **class**
+derived from the shared parent `KufiItem` (`Tile`, `Line`, `Stroke`, `Arc`),
+which owns the geometry for that item and nothing else:
+
+| member | meaning |
+| --- | --- |
+| `key` | the identity above, derived from the geometry in the constructor |
+| `type` | the discriminant (`"tile" \| "line" \| "stroke" \| "arc"`) |
+| `render(config)` | `Rendered = { path, mode: "fill" \| "stroke", width }` |
+| `bounds(config)` / `contains(config, point)` | hit-testing and marquee geometry |
+| `cellRange()` | the cell box the item occupies (move/duplicate maths) |
+| `moved(dColumn, dRow)` / `withColor(color)` | copy-on-write edits |
+| `toJSON()` | the stored `CanvasItem` (omits absent optional fields) |
+
+`parseItem(item)` / `itemOf(item)` map a stored item onto its class;
+`makeTile` / `makeLine` / `makeStroke` / `makeArc` are the factories the tools
+use, and `styleItem` / `colorItem` / `moveItem` are the pure edit helpers.
 
 ## 4. Engine module layout (`src/lib/canvas/`)
 
-Pure TypeScript, **no React, no DOM** (except `render.ts` returning strings).
-This is what makes it testable and reusable by the editor, the dashboard
-previews and export.
+Pure TypeScript, **no React, no DOM** (except `render.ts`, which returns strings).
+This is what makes it testable and reusable by the editor, the dashboard previews
+and export.
 
-| file | exports (minimum) |
+| file | exports |
 | --- | --- |
 | `model.ts` | re-export of `convex/lib/model.ts` |
-| `geometry.ts` | `zoneRect(config, i, j, q)`, `circularSlice(config, i, j, q)`, `shapePath(shape, rect, rotation)`, `tilePath(config, tile)`, `linePath(config, line)`, `archPath(config, arch)`, `itemPath(config, item)` |
-| `grid.ts` | `pointToAnchor(config, {x, y})` → `{ i, j, q }`, `pointToCell(config, {x, y})` → `{ i, j }`, `cellCenter(config, i, j)`, `isSameAxis(a, b)`, `runOf(cells)` → `{ axis, from, to }` |
-| `ops.ts` | `addItems(state, items)`, `removeItems(state, keys)`, `replaceItems(state, items)`, `toOps(...)` (diff → backend ops), `strokeToItems(config, anchors, opts)` (pen stroke → tiles **or** one merged line when `config.mergeLines` and the run is straight) |
-| `render.ts` | `renderSvg(config, items, opts?)` → standalone SVG **string** (used for thumbnails + export), `renderThumbnail(config, items)` → compact string (≤ 24 000 chars) |
+| `geometry.ts` | `Point`, `Rect`, frames (`baseFrame`, `quarterTurnFrame`, `composeFrames`, `mapCommands`), `zoneRect`, `cellRect`, `circularSlice`, `sectorPath`, `slicePath`, `inkUnit`, `arcCentre`, `distanceToSegment/Polyline/Arc`, rect helpers (`boundsOfPoints`, `expandRect`, `rectContains`, `rectsIntersect`, `unionRect`) |
+| `grid.ts` | `pointToCell`, `pointToAnchor` → `Anchor`, `anchorToCell`, `cellCentre`, `isSameAxis`, `runOf(cells)` → `Run`, `cellsBetween`, `gridPaths` → `{ cellBorders, inkLines }`, `anchorPath` |
+| `shapes.ts` | `KufiShape` + the ten shapes (`shapeById`, `shapeLabel`, `shapePath`, `shapeOrderIndex`, `SHAPE_ORDER`); the **same** renderer draws the canvas fragment and the toolbar icon (`tileIconPath`) |
+| `items.ts` | the item classes and factories above, `itemRender`, `itemColor`, `itemBounds`, `itemContains`, `itemCellRange`, `tileIconPath`, `itemsBounds`, `itemIntersectsRect` |
+| `ops.ts` | `addItems`, `removeItems`, `paintItems`, `replaceItems`, `toOps(prev, next)` → backend batch, `penItems`, `lineItems` |
+| `render.ts` | `renderSvg(config, items, opts?)` → standalone SVG **string**, `renderThumbnail(config, items)` → compact string |
 
-Every function must be deterministic and side-effect free.
+Every function is deterministic and side-effect free.
 
-### Shape geometry (fallback definitions)
+### Gesture → items
 
-For a zone rect `R = {x, y, w, h}` and `rotation` quarter turns clockwise around
-the rect centre. Filled paths unless noted. Port the *look* from
-`docs/reference/old-square-kufi.js` where possible; these definitions apply when
-the reference is ambiguous:
-
-* `square` — the full rect.
-* `circle` — ellipse inscribed in `R` (`rx = w/2`, `ry = h/2`).
-* `triangle` — isosceles triangle, apex at top-centre: `(x, y+h)`, `(x+w/2, y)`, `(x+w, y+h)`.
-* `quadrant` — quarter ellipse centred at the rect's *bottom-left* corner: from `(x, y)` arc (`rx=w`, `ry=h`) to `(x+w, y+h)`, closed via the centre.
-* `semicircle` — upper half ellipse: flat edge on the bottom edge, centre `(x+w/2, y+h)`, `rx = w/2`, `ry = h`.
-* `hexagon` — flat-top hexagon: `(x, y+h/2)`, `(x+w/4, y)`, `(x+3w/4, y)`, `(x+w, y+h/2)`, `(x+3w/4, y+h)`, `(x+w/4, y+h)`.
-* `arc` — quarter-arc band from `(x, y+h)` to `(x+w, y)` with elliptical radii `(w, h)` (bulging outward), closed back along the corner; port exact sweep from the reference.
-* `hamza1` / `hamza2` — the two hamza fragments from the reference file (a hook shape and its variant). Reproduce them as filled paths inside `R`; `rotation` covers the mirrored orientations.
-
-### Stroke → items (pen tool)
-
-1. Pointer-move collects anchors `{i, j, q}` (`pointToAnchor`).
-2. Consecutive **identical** anchors collapse.
-3. On stroke end `strokeToItems` returns:
-   * one `LineItem` when `config.mergeLines` **and** all anchors share one
-     row or one column **and** all `q` are in the same axis zone
-     (the old app's “merge squares to lines” behaviour), **or**
-   * one `TileItem` per anchor otherwise.
-4. The resulting items are sent as a single `applyOps` `add` batch.
+* **`penItems(config, anchors, style)`** — the pen paints **exactly the anchors
+  the pointer crossed**: the tool calls it with the in-flight anchor list, which
+  grows one anchor at a time (see §6). Consecutive identical anchors collapse,
+  and `config.mergeLines` (default on) folds a **contiguous** straight run of
+  full-ink anchors (`zone === 0`, square grid) into a single `line` item — the
+  same picture the reference app produced as a run of fragments, at a fraction
+  of the storage.
+* **`lineItems(config, points, closed, color)`** — two points on one axis, open →
+  one `line` bar; anything else (diagonal, or 3+ points) → one `stroke`
+  polyline; `closed` adds the closing segment. `dedupeCells` drops immediate
+  repeats (and the closing repeat).
+* **`toOps(prev, next)`** — diffs two item lists into the backend batch
+  (`remove` + `add`) around the longest common *content* prefix, so a stroke
+  re-sends only the tail it touched, never the whole board.
 
 ## 5. Rendering contract
 
-* Every item renders as one SVG element: `<path d={itemPath(config, item)} fill={item.c ?? config.ink}>`
-  except arches (`fill="none"`, `stroke={c ?? ink}`, `stroke-width={ratio·base}`).
-* Tile shapes are filled; the SVG has no strokes on tiles.
+* Every item renders through its class: `item.render(config)` →
+  `{ path, mode, width }`.
+  * `mode: "fill"` → `<path d fill={itemColor}>` (tiles, straight lines on the
+    square grid, circular lines).
+  * `mode: "stroke"` → `<path d fill="none" stroke={itemColor}
+    stroke-width={width}>` (polylines, arcs, diagonal `line` fallbacks, circular
+    arcs) with `width = inkUnit(config)`.
+* **Butt caps and mitre joins** — a rib ends flush with the ink edge, exactly
+  like the reference app. No `stroke-linecap="round"` anywhere in artwork.
+* `itemColor(config, item)` = `item.color ?? config.ink`.
 * `config.background` paints the SVG background (`transparent` → no rect).
-* `config.showGrid` draws construction lines (light, subtle) **only in the
-  editor**, never in thumbnails/exports.
-* Thumbnails: `renderThumbnail` renders at `viewBox="0 0 1000 1000"` without grid,
-  with a fixed light background; must stay ≤ 24 000 characters — reduce
-  precision (`crypto`-free `toFixed(1)`) and skip the `k`/metadata attributes.
+* `config.showGrid` draws the two-family construction grid (`gridPaths`), and
+  **only in the editor** — never in thumbnails/exports:
+  * `cellBorders` — whole-cell borders and the circular spokes/rings, opacity
+    `0.28`;
+  * `inkLines` — the inner edges that close each ink square (the ones that show
+    «قلم / فراغ»), opacity `0.55`, empty at `ratio = 1`.
+* Thumbnails: `renderThumbnail` renders at `viewBox="0 0 1000 1000"` without the
+  grid, with a fixed light background, reduced precision and no key attributes;
+  it must stay ≤ `MAX_THUMBNAIL_LENGTH` characters.
 
-## 6. Resolved decisions (engine, wave 1)
+### Arc (قوس) geometry
 
-Where the reference apps were incomplete or silent, the engine fixed the
-following — the editor/export must not contradict them:
+An `Arc` is a rib between two ink cells on the same row, the same column or a 45°
+diagonal (`Arc.isSupported`). It is ported from the reference app
+(`kufi.js` lines 285‑311 and its `radius()`), but derived from a **canonical**
+cell order (`from` is the lower cell by column, then row) so the picture no
+longer depends on which anchor was clicked first; the reference app's
+click-order quirk became the explicit `direction` control
+(`clockwise` / `counterclockwise`, literally the SVG sweep flag 1 / 0).
 
-* `hamza1` / `hamza2`: a hook and its mirror, band thickness `min(w,h)/3`
-  (the old app had no hamza path to port).
-* `arc`: band thickness `min(w,h)/2`, bulging outward.
-* `arch` on the square grid: `d = 0` bulges up when horizontal and to the
-  **left** when vertical (consistency choice); circular arches ignore `d`.
+* **Horizontal chord** (`from.row === to.row`): `clockwise` springs off the ink's
+  **bottom** edge and rises, `counterclockwise` off the **top** edge and falls;
+  the ends sit at the ink centre line (`half = ink/2`).
+* **Vertical chord** (`from.column === to.column`): `clockwise` springs off the
+  **left** edge and turns right, `counterclockwise` off the **right** edge.
+* **45° diagonal**: the four spring points are the two ink corners that face the
+  chord, chosen by the sweep.
+* `size: "half"` → a semicircle over the chord: radius `chord/2` (or
+  `dColumn·base + ink/2` on a diagonal), `largeArc = 0`.
+* `size: "threeQuarter"` → 270°: radius `chord/√2`, `largeArc = 1`.
+* On the circular grid the arc runs at the mean radius between the two bands,
+  spanning the sectors from `from.row` to `to.row` along the shortest angular
+  path, with the same sweep-flag meaning.
+
+## 6. Tools (`src/components/editor/tools.ts`)
+
+One **class per tool**, all derived from `KufiTool`, each declaring its own
+identity next to its behaviour and appended to the `REGISTRY` list. The rail,
+the shortcuts and the controller read the registry; nothing switches on a tool
+name. Adding a tool = one class + one registry line.
+
+| id | label | key | gesture |
+| --- | --- | --- | --- |
+| `select` | تحديد | `V` | click selects (shift toggles), drag on an item moves the selection (clamped to the grid), drag on empty space marquee-selects |
+| `pen` | قلم | `P` | press/drag paints fragments along the pointer path |
+| `line` | خط | `L` | click sequence: click A, click B… commits an open run; click the last point again ends it, click the first one closes it. A drag also works (pointer-up ends the *drag*, not the run) |
+| `eraser` | ممحاة | `E` | click/drag removes whatever the pointer touches |
+| `arc` | قوس | `A` | press-drag-release A→B, **or** click A then click B (clicking A again cancels) |
+
+* `KufiTool.persistent` — a tool whose in-flight state survives pointer-up
+  (`line`, `arc`); the others commit on pointer-up.
+* `ToolState` is the in-flight gesture (`pen`, `erase`, `arc`, `line`, `marquee`,
+  `move`, `none`); `ToolPreview` (below) is what the overlay paints.
+
+### Pen rules (the “only what I moved on” contract)
+
+1. A move adds **only** the anchors between the stroke's **last** anchor and the
+   new one, excluding the last (`anchorsBetween(last, anchor).slice(1)`).
+2. A gap longer than `MAX_PEN_GAP` (8 anchors) is a teleport: only the anchor it
+   landed on joins the stroke. A circling pointer can never paint a swath it
+   never crossed.
+3. Anchors are deduplicated by identity (`anchorKey` = column/row/zone), so a
+   fragment is never drawn twice in one stroke.
+4. Nothing is previewed before the pointer touches the canvas (no hover ghost):
+   the pen has no pending state, and the in-flight fragments are the real items.
+
+### Preview
+
+`ToolPreview = { items, mode: "solid" | "ghost", keys, marquee, marker }`:
+
+* `items` — the pending items (the pen's real fragments, ghosted), `keys` — the
+  items to ring (the eraser's sweep), `marquee` — the select box.
+* `marker: Anchor | null` — the armed start cell of a click sequence sized
+  through `anchorPath(config, anchor)`: the arc/line tool's first click stays
+  visible until it commits. The overlay paints it as a filled highlight with no
+  border.
+
+## 7. Resolved decisions (engine)
+
+* `pentagon` is the old `semi-hexagone` (a typo *and* a misnomer: the glyph is a
+  house-shaped pentagon); `curve` is the old shape `arc` (renamed so it cannot be
+  confused with the `arc` tool); `comb` is the old untitled tenth entry.
+* Shape ids other than `square` are never stored as `"square"` — `square` is the
+  absence of `shape`.
+* `hamza1` / `hamza2` band thickness `min(w, h)/3`; `curve` (old `arc`) band
+  thickness `min(w, h)/2`, bulging outward — the palette glyphs are the
+  specification (the old `getPathForShape` only ever drew squares).
 * Non-square shapes on a circular grid are fitted into the slice frame with the
   local `+x` axis pointing outward along the radius.
-* `zoneRect` is square-grid only; circular tiles use `circularSlice` /
-  `sectorPath`.
-* A `LineItem` that is diagonal (invalid by the model) falls back to its
-  bounding-box rect instead of throwing — the editor must prevent creating one.
+* A `LineItem` that is diagonal (invalid by the model) falls back to a stroked
+  segment between the two cell centres instead of throwing — the editor must
+  prevent creating one.
+* The pen paints **over** what is already there: same key → replaced in place,
+  which is how recolouring a fragment works.
 
-## 7. Quick start for consumers
+## 8. Quick start for consumers
 
 ```ts
-import { itemPath, renderSvg, renderThumbnail } from "@/lib/canvas/geometry";
+import { itemOf, itemRender } from "@/lib/canvas/items";
+import { renderSvg, renderThumbnail } from "@/lib/canvas/render";
 import { pointToAnchor } from "@/lib/canvas/grid";
-import { strokeToItems, toOps } from "@/lib/canvas/ops";
+import { penItems, toOps } from "@/lib/canvas/ops";
 
-// editor: pointer → anchor → items → backend batch
+// editor: pointer → anchors → items → backend batch
 const anchor = pointToAnchor(config, viewBoxPoint);
-const ops = toOps({ items: [...current, ...strokeToItems(config, anchors, { mergeLines: config.mergeLines })], previous: current });
+const painted = penItems(config, [...strokeAnchors, anchor], { shape, rotation, color });
+const ops = toOps(current, paintItems({ items: current }, painted).items);
 await applyOps({ projectId, ops });
 
 // dashboard/export: SVG string
 const svg = renderThumbnail(config, items);   // ≤ 24 000 chars
-const full = renderSvg(config, items, { grid: config.showGrid });
+const full = renderSvg(config, items, { showGrid: config.showGrid });
 ```
 
+## 9. Test coverage
 
-## 8. Test coverage (engine, wave 1)
-
-The suite (`bun run test`, 68 tests) covers:
-
-* zone rects for all 4 `q` values at `ratio` 0.5 and 0.75.
-* circular slice math incl. wrap-around sectors (e.g. `j=35` → `j=0`).
-* `pointToAnchor` round-trips with `zoneRect` (click inside a zone rect → same anchor).
-* merge behaviour: straight run → 1 line; L-shaped run → N tiles; `mergeLines:false` → N tiles.
-* `renderSvg` output parses as XML and contains one element per item.
-* runs with `bun run test` (vitest, environment `node`).
+The engine suite (`bun run test`) covers, file by file: `geometry.test.ts`
+(frames, zone rects, slices, arc centres), `grid.test.ts` (addressing,
+round-trips, two-family grid paths, the space-less `1:1` case), `items.test.ts`
+(item classes, keys, geometry, hit-testing), `ops.test.ts` (add/remove/paint/
+replace, `toOps`, pen/line items), `model.test.ts` (presets, snapping, keys,
+signatures), `render.test.ts` (markup, thumbnail budget), `kuficraft-file.test.ts`
+(v2 round-trip + v1 upgrade), plus the backend `convex/**/*.test.ts` suites and
+the editor's `tools.test.ts` / `interaction.test.ts`.

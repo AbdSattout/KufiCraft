@@ -48,10 +48,12 @@ touches documents whose `userId === identity.subject`:
   only ever fail with a raw system error.)
 * `MAX_NAME_LENGTH = 120`,
   `MAX_THUMBNAIL_LENGTH = 24_000`, `MAX_COLOR_LENGTH = 32` (ink/background and
-  an item's `c` are CSS strings and are **truncated**, not rejected),
-  `MAX_KEY_LENGTH = 64` (an item's `k` is **rejected** with the Arabic error
-  when longer — truncating a key would silently merge distinct items),
-  `ratio` is one of `RATIO_PRESETS` (`1:1` … `1:5`), `base ∈ [4, 100]`.
+  an item's `color` are CSS strings and are **truncated**, not rejected),
+  `MAX_KEY_LENGTH = 64` (an item's `key` is **rejected** with the Arabic error
+  when longer — truncating a key would silently merge distinct items; the
+  longest generated key is an arc's, 48 characters),
+  `ratio` is one of `RATIO_PRESETS` (`1:1` … `1:5`, where `1:1` is the
+  space-less cell — `docs/CANVAS.md` §2), `base ∈ [4, 100]`.
 * `list` is a bounded scan: `.take(LIST_LIMIT)` with `LIST_LIMIT = 100`
   (newest first). `items` live in the same document as the summary, so Convex
   reads the full document — including every item — just to project the summary.
@@ -61,15 +63,23 @@ touches documents whose `userId === identity.subject`:
 * **Write sanitisation** (`sanitizeItem` / `sanitizeConfig` in
   `convex/projects.ts`) runs on every write path, so a document stored under an
   older contract is normalised (repaired) the next time it is written:
-  * item coordinates (`i`/`j`, `i1`/`j1`/`i2`/`j2`) are made finite, integer
+  * item keys are **re-derived from the geometry** (`tileKey`, `lineKey`,
+    `strokeKey`, `arcKey`), so a client cannot store a non-canonical key, and an
+    item whose `key` disagrees with its coordinates lands under the canonical one.
+  * item coordinates (tile `column`/`row`, line/arc `from`/`to`,
+    stroke `points`) are made finite, integer
     (`Math.trunc`) and clamped to `0 … maxGridIndex(base)`
     (`= floor(VIEWBOX_SIZE / base)`, at most `VIEWBOX_SIZE / 4 = 250` for
-    `base = 4`). On a circular grid the sector axis (`j`/`j1`/`j2`) is capped at
+    `base = 4`). On a circular grid the sector axis
+    (tile `row`, line/arc `to.row`, stroke point `row`) is capped at
     `CIRCULAR_SECTORS - 1 = 35`. `NaN` → `0`, `+Infinity` → the bound it points
     at (a bare `Math.min/max` propagates `NaN` and would store a non-value).
-  * an item colour `c` is sliced to `MAX_COLOR_LENGTH`.
+  * an item colour is sliced to `MAX_COLOR_LENGTH`.
+  * an item that does not match a v2 type is **dropped** (never stored): an
+    unknown discriminant, a degenerate arc (`from` and `to` on the same cell) or
+    a stroke with fewer than two points returns `null` and is skipped.
   * the `ratio` in `config` is snapped to the nearest `RATIO_PRESETS` entry
-    (`snapRatio`; `NaN` → `DEFAULT_RATIO`).
+    (`snapRatio`; `NaN` → `DEFAULT_RATIO`; a v1 `0.5` → `2/3`).
 * `duplicate` reserves room for the `" (نسخة)"` suffix before truncating the
   base name, so a name at the cap never loses the suffix.
 * `updateThumbnail` deliberately does **not** bump `updatedAt` — thumbnails are
@@ -95,3 +105,15 @@ bunx tsc --noEmit          # always green before committing
 
 `convex/_generated` **is committed** so other checkouts/agents typecheck without
 deploy access. Never edit it by hand.
+
+> **A model change without a push breaks the app silently.** The deployment
+> validates stored documents against the *deployed* validators; when the
+> deployment is older than the client, new-format fields look invalid, queries
+> return documents with those fields missing/empty and every write is rejected —
+> the editor appears to “save then revert”. After touching
+> `convex/lib/model.ts`, `convex/schema.ts` or `convex/projects.ts`, push with
+> `bunx convex dev --once` (or keep `bunx convex dev` running) and verify:
+>
+> ```bash
+> bunx convex function-spec | grep -c '"column"'   # > 0 on a v2 deployment
+> ```
