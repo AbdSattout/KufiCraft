@@ -68,7 +68,7 @@ see `docs/CANVAS.md` §6 for the contract.
 | tool | key | behaviour |
 | --- | --- | --- |
 | تحديد (select) | `V` | click selects (shift toggles), drag on an item moves the selection, drag on empty space marquee-selects |
-| قلم (pen) | `P` | press/drag paints the fragments the pointer crosses; nothing is previewed before the pointer touches the canvas; a straight run of ink squares merges into one line when `mergeLines` |
+| قلم (pen) | `P` | press/drag colours the cells the pointer is moved over — one fragment per pointer position, nothing drawn in between, nothing merged |
 | خط (line) | `L` | click sequence: click A, click B… commits an open run; click the last point again to end it, click the first one to close it; a drag works too |
 | ممحاة (eraser) | `E` | click/drag removes whatever the pointer touches (the swept items ring as a ghost) |
 | قوس (arc) | `A` | press-drag-release A→B, or click A then click B; the armed start cell stays highlighted until it commits, and clicking A again cancels |
@@ -95,7 +95,12 @@ then the board — نسبة الحبر as the five presets `1:1`…`1:5` (live r
 edges), حجم الخلية (`base`), نوع الشبكة (square/circular — switching warns that
 existing items may look odd; the hint explains what each type is), خيارات اللوحة
 (إظهار الشبكة — two families: cell borders plus the stronger inner ink edges —
-and دمج الخطوط) — and مسح الكل at the end (confirm).
+and الخط المستقيم مربّعات) — and مسح الكل at the end (confirm).
+
+خيارات اللوحة is the line tool's shape: **الخط المستقيم مربّعات** (default on)
+draws a run with no diagonal segment as one square per cell — the reference
+app's straight line; off, that run is a single solid `line` bar. It never
+affects what is already drawn.
 
 There is exactly **one** colour control for drawing: لون الحبر is the project's
 ink *and* the pen's colour. لون الورقة next to it is the board's background.
@@ -129,8 +134,9 @@ Settings persistence (localStorage, per browser, no server round-trip):
   rendering; UI prefs only decide the toolbar defaults and tool behaviour.
 * `kuficraft.last-config.v1` — the last committed project config, used as the
   default in the dashboard’s «لوحة جديدة» dialog and for new projects. The
-  document settings — grid, merged lines and the ink ratio — are remembered
-  here rather than in the prefs, because they belong to the project.
+  document settings — grid, the straight-lines-as-squares flag and the ink ratio
+  — are remembered here rather than in the prefs, because they belong to the
+  project.
 * Both keys are versioned and validated on read (corrupt/stale values fall back
   to model defaults, never throw).
 
@@ -145,9 +151,9 @@ from the UI.
 
 Marketing page for a craft tool: hero with **live kufi artwork rendered by the
 canvas engine** (static SVG string, no interaction), one-line value prop,
-“كيف يعمل” 3 steps, feature grid (شبكة مربعة ودائرية، نسب قابلة للتخصيص، دمج
-تلقائي، تصدير SVG/PNG), gallery strip, footer with GitHub link and a CTA to
-`/signup` + `/app`. Follow the `design-taste-frontend` skill: researched
+“كيف يعمل” 3 steps, feature grid (شبكة مربعة ودائرية، نسب قابلة للتخصيص، حفظ
+تلقائي ومزامنة فورية، تصدير SVG/PNG), gallery strip, footer with GitHub link and
+a CTA to `/signup` + `/app`. Follow the `design-taste-frontend` skill: researched
 composition, no generic template look, real typography scale, Arabic-first
 layout (numbers/Latin inline as needed).
 

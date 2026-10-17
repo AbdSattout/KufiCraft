@@ -23,7 +23,7 @@ touches documents whose `userId === identity.subject`:
 | function | args | returns |
 | --- | --- | --- |
 | `list` | — | summaries (no `items`), newest first, capped at `LIST_LIMIT` documents |
-| `get` | `{ projectId }` | full doc, or `null` if not found/not owner |
+| `get` | `{ projectId }` | full doc with a repaired `config` (`sanitizeConfig`), or `null` if not found/not owner |
 | `create` | `{ name, config }` | new id |
 | `rename` | `{ projectId, name }` | — |
 | `remove` | `{ projectId }` | — |
@@ -80,6 +80,13 @@ touches documents whose `userId === identity.subject`:
     a stroke with fewer than two points returns `null` and is skipped.
   * the `ratio` in `config` is snapped to the nearest `RATIO_PRESETS` entry
     (`snapRatio`; `NaN` → `DEFAULT_RATIO`; a v1 `0.5` → `2/3`).
+  * `config` is rebuilt field by field on every read and write
+    (`sanitizeConfig`). A field added later is `v.optional()` in the validator
+    and defaults in the sanitiser, so a document written before it existed still
+    validates and is repaired on read and on its next write. The removed
+    `mergeLines` flag stays in the validator as `v.optional()` for exactly that
+    reason and is dropped by the sanitiser.
+    Asserted by `convex/projects.test.ts`.
 * `duplicate` reserves room for the `" (نسخة)"` suffix before truncating the
   base name, so a name at the cap never loses the suffix.
 * `updateThumbnail` deliberately does **not** bump `updatedAt` — thumbnails are

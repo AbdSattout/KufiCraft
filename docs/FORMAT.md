@@ -52,7 +52,8 @@ apps never had (see “Legacy” below).
   3. `config` is sanitized and clamped with the same semantics as the backend
      (`sanitizeConfig`: `ratio` snapped to the nearest `RATIO_PRESETS` value —
      so a v1 `0.5` becomes `2/3` —, `base ∈ [4, 100]`,
-     `gridType ∈ {square, circular}`, unknown fields dropped);
+     `gridType ∈ {square, circular}`, unknown and legacy fields dropped — a file
+     written before `straightLinesAsSquares` existed takes its default);
   4. `items` are structurally validated against the model (type discriminants
      `tile`/`line`/`stroke`/`arc`, a non-empty string key, finite integer
      coordinates inside the grid), key-deduped, and re-keyed from their geometry

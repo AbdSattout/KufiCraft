@@ -43,8 +43,8 @@ backend) · Better Auth (passkeys, local-install component) · Bun · vitest.
 **Wave 2.5 — done and merged into `main`** (`t3/a2267529`)
 
 * Editor preferences + `last-config` in browser storage
-  (`src/lib/editor-prefs.ts`); document settings (grid, merge, ratio) stay in the
-  document and `last-config`, never in the prefs.
+  (`src/lib/editor-prefs.ts`); document settings (grid, line shape, ratio) stay in
+  the document and `last-config`, never in the prefs.
 * `.kuficraft` v1 export/import (`src/lib/kuficraft-file.ts`, `docs/FORMAT.md`)
   with a dashboard button and drag-and-drop import.
 * Ratio presets 1:1 … 1:5 in the editor settings panel and the new-project
@@ -77,11 +77,12 @@ backend) · Better Auth (passkeys, local-install component) · Bun · vitest.
   the rail icons, labels and shortcuts read from the classes — no `switch (tool)`.
   Shape ids were renamed (`semi-hexagone` → `pentagon`, `arc` → `curve`, the
   untitled tenth → `comb`).
-* Pen paints **only the anchors the pointer crossed** (gap fill between the last
-  anchor and the new one, `MAX_PEN_GAP = 8` for a teleport, identity dedup, no
-  hover preview). Line and arc take **click-click as well as drag**; both show
-  the armed start cell as a filled highlight. Arc geometry was ported from
-  `kufi.js` and now exposes direction + size controls with butt/mitre heads.
+* Pen colours **exactly the cells the pointer is moved over** — one fragment per
+  pointer position, nothing interpolated between positions and nothing merged;
+  identity dedup and no hover preview (see the follow-up below). Line and arc
+  take **click-click as well as drag**; both show the armed start cell as a
+  filled highlight. Arc geometry was ported from `kufi.js` and now exposes
+  direction + size controls with butt/mitre heads.
 * Colour is **per fragment** (`resolvedColor`), so changing the document ink
   never repaints what is already drawn; the toolbar shape icons respect rotation.
 * The sidebar was reorganised: **one** colour control (`لون الحبر` is the pen's
@@ -98,6 +99,16 @@ backend) · Better Auth (passkeys, local-install component) · Bun · vitest.
 * `.kuficraft` is **format v2** (still reads v1; `docs/FORMAT.md`), the backend
   validators/sanitisers follow (`docs/BACKEND.md`), and the docs were rewritten
   in the same branch.
+* **Follow-up (live testing):** the pen lost its gap fill and the merge feature
+  went with it. `config.mergeLines` is **gone**, replaced by
+  `config.straightLinesAsSquares` (sidebar toggle under خيارات اللوحة, default
+  **on**): the line tool draws a run with no diagonal segment as one square per
+  cell — the reference app's straight line — or as a single solid bar when it is
+  off. The pen never merges: what the overlay previews is what the pointer
+  touched, cell by cell. `anchorsBetween` and `MAX_PEN_GAP` were deleted. The
+  backend tolerates documents that still carry `mergeLines`: the validator keeps
+  the field `v.optional()` and `sanitizeConfig` repairs the document on read
+  (`get`) and on its next write.
 
 | wave | work | who |
 | --- | --- | --- |

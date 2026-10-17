@@ -127,15 +127,17 @@ Every function is deterministic and side-effect free.
 
 * **`penItems(config, anchors, style)`** — the pen paints **exactly the anchors
   the pointer crossed**: the tool calls it with the in-flight anchor list, which
-  grows one anchor at a time (see §6). Consecutive identical anchors collapse,
-  and `config.mergeLines` (default on) folds a **contiguous** straight run of
-  full-ink anchors (`zone === 0`, square grid) into a single `line` item — the
-  same picture the reference app produced as a run of fragments, at a fraction
-  of the storage.
-* **`lineItems(config, points, closed, color)`** — two points on one axis, open →
-  one `line` bar; anything else (diagonal, or 3+ points) → one `stroke`
+  grows one anchor per pointer position (see §6). Consecutive identical anchors
+  collapse, and a fragment is always a `tile` — the pen never merges a straight
+  run into a bar.
+* **`lineItems(config, points, closed, color)`** — a run with **no diagonal
+  segment** is either one `line` bar in a single span, or — when
+  `config.straightLinesAsSquares` is on (default) — one square per cell along
+  every segment, which is what the reference app's straight line produced.
+  Anything with a diagonal (including a closing segment) → one `stroke`
   polyline; `closed` adds the closing segment. `dedupeCells` drops immediate
-  repeats (and the closing repeat).
+  repeats (and the closing repeat), and a closed tiled run paints the first cell
+  once.
 * **`toOps(prev, next)`** — diffs two item lists into the backend batch
   (`remove` + `add`) around the longest common *content* prefix, so a stroke
   re-sends only the tail it touched, never the whole board.
@@ -197,8 +199,8 @@ name. Adding a tool = one class + one registry line.
 | id | label | key | gesture |
 | --- | --- | --- | --- |
 | `select` | تحديد | `V` | click selects (shift toggles), drag on an item moves the selection (clamped to the grid), drag on empty space marquee-selects |
-| `pen` | قلم | `P` | press/drag paints fragments along the pointer path |
-| `line` | خط | `L` | click sequence: click A, click B… commits an open run; click the last point again ends it, click the first one closes it. A drag also works (pointer-up ends the *drag*, not the run) |
+| `pen` | قلم | `P` | press/drag colours the cells the pointer is moved over — one fragment per pointer position, nothing in between |
+| `line` | خط | `L` | click sequence: click A, click B… commits an open run; click the last point again ends it, click the first one closes it. A drag also works (pointer-up ends the *drag*, not the run). A run with no diagonal segment is squares (`straightLinesAsSquares`, default) or one bar |
 | `eraser` | ممحاة | `E` | click/drag removes whatever the pointer touches |
 | `arc` | قوس | `A` | press-drag-release A→B, **or** click A then click B (clicking A again cancels) |
 
@@ -209,15 +211,16 @@ name. Adding a tool = one class + one registry line.
 
 ### Pen rules (the “only what I moved on” contract)
 
-1. A move adds **only** the anchors between the stroke's **last** anchor and the
-   new one, excluding the last (`anchorsBetween(last, anchor).slice(1)`).
-2. A gap longer than `MAX_PEN_GAP` (8 anchors) is a teleport: only the anchor it
-   landed on joins the stroke. A circling pointer can never paint a swath it
-   never crossed.
+1. Every pointer position paints **the one cell under the pointer** (its ink or
+   space fragment, `anchorAt`) — exactly the reference app's pen.
+2. **Nothing is painted between two positions.** A fast flick leaves the cells the
+   browser never reported blank; there is no Bresenham fill and no teleport
+   rule. `docs/PLAN.md` records the round that removed them.
 3. Anchors are deduplicated by identity (`anchorKey` = column/row/zone), so a
-   fragment is never drawn twice in one stroke.
+   fragment is never listed twice in one stroke.
 4. Nothing is previewed before the pointer touches the canvas (no hover ghost):
    the pen has no pending state, and the in-flight fragments are the real items.
+5. Nothing merges: a straight run stays a row of `tile` fragments, never a bar.
 
 ### Preview
 
