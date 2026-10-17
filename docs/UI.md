@@ -5,14 +5,21 @@
 | route | access | screen |
 | --- | --- | --- |
 | `/` | public | the **boards** for a visitor with a session; the landing for everyone else (served from `/welcome` by a rewrite, so `/` stays the landing's address) |
-| `/welcome` | public | the landing's own route — what `/` is rewritten to |
+| `/welcome` | public | the landing's own route — what `/` is rewritten to, and a redirect back to `/`, so it is never the URL anyone sees |
 | `/<projectId>` | auth | a board: the editor, one segment under the boards |
 | `/account` | auth | “الحساب والأمان”: the account name (the passkey's) and sign out |
 
 There is **no sign-in route**: the passkey ceremony is a dialog owned by the
 landing (`src/components/auth/sign-in-dialog.tsx`), opened by every CTA and by
-`/?signin=1`. `/signin`, `/signup`, `/app` and `/app/<id>` are redirects to
-their replacements now, so old links and bookmarks still land somewhere real.
+`/?signin=1`. `/signin` and `/signup` are redirects to that flag now, so the
+addresses the sign-in card used to have still land somewhere real.
+
+`/` is one URL, so it renders one of the two pages; the other needs an address
+of its own to live at — the landing keeps its own route, and the proxy picks
+between them. That route redirects to `/` and nothing links to it, so `/` is
+the only address either page is ever reached by. (The alternative — the boards
+at `/boards` — would put a board at `/boards/<id>`, and the boards are the
+root.)
 
 Route groups: `src/app/(marketing)/` (the landing, at `/welcome`) and
 `src/app/(auth)/` (`/account`). The boards (`src/app/page.tsx`) and a board
@@ -28,6 +35,8 @@ Auth session cookie — no validation round-trip — and the rules live in
 * `/` with a session is the boards; without one it is **rewritten** to the
   landing, so the address bar keeps `/` (the landing's canonical URL) and both
   pages stay statically prerendered;
+* the landing's own address redirects to `/` for everyone, so the landing is
+  only ever reached at `/`;
 * `/?signin=1` is the landing **whatever the cookie says**: it is the fallback
   the client guard navigates to, and a fallback that can bounce back to the
   boards is an endless loop;
@@ -35,7 +44,8 @@ Auth session cookie — no validation round-trip — and the rules live in
   `/?signin=1` — the landing with the dialog already open — instead of painting
   a skeleton and fixing it up on the client (the client guards stay as a safety
   net for a session that expires mid-visit);
-* `/app`, `/app/<id>`, `/signin` and `/signup` are redirects for old links.
+* `/signin` and `/signup` are redirects for the addresses the sign-in card had
+  before it became a dialog.
 
 The wrinkle worth remembering: `/` is bounced on the cookie while the client
 guard's own target is `/?signin=1`. A *stale* cookie — one the proxy still

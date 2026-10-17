@@ -23,9 +23,15 @@ describe("guardRoute", () => {
     });
   });
 
-  it("serves the landing at its own address for anyone", () => {
-    expect(guardRoute("/welcome", true)).toEqual({ action: "next" });
-    expect(guardRoute("/welcome", false)).toEqual({ action: "next" });
+  it("sends the landing's own address back to `/`, cookie or not", () => {
+    expect(guardRoute("/welcome", true)).toEqual({
+      action: "redirect",
+      to: "/",
+    });
+    expect(guardRoute("/welcome", false)).toEqual({
+      action: "redirect",
+      to: "/",
+    });
   });
 
   it.each(["/account", "/j57195vyzfcckg0dv469vz6bzs8ge42s"])(
@@ -49,12 +55,16 @@ describe("guardRoute", () => {
     expect(guardRoute("/NotAnId", false)).toEqual({ action: "next" });
   });
 
-  it("redirects the old addresses to their replacements", () => {
-    expect(guardRoute("/app", true)).toEqual({ action: "redirect", to: "/" });
-    expect(guardRoute("/app", false)).toEqual({ action: "redirect", to: "/" });
-    expect(guardRoute("/app/j57195vyzfcckg0dv469vz6bzs8ge42s", true)).toEqual({
+  it("has no rule for the old `/app` addresses — they are just paths now", () => {
+    // `/app` looks like a board id, so it lands on the same screens a bad board
+    // link does; `/app/<id>` no longer exists at all.
+    expect(guardRoute("/app", false)).toEqual({
       action: "redirect",
-      to: "/j57195vyzfcckg0dv469vz6bzs8ge42s",
+      to: "/?signin=1",
+    });
+    expect(guardRoute("/app", true)).toEqual({ action: "next" });
+    expect(guardRoute("/app/j57195vyzfcckg0dv469vz6bzs8ge42s", true)).toEqual({
+      action: "next",
     });
   });
 

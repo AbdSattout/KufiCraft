@@ -178,19 +178,16 @@ function StateScreen({
 
 export function EditorScreen() {
   const params = useParams<{ projectId?: string | string[] }>();
-  const {
-    isAuthenticated,
-    isLoading: authLoading,
-    unavailable,
-    retry,
-  } = useRequireAuth();
+  const gate = useRequireAuth();
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const routeParam = params.projectId;
   const projectId =
     typeof routeParam === "string" ? routeParam : (routeParam?.[0] ?? null);
 
-  const editor = useEditor(projectId, !authLoading && isAuthenticated);
+  // The document is a Convex query, so it waits for a token too — `gate.ready`
+  // rather than merely a session.
+  const editor = useEditor(projectId, gate.ready);
 
   const itemByKey = useMemo(() => {
     const map = new Map<string, CanvasItem>();
@@ -207,14 +204,14 @@ export function EditorScreen() {
     [itemByKey, editor.previewKeys],
   );
 
-  if (unavailable) {
+  if (gate.unavailable) {
     return (
       <div className="grid h-dvh place-items-center bg-background p-6">
-        <SessionUnavailable onRetry={retry} />
+        <SessionUnavailable onRetry={gate.retry} />
       </div>
     );
   }
-  if (!authLoading && !isAuthenticated) return <Redirecting />;
+  if (!gate.isLoading && !gate.isAuthenticated) return <Redirecting />;
 
   if (editor.status === "invalid") {
     return (

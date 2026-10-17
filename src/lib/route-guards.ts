@@ -1,22 +1,26 @@
 /**
  * Pre-render routing guards, shared by `src/proxy.ts` and its tests.
  *
- * Two screens claim the root URL: `/` is the boards for a visitor **with** a
- * session, and the landing for everyone else — served from `/welcome` so both
- * stay statically prerendered and the landing keeps `/` as its address (a
- * rewrite leaves the browser URL alone). The only signal available before a
- * route renders is the Better Auth session cookie, and it is *read* here, never
- * validated, so every rule has to be one-way — a rule that can send a visitor
- * back where it came from is an endless loop:
+ * `/` renders one screen: the boards for a visitor **with** a session, the
+ * landing for everyone else. The landing keeps a route of its own so it stays a
+ * statically prerendered page, and `/` is *rewritten* to it rather than
+ * redirected — an anonymous visitor's address bar keeps saying `/`, the address
+ * the marketing page is published under. That route redirects back to `/`, so
+ * `/` is the only address the landing ever wears.
+ *
+ * The only signal available before a route renders is the Better Auth session
+ * cookie, and it is *read* here, never validated, so every rule has to be
+ * one-way: a rule that can send a visitor back where it came from is an endless
+ * loop:
  *
  * * `/` with a session is the boards (`next`);
- * * `/` without one is rewritten to `/welcome`;
+ * * `/` without one is rewritten to the landing;
  * * `/?signin=1` — the fallback `useRequireAuth` navigates to — is the landing
  *   **whatever the cookie says**, because a stale cookie is exactly when the
  *   proxy and the client disagree about who is signed in. Without that rule the
- *   disagreement becomes `/` → `/‹id›` → `/?signin=1` forever.
- * * `/app` (the boards' old address), `/signin` and `/signup` redirect, so old
- *   links keep working.
+ *   disagreement becomes `/` → `/‹id›` → `/?signin=1` forever;
+ * * `/signin` and `/signup` redirect, so the addresses the sign-in card used to
+ *   have still work.
  */
 
 export type RouteGuard =
@@ -25,7 +29,7 @@ export type RouteGuard =
   | { action: "redirect"; to: string };
 
 export const HOME_ROUTE = "/";
-/** The landing, which `/` is rewritten to for a visitor without a session. */
+/** The landing's own route: what `/` is rewritten to, and a redirect to `/`. */
 export const WELCOME_ROUTE = "/welcome";
 export const ACCOUNT_ROUTE = "/account";
 
@@ -35,25 +39,21 @@ export const SIGN_IN_QUERY = "signin";
 /** Home with the sign-in dialog open — where the guards send an anonymous visitor. */
 export const SIGN_IN_DIALOG_ROUTE = `${HOME_ROUTE}?${SIGN_IN_QUERY}=1`;
 
-/** Routes that moved or were removed; the value is their replacement. */
-const LEGACY_ROUTES: ReadonlyArray<readonly [from: string, to: string]> = [
-  // The boards were `/app`; the editor was `/app/<id>`.
-  ["/app", HOME_ROUTE],
+/** Removed routes, and where a link to one goes now. */
+const LEGACY_ROUTES: Readonly<Record<string, string>> = {
   // The passkey card was a page; it is a dialog on the landing now.
-  ["/signin", SIGN_IN_DIALOG_ROUTE],
-  ["/signup", SIGN_IN_DIALOG_ROUTE],
-];
+  "/signin": SIGN_IN_DIALOG_ROUTE,
+  "/signup": SIGN_IN_DIALOG_ROUTE,
+};
 
 /**
  * `/<id>` — a board. Convex ids are lowercase alphanumerics, so exactly one
  * such segment is a board: `/foo/bar` is not, and neither is a file request
- * like `/favicon.ico`. The landing's own path is spelled the same way, which is
- * why it is named before the pattern is tried.
+ * like `/favicon.ico`.
  */
 const BOARD_PATH = /^\/[a-z0-9]+$/;
 
 function needsSession(pathname: string): boolean {
-  if (pathname === WELCOME_ROUTE) return false;
   return pathname === ACCOUNT_ROUTE || BOARD_PATH.test(pathname);
 }
 
@@ -62,13 +62,11 @@ export function guardRoute(
   hasSession: boolean,
   requestsSignIn = false,
 ): RouteGuard {
-  for (const [from, to] of LEGACY_ROUTES) {
-    if (pathname === from) return { action: "redirect", to };
-    // `/app/<id>` → `/<id>`: the tail is the replacement.
-    if (pathname.startsWith(`${from}/`)) {
-      return { action: "redirect", to: pathname.slice(from.length) };
-    }
-  }
+  const legacy = LEGACY_ROUTES[pathname];
+  if (legacy !== undefined) return { action: "redirect", to: legacy };
+
+  // The landing answers to `/` alone; this is the way in for the rewrite.
+  if (pathname === WELCOME_ROUTE) return { action: "redirect", to: HOME_ROUTE };
 
   if (pathname === HOME_ROUTE) {
     return hasSession && !requestsSignIn

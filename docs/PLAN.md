@@ -185,13 +185,27 @@ backend) · Better Auth (passkeys, local-install component) · Bun · vitest.
   flaky network to the deployment that ping-ponged `/` ↔ `/signin` for as long
   as the tab stayed open, hammering the auth endpoints. The guard now reads the
   session too (`authClient.useSession`), and when the session request itself
-  fails it does not guess: the screens show a retry. The other half is the
+  fails it does not guess: the screens show a retry. The other half was the
   routing: `/` is the boards (the landing moved to `/welcome`, still served at
   `/` by a rewrite), a board is `/<id>` — no more `/app` prefix — and
   `/?signin=1`, the fallback the guard navigates to, is the landing **whatever
   the cookie says**, because a stale cookie is exactly when the proxy and the
-  client disagree. `/app`, `/app/<id>`, `/signin` and `/signup` redirect for old
-  links.
+  client disagree.
+* **Follow-up (user review): no half-routes, and no screen that crashes on a
+  hiccup.** `/welcome` was still an address anyone could visit and keep, and
+  `/app` was still a redirect: both are gone as *addresses* — `/welcome`
+  redirects to `/` (it is only where the landing's markup lives, which is the
+  price of `/` being a single URL with the boards on it), `/app` has no rule at
+  all, and `/app/<id>` is a plain 404. The crash the user hit next was the same
+  flaky token endpoint from the other side: with the session valid but
+  `/api/auth/convex/token` failing, the boards rendered `ProjectsView` with no
+  token, and Convex answers that with `يجب تسجيل الدخول أولًا` — thrown, so
+  `useQuery` took the whole screen down. `useRequireAuth` now exposes `ready`
+  (a session **and** a Convex token), the Convex-reading screens wait for it
+  behind their skeletons, and when the token never arrives they show the retry —
+  a reload, because nothing in the app can make Convex ask for the token again.
+  `/account` needs only the session, so it gates on `sessionFailed` and keeps
+  working while Convex is unreachable.
 
 | wave | work | who |
 | --- | --- | --- |

@@ -33,7 +33,7 @@ export function SessionUnavailable({
         </EmptyMedia>
         <EmptyTitle>تعذّر الاتصال بالخادم</EmptyTitle>
         <EmptyDescription>
-          لم يصل ردّ الجلسة. تحقّق من اتصالك بالإنترنت ثم أعد المحاولة.
+          لم يصل ردّ من الخادم. تحقّق من اتصالك بالإنترنت ثم أعد المحاولة.
         </EmptyDescription>
       </EmptyHeader>
       <EmptyContent>

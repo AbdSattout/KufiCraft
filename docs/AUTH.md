@@ -46,7 +46,7 @@ everything about the live deployment that a unit test cannot reach is marked
 | `src/app/(auth)/{layout,account}` | Arabic RTL shell: `/account` is “الحساب والأمان” (there is no sign-in route — the dialog lives on the landing) |
 | `src/app/page.tsx`, `src/app/[projectId]/page.tsx` | the boards (home) and a board — one segment apart, no `/app` prefix |
 | `src/components/auth/**` | the sign-in dialog (one button, silent auto-attempt) and its CTA triggers, account screen + account & security card (account name = passkey name, sign-out), passkey error mapping, `require-auth` guard (`useSession`, so a failed Convex token cannot sign anyone out) |
-| `src/proxy.ts` + `src/lib/route-guards.ts` | pre-render routing: `/` is the boards with a session and the landing without one, `/?signin=1` is the landing either way, `/account` and `/<id>` → `/?signin=1` without a session, and `/app`, `/app/<id>`, `/signin`, `/signup` redirect for old links |
+| `src/proxy.ts` + `src/lib/route-guards.ts` | pre-render routing: `/` is the boards with a session and the landing without one, `/?signin=1` is the landing either way, `/account` and `/<id>` → `/?signin=1` without a session, and `/signin`/`/signup` redirect for the old sign-in addresses |
 | `src/lib/auth-server.ts` | `convexBetterAuthNextJs(...)` helpers (`getToken`, `preloadAuthQuery`, …) |
 | `src/app/api/auth/[...all]/route.ts` | `export const { GET, POST } = handler` (proxies to Convex) |
 | `src/components/convex-client-provider.tsx` | `ConvexBetterAuthProvider` (client) |

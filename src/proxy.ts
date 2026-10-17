@@ -34,8 +34,8 @@ export const config = {
     "/account",
     "/signin",
     "/signup",
-    "/app",
-    "/app/:path*",
+    // A board. Any other single segment behaves the same way — a board link is
+    // the only root-level screen there is.
     "/:projectId",
   ],
 };

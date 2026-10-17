@@ -11,12 +11,17 @@ import { Skeleton } from "@/components/ui/skeleton";
  * and sign-out — for a visitor with a live session. `src/proxy.ts` has already
  * sent anonymous visitors home; the client guard below only covers a session
  * that expired while the page was open.
+ *
+ * The passkey list is a Better Auth call, not a Convex query, so this screen
+ * only waits on the session itself (`sessionFailed`), never on Convex's token.
  */
 export function AccountScreen() {
-  const { isAuthenticated, unavailable, retry } = useRequireAuth();
+  const gate = useRequireAuth();
 
-  if (unavailable) return <SessionUnavailable onRetry={retry} />;
-  if (!isAuthenticated) return <AccountSkeleton />;
+  if (gate.sessionFailed) {
+    return <SessionUnavailable onRetry={gate.retry} />;
+  }
+  if (!gate.isAuthenticated) return <AccountSkeleton />;
 
   return <AccountSecurity />;
 }

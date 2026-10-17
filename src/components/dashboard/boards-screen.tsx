@@ -13,15 +13,15 @@ import { DashboardSkeleton } from "@/components/dashboard/skeletons";
  * sent anonymous visitors to the landing.
  */
 export function BoardsScreen() {
-  const { isAuthenticated, unavailable, retry } = useRequireAuth();
+  const gate = useRequireAuth();
 
   return (
     <div className="flex min-h-dvh flex-col bg-background">
       <SiteHeader />
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:py-10">
-        {unavailable ? (
-          <SessionUnavailable className="mt-10" onRetry={retry} />
-        ) : isAuthenticated ? (
+        {gate.unavailable ? (
+          <SessionUnavailable className="mt-10" onRetry={gate.retry} />
+        ) : gate.ready ? (
           <ProjectsView />
         ) : (
           <DashboardSkeleton />
