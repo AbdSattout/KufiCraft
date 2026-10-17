@@ -133,6 +133,16 @@ export abstract class KufiTool {
   abstract readonly icon: readonly ToolIconPart[];
   /** True when the tool keeps its state across pointer-up. */
   readonly persistent: boolean = false;
+  /**
+   * True for tools that move the **view** instead of the document (the hand).
+   * The controller reads it and never dispatches pointer input to a panning
+   * tool: the pointer scrolls the viewport, and a double click recentres the
+   * canvas. Such a tool owns no `ToolState`, so a pan can never reach the
+   * document, the history or the server.
+   */
+  readonly pans: boolean = false;
+  /** One line of guidance the status bar shows while the tool is active. */
+  readonly hint: string | null = null;
 
   /** Pointer down; `state` is the live state (usually `none`). */
   abstract begin(
@@ -402,6 +412,8 @@ class LineTool extends KufiTool {
   readonly shortcut = "L";
   readonly cursor = "cursor-crosshair";
   override readonly persistent = true;
+  override readonly hint =
+    "انقر لتحديد النقاط، ثم انقر النقطة الأخيرة للإنهاء أو الأولى للإغلاق";
   readonly icon: readonly ToolIconPart[] = [
     { d: "M5 19 L19 5" },
     {
@@ -646,6 +658,48 @@ class ArcTool extends KufiTool {
 }
 
 /* ------------------------------------------------------------------ */
+/* Hand                                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The hand — the one *view* tool, and a deliberate exception to the shape of
+ * the others: it draws nothing and owns no state. `pans` is the whole
+ * contract (`docs/CANVAS.md` §6): the controller scrolls the viewport while
+ * the pointer is down (`panScrollOffset`) and double-click recentres the board
+ * (`centreScroll`). Nothing it does can reach the document, the undo stack or
+ * the server, so its `begin` / `move` / `end` are empty on purpose.
+ */
+class HandTool extends KufiTool {
+  readonly id = "hand" as const;
+  readonly label = "يد";
+  readonly shortcut = "H";
+  readonly cursor = "cursor-grab active:cursor-grabbing";
+  override readonly pans = true;
+  override readonly hint =
+    "اسحب لتحريك اللوحة، وانقر نقرتين لإرجاعها إلى المنتصف";
+  readonly icon: readonly ToolIconPart[] = [
+    { d: "M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2" },
+    { d: "M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2" },
+    { d: "M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8" },
+    {
+      d: "M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15",
+    },
+  ];
+
+  begin(): ToolOutcome {
+    return { state: NO_STATE };
+  }
+
+  move(): ToolOutcome {
+    return { state: NO_STATE };
+  }
+
+  end(): ToolOutcome {
+    return { state: NO_STATE };
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* Registry                                                            */
 /* ------------------------------------------------------------------ */
 
@@ -655,6 +709,7 @@ const REGISTRY: Readonly<Record<ToolId, KufiTool>> = {
   line: new LineTool(),
   eraser: new EraserTool(),
   arc: new ArcTool(),
+  hand: new HandTool(),
 };
 
 /** Rail order (RTL: first = closest to the canvas edge). */
@@ -664,6 +719,7 @@ export const TOOL_ORDER: readonly ToolId[] = [
   "line",
   "eraser",
   "arc",
+  "hand",
 ];
 
 /** The registered tools, in rail order — the one list the UI reads. */

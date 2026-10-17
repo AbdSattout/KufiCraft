@@ -48,7 +48,7 @@ import { ShapePanel } from "./editor-shape-panel";
 import { SettingsPanel } from "./editor-settings-panel";
 
 const EMPTY_ITEMS: readonly CanvasItem[] = [];
-const RAIL_PLACEHOLDERS = [0, 1, 2, 3];
+const RAIL_PLACEHOLDERS = [0, 1, 2, 3, 4, 5];
 const PANEL_PLACEHOLDERS = [0, 1, 2];
 
 /** Resolves selection keys to items, keeping the empty case referentially stable. */
@@ -252,6 +252,7 @@ export function EditorScreen() {
           arc={editor.arc}
           setArcDirection={editor.setArcDirection}
           setArcSize={editor.setArcSize}
+          onCentreView={editor.centreView}
           className="hidden md:flex"
         />
 
@@ -269,6 +270,8 @@ export function EditorScreen() {
             zoom={editor.zoom}
             setZoom={editor.setZoom}
             surfaceRef={editor.surfaceRef}
+            viewportRef={editor.viewportRef}
+            onCentreView={editor.centreView}
             onPointerDown={editor.onPointerDown}
             onPointerMove={editor.onPointerMove}
             onPointerUp={editor.onPointerUp}
@@ -281,6 +284,7 @@ export function EditorScreen() {
             arc={editor.arc}
             setArcDirection={editor.setArcDirection}
             setArcSize={editor.setArcSize}
+            onCentreView={editor.centreView}
             className="md:hidden"
           />
         </main>

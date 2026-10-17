@@ -63,7 +63,7 @@ import { SHAPE_ORDER as SHAPE_REGISTRY_ORDER, shapeLabel } from "@/lib/canvas/sh
  * collided with the shape formerly called `arc` (now `curve`). Each tool is a
  * class in `tools.ts` that declares its own id, label, shortcut and icon.
  */
-export type ToolId = "select" | "pen" | "line" | "eraser" | "arc";
+export type ToolId = "select" | "pen" | "line" | "eraser" | "arc" | "hand";
 
 /** Shape palette order — the pen's ten shapes. */
 export const SHAPE_ORDER: readonly ShapeId[] = SHAPE_REGISTRY_ORDER;
@@ -496,6 +496,76 @@ export function linePreview(
 
 /* Anchor identity helpers used by the pen's de-duplication. */
 export { anchorKey };
+
+/* ------------------------------------------------------------------ */
+/* Viewport scrolling (the hand tool)                                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The scroll fields the viewport helpers read and write. A real element
+ * satisfies this, and so does a plain object in a test — the helpers stay
+ * DOM-free like the rest of this module.
+ */
+export interface ScrollLike {
+  scrollLeft: number;
+  scrollTop: number;
+  scrollWidth: number;
+  scrollHeight: number;
+  clientWidth: number;
+  clientHeight: number;
+}
+
+export interface ScrollOffset {
+  left: number;
+  top: number;
+}
+
+/**
+ * Which way this container counts horizontal offsets.
+ *
+ * An RTL scroll container is the classic trap: `scrollLeft` is `0` at the
+ * inline **start** (the right edge in Arabic), and the offset then runs either
+ * positive (offsets measured from that start) or negative (the historical
+ * Blink/Gecko behaviour). Instead of guessing, probe: `1` is only reachable
+ * when the container counts upwards. The probe is undone before returning.
+ */
+export function horizontalScrollSign(view: ScrollLike): 1 | -1 {
+  const restore = view.scrollLeft;
+  view.scrollLeft = 1;
+  const countsUp = view.scrollLeft > 0;
+  view.scrollLeft = restore;
+  return countsUp ? 1 : -1;
+}
+
+/**
+ * The scroll offset that keeps the content under the pointer: dragging right
+ * moves the canvas right, in either horizontal convention (`sign` comes from
+ * `horizontalScrollSign`). The vertical axis never flips.
+ */
+export function panScrollOffset(
+  start: ScrollOffset,
+  sign: 1 | -1,
+  from: Point,
+  to: Point,
+): ScrollOffset {
+  return {
+    left: start.left - sign * (to.x - from.x),
+    top: start.top - (to.y - from.y),
+  };
+}
+
+/**
+ * Centres the scrolled content — the middle of the reachable range, on the side
+ * this container counts towards (see `horizontalScrollSign`), so the hand
+ * tool's double click recentres the board in any browser.
+ */
+export function centreScroll(view: ScrollLike): void {
+  const sign = horizontalScrollSign(view);
+  const rangeX = Math.max(0, view.scrollWidth - view.clientWidth);
+  const rangeY = Math.max(0, view.scrollHeight - view.clientHeight);
+  view.scrollLeft = (sign * rangeX) / 2;
+  view.scrollTop = rangeY / 2;
+}
 
 /* ------------------------------------------------------------------ */
 /* Value comparison helpers                                            */

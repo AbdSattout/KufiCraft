@@ -21,6 +21,7 @@ describe("editor keyboard map", () => {
     expect(shortcutFor({ key: "E" })).toEqual({ kind: "tool", tool: "eraser" });
     expect(shortcutFor({ key: "a" })).toEqual({ kind: "tool", tool: "arc" });
     expect(shortcutFor({ key: "v" })).toEqual({ kind: "tool", tool: "select" });
+    expect(shortcutFor({ key: "h" })).toEqual({ kind: "tool", tool: "hand" });
   });
 
   it("handles delete, escape and rotate", () => {

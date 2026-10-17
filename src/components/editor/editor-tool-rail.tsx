@@ -55,6 +55,8 @@ export interface ToolRailProps {
   arc: ArcStyle;
   setArcDirection: (direction: ArcStyle["direction"]) => void;
   setArcSize: (size: ArcStyle["size"]) => void;
+  /** Double click on a view tool's button (the hand centres the board). */
+  onCentreView: () => void;
   orientation: "vertical" | "horizontal";
   className?: string;
 }
@@ -65,6 +67,7 @@ export function ToolRail({
   arc,
   setArcDirection,
   setArcSize,
+  onCentreView,
   orientation,
   className,
 }: ToolRailProps) {
@@ -85,7 +88,9 @@ export function ToolRail({
     >
       {TOOLS.map((entry) => {
         const active = entry.id === tool;
-        const hint = `${entry.label} (${entry.shortcut})`;
+        const hint = entry.pans
+          ? `${entry.label} (${entry.shortcut}) — ${MESSAGES.handDoubleClick}`
+          : `${entry.label} (${entry.shortcut})`;
         return (
           <Button
             key={entry.id}
@@ -94,6 +99,7 @@ export function ToolRail({
             aria-label={hint}
             title={hint}
             onClick={() => setTool(entry.id)}
+            onDoubleClick={entry.pans ? onCentreView : undefined}
             className={cn(
               "h-auto flex-col gap-0.5 px-1 py-1.5 text-[0.7rem]",
               vertical ? "w-full" : "min-w-16 shrink-0",

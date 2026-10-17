@@ -11,10 +11,14 @@ import {
 import type { ToolContext } from "./interaction";
 import {
   NO_STATE,
+  TOOLS,
+  TOOL_ORDER,
   beginTool,
   endTool,
   moveTool,
   previewTool,
+  toolForShortcut,
+  toolOf,
 } from "./tools";
 import type { ToolState } from "./tools";
 
@@ -433,5 +437,59 @@ describe("anchorPath", () => {
     expect(
       anchorPath(circular, { column: 5, row: 2, zone: 3 }).length,
     ).toBeGreaterThan(0);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Registry                                                            */
+/* ------------------------------------------------------------------ */
+
+describe("tool registry", () => {
+  it("holds one class per tool, in rail order, with unique shortcuts", () => {
+    expect([...TOOL_ORDER]).toEqual([
+      "select",
+      "pen",
+      "line",
+      "eraser",
+      "arc",
+      "hand",
+    ]);
+    expect(TOOLS.map((tool) => tool.id)).toEqual([...TOOL_ORDER]);
+    expect(new Set(TOOLS.map((tool) => tool.shortcut)).size).toBe(TOOLS.length);
+    for (const tool of TOOLS) {
+      expect(tool.label).not.toBe("");
+      expect(tool.icon.length).toBeGreaterThan(0);
+      expect(toolForShortcut(tool.shortcut.toLowerCase())).toBe(tool.id);
+      if (tool.hint !== null) expect(tool.hint).not.toBe("");
+    }
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Hand                                                                */
+/* ------------------------------------------------------------------ */
+
+describe("HandTool", () => {
+  it("is the only view tool, and it never touches the document", () => {
+    const hand = toolOf("hand");
+    expect(hand.pans).toBe(true);
+    expect(TOOLS.filter((tool) => tool.pans)).toEqual([hand]);
+    expect(hand.label).toBe("يد");
+    expect(hand.shortcut).toBe("H");
+    expect(hand.cursor).toContain("cursor-grab");
+    expect(hand.hint).not.toBeNull();
+
+    const ctx = context();
+    for (const outcome of [
+      beginTool("hand", ctx, NO_STATE, input(pointOf(1, 1))),
+      moveTool("hand", ctx, NO_STATE, input(pointOf(3, 2))),
+      endTool("hand", ctx, NO_STATE),
+    ]) {
+      expect(outcome.state).toEqual(NO_STATE);
+      expect(outcome.commit).toBeUndefined();
+    }
+    const preview = previewTool("hand", ctx, NO_STATE);
+    expect(preview.items).toEqual([]);
+    expect(preview.marker).toBeNull();
   });
 });

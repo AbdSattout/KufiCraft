@@ -14,11 +14,14 @@ import {
   anchorAt,
   arcBetween,
   cellLimits,
+  centreScroll,
   clampDelta,
   clampToCanvas,
   clientToViewBox,
   configsEqual,
   deleteItems,
+  horizontalScrollSign,
+  panScrollOffset,
   duplicateItems,
   hitTest,
   hitsItem,
@@ -36,7 +39,7 @@ import {
   reshapeItems,
   shiftSelection,
 } from "./interaction";
-import type { ToolContext } from "./interaction";
+import type { ScrollLike, ToolContext } from "./interaction";
 
 const square: ProjectConfig = { ...DEFAULT_PROJECT_CONFIG };
 const circular: ProjectConfig = { ...square, gridType: "circular" };
@@ -516,5 +519,115 @@ describe("comparison helpers", () => {
     expect(isProjectId("abc12345678")).toBe(false);
     expect(isProjectId("ABC123456789")).toBe(false);
     expect(isProjectId("../../etc/passwd")).toBe(false);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Viewport scrolling (the hand tool)                                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A scroll container stand-in: it clamps offsets like a real one, and can
+ * count horizontal offsets the RTL way (`0` at the inline start, negative
+ * towards the end) or the LTR way (`0` at the start, positive towards the end).
+ */
+class FakeScroll implements ScrollLike {
+  scrollWidth: number;
+  clientWidth: number;
+  scrollHeight: number;
+  clientHeight: number;
+  private left = 0;
+  private top = 0;
+  private readonly negative: boolean;
+
+  constructor(
+    content: { width: number; height: number },
+    viewport: { width: number; height: number },
+    negative = false,
+  ) {
+    this.scrollWidth = content.width;
+    this.clientWidth = viewport.width;
+    this.scrollHeight = content.height;
+    this.clientHeight = viewport.height;
+    this.negative = negative;
+  }
+
+  get scrollLeft(): number {
+    return this.left;
+  }
+
+  set scrollLeft(value: number) {
+    const max = Math.max(0, this.scrollWidth - this.clientWidth);
+    const low = this.negative ? -max : 0;
+    const high = this.negative ? 0 : max;
+    this.left = Math.min(high, Math.max(low, value));
+  }
+
+  get scrollTop(): number {
+    return this.top;
+  }
+
+  set scrollTop(value: number) {
+    const max = Math.max(0, this.scrollHeight - this.clientHeight);
+    this.top = Math.min(max, Math.max(0, value));
+  }
+}
+
+describe("viewport scrolling", () => {
+  it("detects which way the container counts horizontal offsets", () => {
+    const ltr = new FakeScroll({ width: 400, height: 400 }, { width: 200, height: 200 });
+    const rtl = new FakeScroll(
+      { width: 400, height: 400 },
+      { width: 200, height: 200 },
+      true,
+    );
+    expect(horizontalScrollSign(ltr)).toBe(1);
+    expect(horizontalScrollSign(rtl)).toBe(-1);
+  });
+
+  it("leaves the scroll position alone while probing", () => {
+    const view = new FakeScroll({ width: 400, height: 400 }, { width: 200, height: 200 });
+    view.scrollLeft = 40;
+    expect(horizontalScrollSign(view)).toBe(1);
+    expect(view.scrollLeft).toBe(40);
+  });
+
+  it("keeps the content under the pointer in either convention", () => {
+    // Dragging right moves the canvas right: the offset shrinks when offsets
+    // count up, and grows back towards zero when they count down. Dragging down
+    // always reduces `scrollTop`.
+    expect(
+      panScrollOffset({ left: 100, top: 50 }, 1, { x: 10, y: 10 }, { x: 30, y: 40 }),
+    ).toEqual({ left: 80, top: 20 });
+    expect(
+      panScrollOffset({ left: -100, top: 50 }, -1, { x: 10, y: 10 }, { x: 30, y: 40 }),
+    ).toEqual({ left: -80, top: 20 });
+  });
+
+  it("centres the content in either convention", () => {
+    const ltr = new FakeScroll({ width: 400, height: 300 }, { width: 200, height: 100 });
+    centreScroll(ltr);
+    expect([ltr.scrollLeft, ltr.scrollTop]).toEqual([100, 100]);
+
+    const rtl = new FakeScroll(
+      { width: 400, height: 300 },
+      { width: 200, height: 100 },
+      true,
+    );
+    centreScroll(rtl);
+    expect([rtl.scrollLeft, rtl.scrollTop]).toEqual([-100, 100]);
+  });
+
+  it("stays at the start when the content already fits", () => {
+    for (const negative of [false, true]) {
+      const view = new FakeScroll(
+        { width: 100, height: 100 },
+        { width: 200, height: 200 },
+        negative,
+      );
+      centreScroll(view);
+      expect(view.scrollLeft === 0).toBe(true);
+      expect(view.scrollTop).toBe(0);
+    }
   });
 });

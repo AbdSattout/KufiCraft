@@ -73,8 +73,9 @@ backend) · Better Auth (passkeys, local-install component) · Bun · vitest.
   full words (`column`, `zone`, `from`, `points`, …), and the old one-letter
   names and redundant `arch` type are gone (`docs/CANVAS.md` §3).
 * Tools are **one class each in a registry** (`REGISTRY` in
-  `src/components/editor/tools.ts`): `select | pen | line | eraser | arc`, with
-  the rail icons, labels and shortcuts read from the classes — no `switch (tool)`.
+  `src/components/editor/tools.ts`): `select | pen | line | eraser | arc | hand`,
+  with the rail icons, labels and shortcuts read from the classes — no
+  `switch (tool)`.
   Shape ids were renamed (`semi-hexagone` → `pentagon`, `arc` → `curve`, the
   untitled tenth → `comb`).
 * Pen colours **exactly the cells the pointer is moved over** — one fragment per
@@ -109,6 +110,19 @@ backend) · Better Auth (passkeys, local-install component) · Bun · vitest.
   backend tolerates documents that still carry `mergeLines`: the validator keeps
   the field `v.optional()` and `sanitizeConfig` repairs the document on read
   (`get`) and on its next write.
+* **Follow-up (live testing):** the canvas scroller and the missing hand tool.
+  The stage used to centre the surface with `justify-center`, so an overflowing
+  board also spilled off the inline-**start** edge — the one direction a scroll
+  container cannot reach, which is why the board could not be scrolled
+  sideways; it now centres with `margin: auto` (auto margins collapse to zero
+  once the surface overflows). The old app's **hand tool** is back:
+  `KufiTool.pans` marks it as a view tool, the controller drags the viewport
+  (`panScrollOffset`, with `horizontalScrollSign` handling the RTL `scrollLeft`
+  conventions), and a double click on the canvas or on its rail button recentres
+  the board (`centreScroll`). Every tool now also carries its own status-bar
+  `hint`, replacing the `tool === "line"` special case. Open: zoom keeps the
+  inline-start edge anchored, so zooming in from a centred board jumps to a
+  corner — anchoring at the view centre instead is a possible follow-up.
 
 | wave | work | who |
 | --- | --- | --- |

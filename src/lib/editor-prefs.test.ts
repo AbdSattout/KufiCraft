@@ -60,6 +60,12 @@ describe("editor preferences", () => {
     expect(loadEditorPrefs(storage)).toEqual(prefs);
   });
 
+  it("remembers the hand tool — it is a rail tool like any other", () => {
+    const storage = new MemoryStorage();
+    saveEditorPrefs({ ...DEFAULT_EDITOR_PREFS, tool: "hand" }, storage);
+    expect(loadEditorPrefs(storage).tool).toBe("hand");
+  });
+
   it("migrates pre-2 prefs (arch tool, bulge) to the new defaults", () => {
     const prefs = loadEditorPrefs(
       new MemoryStorage({

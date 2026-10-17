@@ -72,12 +72,19 @@ see `docs/CANVAS.md` §6 for the contract.
 | خط (line) | `L` | click sequence: click A, click B… commits an open run; click the last point again to end it, click the first one to close it; a drag works too |
 | ممحاة (eraser) | `E` | click/drag removes whatever the pointer touches (the swept items ring as a ghost) |
 | قوس (arc) | `A` | press-drag-release A→B, or click A then click B; the armed start cell stays highlighted until it commits, and clicking A again cancels |
+| يد (hand) | `H` | drags the *view*, not the board: press and drag to move around a board bigger than the pane, and double click (on the canvas or on the rail button) to put the middle of the board back in the middle |
 
 The line and arc tools are **persistent**: their click sequence survives
 pointer-up. While one is armed the overlay shows a filled highlight (no border)
 on the start cell. The arc reveals its own controls next to it in the rail:
 اتجاه القوس (مع عقارب الساعة / عكس عقارب الساعة) and حجم القوس (نصف دائرة /
 ثلاثة أرباع).
+
+Bigger boards scroll: the canvas sits in an `overflow-auto` pane, and the square
+centres itself with `margin: auto` so its overflow always lands on the reachable
+side (a `justify-center` canvas would hide its inline-start edge — in RTL, the
+right one — from the scroll range for good). Each tool carries its own one-line
+hint in the status bar, which is where the hand tool says what it does.
 
 Shape palette (applies to the next drawn tiles and to the current selection):
 square, circle, triangle, quarter circle, semicircle, pentagon, curve, hamza1,
@@ -143,9 +150,9 @@ Settings persistence (localStorage, per browser, no server round-trip):
 Keyboard: `Delete`/`Backspace` remove, `Ctrl+Z` / `Ctrl+Shift+Z` (`Ctrl+Y`)
 undo/redo, `Ctrl+D` duplicate, `R` rotate the active shape, `Escape`/`Enter`
 cancel a click sequence, digits `1…9` pick a shape, `V` select, `P` pen, `L`
-line, `E` eraser, `A` arc. The tool keys come from the tool classes and the
-shape digits from the shape registry (`SHAPE_ORDER`), so the map cannot drift
-from the UI.
+line, `E` eraser, `A` arc, `H` hand. The tool keys come from the tool classes
+and the shape digits from the shape registry (`SHAPE_ORDER`), so the map cannot
+drift from the UI.
 
 ## Landing (`/`)
 

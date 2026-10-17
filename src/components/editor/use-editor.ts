@@ -38,19 +38,23 @@ import {
 import { downloadProjectFile } from "@/lib/kuficraft-file";
 import {
   DEFAULT_STYLE,
+  centreScroll,
   clientToViewBox,
   clampToCanvas,
   deleteItems,
   duplicateItems,
+  horizontalScrollSign,
   isProjectId,
   itemsEqual,
   nextRotation,
+  panScrollOffset,
   recolourItems,
   reshapeItems,
 } from "./interaction";
 import type {
   ArcStyle,
   DrawStyle,
+  ScrollOffset,
   ToolContext,
   ToolId,
 } from "./interaction";
@@ -76,7 +80,7 @@ import { shortcutFor } from "./shortcuts";
 import { useEditorDocument } from "./use-editor-document";
 import { downloadPng, downloadSvg } from "./export";
 import { MESSAGES, errorMessage } from "./messages";
-import type { Rect } from "@/lib/canvas/geometry";
+import type { Point, Rect } from "@/lib/canvas/geometry";
 
 export { MAX_ZOOM, MIN_ZOOM } from "@/lib/editor-prefs";
 export const ZOOM_STEP = 0.25;
@@ -130,6 +134,10 @@ export interface EditorController {
   setZoom: (zoom: number) => void;
 
   surfaceRef: React.RefObject<HTMLDivElement | null>;
+  /** The scrollable canvas viewport (what the hand tool pans). */
+  viewportRef: React.RefObject<HTMLDivElement | null>;
+  /** Puts the middle of the canvas in the middle of the viewport. */
+  centreView: () => void;
   onPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onPointerMove: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onPointerUp: (event: ReactPointerEvent<HTMLDivElement>) => void;
@@ -184,11 +192,23 @@ export function useEditor(
   const stateRef = useRef<ToolState>(NO_STATE);
 
   const surfaceRef = useRef<HTMLDivElement | null>(null);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  /**
+   * The live pan gesture: where the pointer started, the scroll offset it
+   * started from, and which way this browser counts horizontal offsets. Kept in
+   * a ref — a pan must not re-render on every pointer move.
+   */
+  const panRef = useRef<{
+    from: Point;
+    scroll: ScrollOffset;
+    sign: 1 | -1;
+  } | null>(null);
 
   const setToolStateAndReset = useCallback((next: ToolId) => {
     setToolState(next);
     stateRef.current = NO_STATE;
     setState(NO_STATE);
+    panRef.current = null;
   }, []);
 
   /**
@@ -269,6 +289,20 @@ export function useEditor(
   const onPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
       if (event.button !== 0) return;
+      const active = toolOf(tool);
+      const view = viewportRef.current;
+      if (active.pans && view) {
+        // A view tool: the pointer drags the viewport, no tool state is made.
+        event.preventDefault();
+        event.currentTarget.setPointerCapture(event.pointerId);
+        panRef.current = {
+          from: { x: event.clientX, y: event.clientY },
+          scroll: { left: view.scrollLeft, top: view.scrollTop },
+          sign: horizontalScrollSign(view),
+        };
+        surfaceRef.current?.focus({ preventScroll: true });
+        return;
+      }
       const point = pointOf(event);
       if (!point) return;
       event.preventDefault();
@@ -287,6 +321,19 @@ export function useEditor(
 
   const onPointerMove = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
+      const pan = panRef.current;
+      if (pan) {
+        const view = viewportRef.current;
+        if (view) {
+          const next = panScrollOffset(pan.scroll, pan.sign, pan.from, {
+            x: event.clientX,
+            y: event.clientY,
+          });
+          view.scrollLeft = next.left;
+          view.scrollTop = next.top;
+        }
+        return;
+      }
       // Tools with a click sequence (the line tool) track the hover position
       // even while no button is down; drag tools only move with the button.
       if (stateRef.current.kind === "none" && !toolOf(tool).persistent) return;
@@ -309,6 +356,10 @@ export function useEditor(
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId);
       }
+      if (panRef.current) {
+        panRef.current = null;
+        return;
+      }
       const settled = stateRef.current;
       const outcome = endTool(tool, context, settled);
       applyOutcome(outcome);
@@ -320,8 +371,14 @@ export function useEditor(
   );
 
   const onPointerCancel = useCallback(() => {
+    panRef.current = null;
     stateRef.current = NO_STATE;
     setState(NO_STATE);
+  }, []);
+
+  const centreView = useCallback(() => {
+    const view = viewportRef.current;
+    if (view) centreScroll(view);
   }, []);
 
   /* ---------------------------------------------------------------- */
@@ -598,6 +655,8 @@ export function useEditor(
     zoom,
     setZoom,
     surfaceRef,
+    viewportRef,
+    centreView,
     onPointerDown,
     onPointerMove,
     onPointerUp,

@@ -203,9 +203,14 @@ name. Adding a tool = one class + one registry line.
 | `line` | خط | `L` | click sequence: click A, click B… commits an open run; click the last point again ends it, click the first one closes it. A drag also works (pointer-up ends the *drag*, not the run). A run with no diagonal segment is squares (`straightLinesAsSquares`, default) or one bar |
 | `eraser` | ممحاة | `E` | click/drag removes whatever the pointer touches |
 | `arc` | قوس | `A` | press-drag-release A→B, **or** click A then click B (clicking A again cancels) |
+| `hand` | يد | `H` | the one **view** tool: the pointer scrolls the canvas pane (`panScrollOffset`), `KufiTool.pans` tells the controller so, and a double click recentres the board (`centreScroll`) |
 
 * `KufiTool.persistent` — a tool whose in-flight state survives pointer-up
   (`line`, `arc`); the others commit on pointer-up.
+* `KufiTool.pans` — a view tool: it never sees pointer input, owns no
+  `ToolState`, and can therefore never reach the document, the history or the
+  server. Its rail button (and the canvas) answers a double click with
+  `centreView`. `hand` is the only one.
 * `ToolState` is the in-flight gesture (`pen`, `erase`, `arc`, `line`, `marquee`,
   `move`, `none`); `ToolPreview` (below) is what the overlay paints.
 

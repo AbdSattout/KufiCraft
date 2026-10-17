@@ -8,6 +8,15 @@
  * zoom control is plain CSS — the pointer → viewBox mapping measures the
  * live rect, which makes both the zoom and RTL exact.
  *
+ * When the board is bigger than the pane, the surrounding scroller (the
+ * `viewportRef` element) does the moving. The surface centres itself with
+ * `margin: auto`, which collapses to zero as soon as it overflows, so the
+ * whole artwork stays inside the scrollable region — a canvas centred with
+ * `justify-center` overflows off the inline-start edge too, and a scroll
+ * container can never reach that. The hand tool drags this scroller, and a
+ * double click puts the middle of the board back in the middle of the pane
+ * (`docs/CANVAS.md` §6).
+ *
  * The artwork itself is the memoised `<CanvasPreview>`; pointer moves only
  * re-render the overlay.
  */
@@ -39,6 +48,10 @@ export interface CanvasStageProps {
   zoom: number;
   setZoom: (zoom: number) => void;
   surfaceRef: RefObject<HTMLDivElement | null>;
+  /** The scroll container around the canvas (the hand tool pans it). */
+  viewportRef: RefObject<HTMLDivElement | null>;
+  /** Double click with a view tool: middle of the canvas in the middle. */
+  onCentreView: () => void;
   onPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onPointerMove: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onPointerUp: (event: ReactPointerEvent<HTMLDivElement>) => void;
@@ -58,19 +71,33 @@ export function CanvasStage({
   zoom,
   setZoom,
   surfaceRef,
+  viewportRef,
+  onCentreView,
   onPointerDown,
   onPointerMove,
   onPointerUp,
   onPointerCancel,
 }: CanvasStageProps) {
   const selected = selectionItems.length;
-  // The cursor comes from the tool class, so a new tool cannot forget one.
-  const cursor = toolOf(tool).cursor;
+  // The cursor, the hint and the pan flag all come from the tool class, so a
+  // new tool cannot forget them.
+  const active = toolOf(tool);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="min-h-0 flex-1 overflow-auto bg-muted/30 p-3 sm:p-5">
-        <div className="flex min-h-full items-center justify-center">
+      {/*
+        The canvas is centred with `m-auto` on the surface rather than
+        `justify-center` on this wrapper: auto margins collapse to zero when the
+        surface is larger than the viewport, which puts the whole artwork inside
+        the scrollable overflow region. A centred flex item overflows both
+        edges, and a scroll container cannot reach its inline-start edge — that
+        is what used to leave the board unscrollable sideways.
+      */}
+      <div
+        ref={viewportRef}
+        className="min-h-0 flex-1 overflow-auto bg-muted/30 p-3 sm:p-5"
+      >
+        <div className="flex min-h-full">
           <div
             ref={surfaceRef}
             role="application"
@@ -78,15 +105,16 @@ export function CanvasStage({
             tabIndex={0}
             style={{ width: `calc(min(100%, 100svh - 14rem) * ${zoom})` }}
             className={cn(
-              "relative aspect-square shrink-0 touch-none rounded-sm bg-background",
+              "relative m-auto aspect-square shrink-0 touch-none rounded-sm bg-background",
               "shadow-sm ring-1 ring-border/70 outline-none select-none",
               "focus-visible:ring-2 focus-visible:ring-ring",
-              cursor,
+              active.cursor,
             )}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerCancel}
+            onDoubleClick={active.pans ? onCentreView : undefined}
             onContextMenu={(event) => event.preventDefault()}
           >
             <CanvasPreview
@@ -116,9 +144,9 @@ export function CanvasStage({
             · {MESSAGES.selectedCount} {formatCount(selected)}
           </span>
         ) : null}
-        {tool === "line" ? (
+        {active.hint ? (
           <span className="truncate text-muted-foreground/80">
-            · {MESSAGES.lineHint}
+            · {active.hint}
           </span>
         ) : null}
 

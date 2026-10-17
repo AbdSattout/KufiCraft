@@ -77,8 +77,7 @@ export const MESSAGES = {
   arcThreeQuarter: "ثلاثة أرباع",
   arcHalfShort: "نصف",
   arcThreeQuarterShort: "٣/٤",
-  lineHint:
-    "انقر لتحديد النقاط، ثم انقر النقطة الأخيرة للإنهاء أو الأولى للإغلاق",
+  handDoubleClick: "نقرة مزدوجة: توسيط اللوحة",
   ratioHint: "نسبة الحبر إلى الفراغ داخل كل خلية.",
   ratioFullCell: "1:1 يعني أن الحبر يملأ الخلية كاملة (شبكة بلا فراغ).",
   deleteKeyHint: "حذف",
