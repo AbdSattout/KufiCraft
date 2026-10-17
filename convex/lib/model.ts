@@ -301,8 +301,11 @@ export interface ProjectConfig {
   background: string;
   /** Show the construction grid. */
   showGrid: boolean;
-  /** Merge a straight pen stroke of ink squares into one `line` item. */
-  mergeLines: boolean;
+  /**
+   * Draw a straight run with the line tool as one square per cell (the
+   * reference app) instead of one solid `line` bar.
+   */
+  straightLinesAsSquares: boolean;
 }
 
 /* ------------------------------------------------------------------ */
@@ -316,7 +319,7 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
   ink: DEFAULT_INK,
   background: DEFAULT_BACKGROUND,
   showGrid: false,
-  mergeLines: true,
+  straightLinesAsSquares: true,
 };
 
 /** Canonical cell order: by column, then row. */
@@ -516,5 +519,12 @@ export const projectConfigValidator = v.object({
   ink: v.string(),
   background: v.string(),
   showGrid: v.boolean(),
-  mergeLines: v.boolean(),
+  /**
+   * Optional so a document written before the field was introduced — or a
+   * client tab that predates it — still validates; `sanitizeConfig` fills the
+   * default and drops the legacy `mergeLines` flag.
+   */
+  straightLinesAsSquares: v.optional(v.boolean()),
+  /** Legacy (removed): merged a straight pen stroke into one `line` item. */
+  mergeLines: v.optional(v.boolean()),
 });

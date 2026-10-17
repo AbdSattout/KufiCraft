@@ -15,7 +15,11 @@ import { toast } from "sonner";
 import { ConvexError } from "convex/values";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
-import { downloadProjectFile, readProjectFile } from "@/lib/kuficraft-file";
+import {
+  downloadProjectFile,
+  readProjectFile,
+  sanitizeProjectConfig,
+} from "@/lib/kuficraft-file";
 
 const EXPORT_ERROR = "تعذّر تصدير الملف";
 const IMPORT_ERROR = "تعذّر استيراد الملف";
@@ -47,7 +51,9 @@ export function useExportProjectFile(): (
       if (!doc) throw new Error(EXPORT_ERROR);
       downloadProjectFile({
         name: doc.name || fallbackName,
-        config: doc.config,
+        // Normalised here too: a document written before a config field existed
+        // (or by an older deployment) still exports a complete config.
+        config: sanitizeProjectConfig(doc.config),
         items: doc.items,
       });
     },

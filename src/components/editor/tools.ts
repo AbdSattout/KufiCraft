@@ -24,7 +24,6 @@ import { addItems, lineItems, paintItems, penItems, removeItems } from "@/lib/ca
 import { Arc } from "@/lib/canvas/items";
 import {
   anchorKey,
-  anchorsBetween,
   anchorAt,
   arcBetween,
   clampDelta,
@@ -109,14 +108,6 @@ const EMPTY_PREVIEW: ToolPreview = {
   marquee: null,
   marker: null,
 };
-
-/**
- * Largest gap (in whole anchors) a pen move will fill with in-between
- * fragments before it is treated as a pointer teleport. A fast flick can skip
- * a handful of cells and should stay continuous; a jump of a dozen cells means
- * the pointer was elsewhere, so only the cell it landed on is painted.
- */
-export const MAX_PEN_GAP = 8;
 
 /** A piece of a toolbar icon, drawn in a `0 0 24 24` box. */
 export interface ToolIconPart {
@@ -329,11 +320,11 @@ function moveDelta(
 /* ------------------------------------------------------------------ */
 
 /**
- * The pen paints the anchors the pointer sweeps, one fragment each, and it
- * paints **over** what is already there (same key → replaced), which is how
- * recolouring works in the old app. Nothing is previewed before the pointer
- * touches the canvas: the in-flight fragments are the real items, and the
- * gesture commits as one undo step.
+ * The pen colours the cells the pointer is moved over: one fragment per
+ * pointer position, painted **over** whatever is already there (same key →
+ * replaced), which is how recolouring works in the old app. Nothing is drawn
+ * between two positions — a stroke is exactly the cells that were visited —
+ * and nothing is previewed before the pointer touches the canvas.
  */
 class PenTool extends KufiTool {
   readonly id = "pen" as const;
@@ -354,30 +345,11 @@ class PenTool extends KufiTool {
   move(ctx: ToolContext, state: ToolState, input: ToolInput): ToolOutcome {
     if (state.kind !== "pen") return unchanged(state);
     const anchor = anchorAt(ctx.config, input.point);
-    const last = state.anchors[state.anchors.length - 1];
-    if (
-      last.column === anchor.column &&
-      last.row === anchor.row &&
-      last.zone === anchor.zone
-    ) {
-      return unchanged(state);
-    }
-    // Only the segment the pointer just swept is painted: the anchors between
-    // the stroke's last anchor and the new one, `last` itself dropped. A gap
-    // longer than MAX_PEN_GAP is a teleport, so only the cell it lands on joins
-    // the stroke — a circling pointer can never paint a swath it never crossed.
-    const gap = anchorsBetween(last, anchor).slice(1);
-    const candidates = gap.length > MAX_PEN_GAP ? [anchor] : gap;
-    // An anchor's key is its identity, so a fragment is never drawn twice.
+    // One fragment per pointer position, and an anchor's key is its identity,
+    // so the same cell is never listed twice.
     const taken = new Set(state.anchors.map(anchorKey));
-    const fresh = candidates.filter((candidate) => {
-      const id = anchorKey(candidate);
-      if (taken.has(id)) return false;
-      taken.add(id);
-      return true;
-    });
-    if (fresh.length === 0) return unchanged(state);
-    return { state: { kind: "pen", anchors: [...state.anchors, ...fresh] } };
+    if (taken.has(anchorKey(anchor))) return unchanged(state);
+    return { state: { kind: "pen", anchors: [...state.anchors, anchor] } };
   }
 
   end(ctx: ToolContext, state: ToolState): ToolOutcome {
@@ -408,7 +380,6 @@ class PenTool extends KufiTool {
     return penItems(ctx.config, anchors, {
       shape: ctx.style.shape,
       rotation: ctx.style.rotation,
-      mergeLines: ctx.config.mergeLines,
     });
   }
 }
@@ -421,8 +392,9 @@ class PenTool extends KufiTool {
  * The line tool is a click sequence, not a drag: the first click starts a run,
  * each further click extends it, and clicking the last point again commits an
  * open polyline while clicking the first one commits a closed one (`Z`). That
- * is exactly the reference app's behaviour, including the two-point, same-axis
- * case that collapses to one solid bar.
+ * is exactly the reference app's behaviour. A run with a diagonal part is
+ * stroked; a run made only of axis-aligned segments is drawn as
+ * `config.straightLinesAsSquares` says — one square per cell, or one solid bar.
  */
 class LineTool extends KufiTool {
   readonly id = "line" as const;

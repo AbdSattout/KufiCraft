@@ -45,7 +45,9 @@ export const MESSAGES = {
   inkColorHint: "يُطبَّق على ما ترسمه من الآن؛ ما رسمته سابقًا يحتفظ بلونه.",
   paperColor: "لون الورقة",
   showGrid: "إظهار الشبكة",
-  mergeLines: "دمج الخطوط",
+  straightLinesAsSquares: "الخط المستقيم مربّعات",
+  straightLinesAsSquaresHint:
+    "المقاطع المستقيمة تُرسم مربعًا في كل خلية، بدل شريط واحد متصل.",
   boardOptions: "خيارات اللوحة",
   gridType: "نوع الشبكة",
   gridSquare: "مربعة",

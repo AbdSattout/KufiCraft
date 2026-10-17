@@ -627,14 +627,14 @@ describe("updateConfig", () => {
     expect(clampedHigh.config.base).toBe(4);
   });
 
-  it("can switch the grid type and mergeLines flags", async () => {
+  it("can switch the grid type and the straight-lines-as-squares flag", async () => {
     const t = newTest();
     const asA = t.withIdentity(USER_A);
     const projectId = await createProject(t, USER_A);
 
     await asA.mutation(api.projects.updateConfig, {
       projectId,
-      patch: { gridType: "circular", mergeLines: false },
+      patch: { gridType: "circular", straightLinesAsSquares: false },
     });
 
     const doc = required(
@@ -642,7 +642,52 @@ describe("updateConfig", () => {
       "project should exist",
     );
     expect(doc.config.gridType).toBe("circular");
-    expect(doc.config.mergeLines).toBe(false);
+    expect(doc.config.straightLinesAsSquares).toBe(false);
+  });
+
+  it("repairs a config written before the field existed", async () => {
+    // A stored document from an older deployment: no `straightLinesAsSquares`
+    // and the legacy `mergeLines` flag still present.
+    const t = newTest();
+    const asA = t.withIdentity(USER_A);
+    const projectId = await createProject(t, USER_A);
+    await t.run(async (ctx) => {
+      const project = await ctx.db.get("projects", projectId);
+      if (!project) throw new Error("missing project");
+      const { config } = project;
+      await ctx.db.patch("projects", projectId, {
+        config: {
+          gridType: config.gridType,
+          ratio: config.ratio,
+          base: config.base,
+          ink: config.ink,
+          background: config.background,
+          showGrid: config.showGrid,
+          mergeLines: false,
+        },
+      });
+    });
+
+    const doc = required(
+      await asA.query(api.projects.get, { projectId }),
+      "project should exist",
+    );
+    expect(doc.config.straightLinesAsSquares).toBe(
+      DEFAULT_PROJECT_CONFIG.straightLinesAsSquares,
+    );
+    expect(doc.config).not.toHaveProperty("mergeLines");
+
+    // …and the next write stores the repaired config.
+    await asA.mutation(api.projects.updateConfig, {
+      projectId,
+      patch: { showGrid: true },
+    });
+    const stored = await t.run(async (ctx) => {
+      const project = await ctx.db.get("projects", projectId);
+      return project?.config ?? null;
+    });
+    expect(stored?.straightLinesAsSquares).toBe(true);
+    expect(stored).not.toHaveProperty("mergeLines");
   });
 });
 

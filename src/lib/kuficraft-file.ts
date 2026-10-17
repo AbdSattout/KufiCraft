@@ -197,10 +197,12 @@ export function sanitizeProjectConfig(value: unknown): ProjectConfig {
       typeof record.showGrid === "boolean"
         ? record.showGrid
         : DEFAULT_PROJECT_CONFIG.showGrid,
-    mergeLines:
-      typeof record.mergeLines === "boolean"
-        ? record.mergeLines
-        : DEFAULT_PROJECT_CONFIG.mergeLines,
+    // Files written before the field existed (and the legacy `mergeLines` flag)
+    // fall back to the default; `mergeLines` is deliberately dropped.
+    straightLinesAsSquares:
+      typeof record.straightLinesAsSquares === "boolean"
+        ? record.straightLinesAsSquares
+        : DEFAULT_PROJECT_CONFIG.straightLinesAsSquares,
   };
 }
 

@@ -151,8 +151,6 @@ export interface InkStyle {
   color?: string;
   /** Quarter-turn rotation for the drawn tiles. */
   rotation?: Rotation;
-  /** Overrides `config.mergeLines` for this stroke. */
-  mergeLines?: boolean;
 }
 
 /** Consecutive identical anchors collapse to one. */
@@ -205,54 +203,26 @@ function tileFor(
 /**
  * Pen stroke → items.
  *
- * The pen paints the anchors the pointer touched, one tile each — the old
- * app's behaviour. `mergeLines` (default on) folds a **contiguous** straight
- * run of full-ink anchors into one `line` item, which is the same picture as
- * the run of fragments the old line tool emitted, at a fraction of the cost.
+ * One fragment per anchor the pointer touched — the reference app: the pen
+ * colours the cells it is moved over and nothing else. It never merges a
+ * straight run into a bar (`straightLinesAsSquares` is about the *line tool*),
+ * so what the overlay previews is exactly what is painted.
  */
 export function penItems(
   config: ProjectConfig,
   anchors: readonly Anchor[],
   style: InkStyle = {},
 ): CanvasItem[] {
-  const collapsed = collapseAnchors(anchors);
-  const merge = style.mergeLines ?? config.mergeLines;
-  if (merge && collapsed.length >= 2 && config.gridType === "square") {
-    const run = runOf(collapsed);
-    const zone = collapsed[0].zone;
-    const sameZone = collapsed.every((anchor) => anchor.zone === zone);
-    if (run.axis !== null && sameZone && zone === 0) {
-      const indexes = collapsed.map((anchor) =>
-        run.axis === "row" ? anchor.column : anchor.row,
-      );
-      const sorted = [...new Set(indexes)].sort((a, b) => a - b);
-      const contiguous = sorted.every(
-        (value, index) => index === 0 || value === sorted[index - 1] + 1,
-      );
-      if (contiguous) {
-        const first = sorted[0];
-        const last = sorted[sorted.length - 1];
-        const from: Cell =
-          run.axis === "row"
-            ? { column: first, row: collapsed[0].row }
-            : { column: collapsed[0].column, row: first };
-        const to: Cell =
-          run.axis === "row"
-            ? { column: last, row: collapsed[0].row }
-            : { column: collapsed[0].column, row: last };
-        if (first !== last) {
-          return [makeLine(from, to, resolvedColor(config, style.color))];
-        }
-      }
-    }
-  }
-  return collapsed.map((anchor) => tileFor(config, anchor, style));
+  return collapseAnchors(anchors).map((anchor) => tileFor(config, anchor, style));
 }
 
 /**
- * Line tool → items: the old app's two-point, same-axis case becomes one
- * `line` bar; anything else (a diagonal, or three or more points) becomes one
- * stroked `polyline`, exactly like the reference implementation.
+ * Line tool → items.
+ *
+ * A run with **no diagonal segment** is either one solid `line` bar (the two
+ * endpoints) or — when `config.straightLinesAsSquares` is on, the reference
+ * app's default — one square per cell along every segment. Anything with a
+ * diagonal part becomes one stroked `polyline`, exactly like the old app.
  */
 export function lineItems(
   config: ProjectConfig,
@@ -263,11 +233,57 @@ export function lineItems(
   const unique = dedupeCells(points, closed);
   if (unique.length < 2) return [];
   const lineColor = resolvedColor(config, color);
+  if (config.gridType === "square" && config.straightLinesAsSquares) {
+    const squared = straightRunSquares(config, unique, closed, lineColor);
+    if (squared !== null) return squared;
+  }
   const run = runOf(unique);
   if (!closed && run.axis !== null && config.gridType === "square") {
     return [makeLine(unique[0], unique[unique.length - 1], lineColor)];
   }
   return [makeStroke(unique, closed, lineColor)];
+}
+
+/**
+ * One square per cell along every axis-aligned segment of the run — the
+ * reference app's `line()` (which emitted a `square` shape per cell whenever a
+ * straight line was drawn). Returns `null` as soon as a segment is diagonal,
+ * leaving the run to the polyline path.
+ */
+function straightRunSquares(
+  config: ProjectConfig,
+  cells: readonly Cell[],
+  closed: boolean,
+  color: string,
+): CanvasItem[] | null {
+  const segments: [Cell, Cell][] = [];
+  for (let index = 1; index < cells.length; index++) {
+    segments.push([cells[index - 1], cells[index]]);
+  }
+  if (closed && cells.length > 2) {
+    segments.push([cells[cells.length - 1], cells[0]]);
+  }
+  const along: Cell[] = [];
+  const seen = new Set<string>();
+  for (const [from, to] of segments) {
+    if (from.column !== to.column && from.row !== to.row) return null;
+    const step = Math.sign(to.column - from.column) || Math.sign(to.row - from.row);
+    const length = Math.abs(to.column - from.column) + Math.abs(to.row - from.row);
+    for (let offset = 0; offset <= length; offset++) {
+      const cell =
+        from.column === to.column
+          ? { column: from.column, row: from.row + step * offset }
+          : { column: from.column + step * offset, row: from.row };
+      // A closed run returns to its first cell; a cell is painted once.
+      const id = `${cell.column}:${cell.row}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      along.push(cell);
+    }
+  }
+  return along.map((cell) =>
+    tileFor(config, { column: cell.column, row: cell.row, zone: 0 }, { color }),
+  );
 }
 
 /** Drops immediate repeats (and the closing repeat of `closed`). */

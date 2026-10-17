@@ -9,6 +9,7 @@ import {
 import type {
   Anchor,
   CanvasItem,
+  Cell,
   ProjectConfig,
   TileItem,
   Zone,
@@ -201,76 +202,64 @@ const run = (from: number, to: number, zone: Zone, row = 4): Anchor[] => {
 };
 
 describe("penItems", () => {
-  it("merges a straight run into one line", () => {
+  it("paints one tile per anchor, never a merged bar", () => {
     const config = makeConfig();
     const items = penItems(config, run(2, 5, 0));
-    expect(items).toHaveLength(1);
-    expect(items[0]).toEqual({
-      type: "line",
-      key: lineKey({ column: 2, row: 4 }, { column: 5, row: 4 }),
-      from: { column: 2, row: 4 },
-      to: { column: 5, row: 4 },
-      color: config.ink,
-    });
-  });
-
-  it("canonicalises the run direction", () => {
-    const config = makeConfig();
-    expect(penItems(config, run(5, 2, 0))).toEqual(
-      penItems(config, run(2, 5, 0)),
-    );
-  });
-
-  it("merges vertical runs into a column line", () => {
-    const config = makeConfig();
-    const anchors: Anchor[] = [
-      { column: 3, row: 7, zone: 0 },
-      { column: 3, row: 6, zone: 0 },
-      { column: 3, row: 5, zone: 0 },
-    ];
-    expect(penItems(config, anchors)).toEqual([
+    expect(items).toEqual([
       {
-        type: "line",
-        key: lineKey({ column: 3, row: 5 }, { column: 3, row: 7 }),
-        from: { column: 3, row: 5 },
-        to: { column: 3, row: 7 },
+        type: "tile",
+        key: tileKey(2, 4, 0),
+        column: 2,
+        row: 4,
+        zone: 0,
+        color: config.ink,
+      },
+      {
+        type: "tile",
+        key: tileKey(3, 4, 0),
+        column: 3,
+        row: 4,
+        zone: 0,
+        color: config.ink,
+      },
+      {
+        type: "tile",
+        key: tileKey(4, 4, 0),
+        column: 4,
+        row: 4,
+        zone: 0,
+        color: config.ink,
+      },
+      {
+        type: "tile",
+        key: tileKey(5, 4, 0),
+        column: 5,
+        row: 4,
+        zone: 0,
         color: config.ink,
       },
     ]);
   });
 
-  it("keeps tiles for an L-shaped run", () => {
+  it("keeps the order the pointer moved in", () => {
     const config = makeConfig();
-    const anchors: Anchor[] = [
-      { column: 0, row: 0, zone: 0 },
-      { column: 1, row: 0, zone: 0 },
-      { column: 1, row: 1, zone: 0 },
-    ];
-    const items = penItems(config, anchors);
-    expect(items).toHaveLength(3);
-    expect(items.every((item) => item.type === "tile")).toBe(true);
-    expect(items.map((item) => item.key)).toEqual([
-      tileKey(0, 0, 0),
-      tileKey(1, 0, 0),
-      tileKey(1, 1, 0),
-    ]);
+    expect(penItems(config, run(5, 2, 0))).toEqual(
+      penItems(config, run(2, 5, 0)).reverse(),
+    );
   });
 
-  it("keeps tiles when mergeLines is off", () => {
-    const config = makeConfig();
-    const items = penItems(config, run(2, 5, 0), { mergeLines: false });
-    expect(items).toHaveLength(4);
-    expect(items.every((item) => item.type === "tile")).toBe(true);
-  });
-
-  it("keeps tiles when the zone quadrant changes inside the run", () => {
+  it("keeps the zone of each anchor", () => {
     const config = makeConfig();
     const anchors: Anchor[] = [
       { column: 2, row: 4, zone: 0 },
-      { column: 3, row: 4, zone: 0 },
-      { column: 4, row: 4, zone: 1 },
+      { column: 3, row: 4, zone: 1 },
+      { column: 4, row: 4, zone: 3 },
     ];
-    expect(penItems(config, anchors)).toHaveLength(3);
+    expect(penItems(config, anchors).map((item) => item.key)).toEqual([
+      tileKey(2, 4, 0),
+      tileKey(3, 4, 1),
+      tileKey(4, 4, 3),
+    ]);
   });
 
   it("collapses consecutive identical anchors", () => {
@@ -282,14 +271,9 @@ describe("penItems", () => {
       { column: 2, row: 1, zone: 0 },
       { column: 2, row: 1, zone: 0 },
     ];
-    expect(penItems(config, anchors)).toEqual([
-      {
-        type: "line",
-        key: lineKey({ column: 1, row: 1 }, { column: 2, row: 1 }),
-        from: { column: 1, row: 1 },
-        to: { column: 2, row: 1 },
-        color: config.ink,
-      },
+    expect(penItems(config, anchors).map((item) => item.key)).toEqual([
+      tileKey(1, 1, 0),
+      tileKey(2, 1, 0),
     ]);
   });
 
@@ -350,10 +334,27 @@ describe("penItems", () => {
     // …but the resolved colour is always stored, even when it is the ink.
     expect(penItems(config, run(0, 2, 0))).toEqual([
       {
-        type: "line",
-        key: lineKey({ column: 0, row: 4 }, { column: 2, row: 4 }),
-        from: { column: 0, row: 4 },
-        to: { column: 2, row: 4 },
+        type: "tile",
+        key: tileKey(0, 4, 0),
+        column: 0,
+        row: 4,
+        zone: 0,
+        color: "#1a1a2e",
+      },
+      {
+        type: "tile",
+        key: tileKey(1, 4, 0),
+        column: 1,
+        row: 4,
+        zone: 0,
+        color: "#1a1a2e",
+      },
+      {
+        type: "tile",
+        key: tileKey(2, 4, 0),
+        column: 2,
+        row: 4,
+        zone: 0,
         color: "#1a1a2e",
       },
     ]);
@@ -373,10 +374,35 @@ describe("penItems", () => {
     ]);
     expect(penItems(config, run(2, 5, 0))).toEqual([
       {
-        type: "line",
-        key: lineKey({ column: 2, row: 4 }, { column: 5, row: 4 }),
-        from: { column: 2, row: 4 },
-        to: { column: 5, row: 4 },
+        type: "tile",
+        key: tileKey(2, 4, 0),
+        column: 2,
+        row: 4,
+        zone: 0,
+        color: "#101010",
+      },
+      {
+        type: "tile",
+        key: tileKey(3, 4, 0),
+        column: 3,
+        row: 4,
+        zone: 0,
+        color: "#101010",
+      },
+      {
+        type: "tile",
+        key: tileKey(4, 4, 0),
+        column: 4,
+        row: 4,
+        zone: 0,
+        color: "#101010",
+      },
+      {
+        type: "tile",
+        key: tileKey(5, 4, 0),
+        column: 5,
+        row: 4,
+        zone: 0,
         color: "#101010",
       },
     ]);
@@ -396,15 +422,12 @@ describe("penItems", () => {
         color: "#ff0000",
       },
     ]);
-    const tiles = penItems(config, run(0, 2, 0), {
-      color: "#ff0000",
-      mergeLines: false,
-    });
+    const tiles = penItems(config, run(0, 2, 0), { color: "#ff0000" });
     expect(tiles).toHaveLength(3);
     expect(tiles.every((item) => item.color === "#ff0000")).toBe(true);
   });
 
-  it("keeps tiles for a circular run (no line merge on a polar grid)", () => {
+  it("uses the same tiles on the circular grid", () => {
     const config = makeConfig({ gridType: "circular" });
     const anchors: Anchor[] = [
       { column: 5, row: 35, zone: 0 },
@@ -443,32 +466,72 @@ describe("penItems", () => {
 /* ------------------------------------------------------------------ */
 
 describe("lineItems", () => {
-  it("turns a two-point same-axis segment into one line bar", () => {
+  /** The option off: a straight run becomes one solid bar. */
+  const bars = makeConfig({ straightLinesAsSquares: false });
+
+  it("draws a two-point straight run as one square per cell", () => {
     const config = makeConfig();
     const items = lineItems(
       config,
       [
         { column: 0, row: 4 },
-        { column: 5, row: 4 },
+        { column: 2, row: 4 },
       ],
       false,
     );
     expect(items).toEqual([
       {
-        type: "line",
-        key: lineKey({ column: 0, row: 4 }, { column: 5, row: 4 }),
-        from: { column: 0, row: 4 },
-        to: { column: 5, row: 4 },
+        type: "tile",
+        key: tileKey(0, 4, 0),
+        column: 0,
+        row: 4,
+        zone: 0,
+        color: config.ink,
+      },
+      {
+        type: "tile",
+        key: tileKey(1, 4, 0),
+        column: 1,
+        row: 4,
+        zone: 0,
+        color: config.ink,
+      },
+      {
+        type: "tile",
+        key: tileKey(2, 4, 0),
+        column: 2,
+        row: 4,
+        zone: 0,
         color: config.ink,
       },
     ]);
   });
 
-  it("canonicalises the two points", () => {
-    const config = makeConfig();
+  it("draws the same run as one bar when the option is off", () => {
     expect(
       lineItems(
-        config,
+        bars,
+        [
+          { column: 0, row: 4 },
+          { column: 5, row: 4 },
+        ],
+        false,
+      ),
+    ).toEqual([
+      {
+        type: "line",
+        key: lineKey({ column: 0, row: 4 }, { column: 5, row: 4 }),
+        from: { column: 0, row: 4 },
+        to: { column: 5, row: 4 },
+        color: bars.ink,
+      },
+    ]);
+  });
+
+  it("canonicalises the two points of a bar", () => {
+    expect(
+      lineItems(
+        bars,
         [
           { column: 5, row: 4 },
           { column: 0, row: 4 },
@@ -477,7 +540,7 @@ describe("lineItems", () => {
       ),
     ).toEqual(
       lineItems(
-        config,
+        bars,
         [
           { column: 0, row: 4 },
           { column: 5, row: 4 },
@@ -487,7 +550,37 @@ describe("lineItems", () => {
     );
   });
 
-  it("strokes a diagonal instead of a bar", () => {
+  it("covers the same cells whichever way the run was drawn", () => {
+    const config = makeConfig();
+    const keys = (points: readonly Cell[]) =>
+      lineItems(config, points, false)
+        .map((item) => item.key)
+        .sort();
+    expect(keys([{ column: 5, row: 4 }, { column: 0, row: 4 }])).toEqual(
+      keys([{ column: 0, row: 4 }, { column: 5, row: 4 }]),
+    );
+  });
+
+  it("splits each straight leg of a polyline into squares", () => {
+    const items = lineItems(
+      makeConfig(),
+      [
+        { column: 0, row: 0 },
+        { column: 2, row: 0 },
+        { column: 2, row: 2 },
+      ],
+      false,
+    );
+    expect(items.map((item) => item.key)).toEqual([
+      tileKey(0, 0, 0),
+      tileKey(1, 0, 0),
+      tileKey(2, 0, 0),
+      tileKey(2, 1, 0),
+      tileKey(2, 2, 0),
+    ]);
+  });
+
+  it("strokes a diagonal instead of squares", () => {
     const items = lineItems(
       makeConfig(),
       [
@@ -500,23 +593,73 @@ describe("lineItems", () => {
     expect(items[0].type).toBe("stroke");
   });
 
-  it("strokes a closed two-point run even on one axis", () => {
-    const points = [
-      { column: 0, row: 4 },
-      { column: 5, row: 4 },
-    ];
+  it("strokes a run that has any diagonal leg", () => {
+    const items = lineItems(
+      makeConfig(),
+      [
+        { column: 0, row: 0 },
+        { column: 2, row: 0 },
+        { column: 3, row: 3 },
+      ],
+      false,
+    );
+    expect(items).toHaveLength(1);
+    expect(items[0].type).toBe("stroke");
+  });
+
+  it("outlines a closed axis-aligned run with squares", () => {
+    const items = lineItems(
+      makeConfig(),
+      [
+        { column: 0, row: 0 },
+        { column: 2, row: 0 },
+        { column: 2, row: 2 },
+        { column: 0, row: 2 },
+      ],
+      true,
+    );
+    expect(items.map((item) => item.key)).toEqual([
+      tileKey(0, 0, 0),
+      tileKey(1, 0, 0),
+      tileKey(2, 0, 0),
+      tileKey(2, 1, 0),
+      tileKey(2, 2, 0),
+      tileKey(1, 2, 0),
+      tileKey(0, 2, 0),
+      tileKey(0, 1, 0),
+    ]);
+  });
+
+  it("strokes a closed run whose closing segment is diagonal", () => {
     const config = makeConfig();
-    const items = lineItems(config, points, true);
-    expect(items).toEqual([
+    const points: Cell[] = [
+      { column: 0, row: 0 },
+      { column: 2, row: 0 },
+      { column: 2, row: 2 },
+    ];
+    expect(lineItems(config, points, true)).toEqual([
       {
         type: "stroke",
         key: strokeKey(points, true),
-        points: [
-          { column: 0, row: 4 },
-          { column: 5, row: 4 },
-        ],
+        points,
         closed: true,
         color: config.ink,
+      },
+    ]);
+  });
+
+  it("strokes a closed two-point run when the option is off", () => {
+    const points: Cell[] = [
+      { column: 0, row: 4 },
+      { column: 5, row: 4 },
+    ];
+    expect(lineItems(bars, points, true)).toEqual([
+      {
+        type: "stroke",
+        key: strokeKey(points, true),
+        points,
+        closed: true,
+        color: bars.ink,
       },
     ]);
   });
@@ -537,17 +680,39 @@ describe("lineItems", () => {
     ).toEqual([]);
   });
 
-  it("keeps the colour override in the payload", () => {
-    const items = lineItems(
-      makeConfig(),
-      [
-        { column: 0, row: 0 },
-        { column: 2, row: 0 },
-      ],
-      false,
-      "#00ff00",
-    );
-    expect(items).toEqual([
+  it("keeps the colour override on squares and on a bar", () => {
+    const config = makeConfig();
+    const points: Cell[] = [
+      { column: 0, row: 0 },
+      { column: 2, row: 0 },
+    ];
+    expect(lineItems(config, points, false, "#00ff00")).toEqual([
+      {
+        type: "tile",
+        key: tileKey(0, 0, 0),
+        column: 0,
+        row: 0,
+        zone: 0,
+        color: "#00ff00",
+      },
+      {
+        type: "tile",
+        key: tileKey(1, 0, 0),
+        column: 1,
+        row: 0,
+        zone: 0,
+        color: "#00ff00",
+      },
+      {
+        type: "tile",
+        key: tileKey(2, 0, 0),
+        column: 2,
+        row: 0,
+        zone: 0,
+        color: "#00ff00",
+      },
+    ]);
+    expect(lineItems(bars, points, false, "#00ff00")).toEqual([
       {
         type: "line",
         key: lineKey({ column: 0, row: 0 }, { column: 2, row: 0 }),
@@ -558,26 +723,18 @@ describe("lineItems", () => {
     ]);
   });
 
-  it("stores the document ink on a bar and on a polyline", () => {
+  it("stores the document ink on squares and on a polyline", () => {
     const config = makeConfig({ ink: "#101010" });
-    expect(
-      lineItems(
-        config,
-        [
-          { column: 0, row: 4 },
-          { column: 5, row: 4 },
-        ],
-        false,
-      ),
-    ).toEqual([
-      {
-        type: "line",
-        key: lineKey({ column: 0, row: 4 }, { column: 5, row: 4 }),
-        from: { column: 0, row: 4 },
-        to: { column: 5, row: 4 },
-        color: "#101010",
-      },
-    ]);
+    const squares = lineItems(
+      config,
+      [
+        { column: 0, row: 4 },
+        { column: 5, row: 4 },
+      ],
+      false,
+    );
+    expect(squares).toHaveLength(6);
+    expect(squares.every((item) => item.color === "#101010")).toBe(true);
     // A diagonal is a polyline, and it carries the same resolved colour.
     const stroke = lineItems(
       config,
@@ -647,23 +804,21 @@ describe("ratio 1 (the space-less cell)", () => {
 
   it("still resolves the document ink on the line tool", () => {
     const config = makeConfig({ ratio: 1 });
-    expect(
-      lineItems(
-        config,
-        [
-          { column: 0, row: 0 },
-          { column: 4, row: 0 },
-        ],
-        false,
-      ),
-    ).toEqual([
-      {
-        type: "line",
-        key: lineKey({ column: 0, row: 0 }, { column: 4, row: 0 }),
-        from: { column: 0, row: 0 },
-        to: { column: 4, row: 0 },
-        color: config.ink,
-      },
+    const items = lineItems(
+      config,
+      [
+        { column: 0, row: 0 },
+        { column: 4, row: 0 },
+      ],
+      false,
+    );
+    expect(items.map((item) => item.key)).toEqual([
+      tileKey(0, 0, 0),
+      tileKey(1, 0, 0),
+      tileKey(2, 0, 0),
+      tileKey(3, 0, 0),
+      tileKey(4, 0, 0),
     ]);
+    expect(items.every((item) => item.color === config.ink)).toBe(true);
   });
 });

@@ -164,7 +164,8 @@ describe("editor preferences", () => {
       ink: "#abcdef",
       background: "transparent",
       showGrid: true,
-      mergeLines: false,
+      // The legacy `mergeLines` flag is dropped; the new option defaults on.
+      straightLinesAsSquares: true,
     });
 
     saveLastConfig(config!, storage);

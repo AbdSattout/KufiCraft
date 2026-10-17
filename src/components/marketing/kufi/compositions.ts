@@ -282,11 +282,11 @@ export function ratioCells(ratios: number[]): Piece[] {
   }));
 }
 
-/** A run of five cells: separate fragments above, one merged bar below. */
+/** A run of five cells: separate fragments above, one solid bar below. */
 export const mergedRun: Piece = {
   id: "merged-run",
-  name: "دمج الخطوط",
-  note: "خمس خلايا، ثم خط واحد",
+  name: "خط ومربّعات",
+  note: "مربّع لكل خلية، أو شريط واحد",
   spec: { kind: "square", cells: 5, extent: { w: 5, h: 2 } },
   ratio: NARROW_RATIO,
   items: [...tiles(["#####", "....."]), { t: "bar", i1: 0, j1: 1, i2: 4, j2: 1 }],

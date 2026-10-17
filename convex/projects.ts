@@ -4,6 +4,7 @@ import type { Id } from "./_generated/dataModel";
 import { ConvexError } from "convex/values";
 import {
   CIRCULAR_SECTORS,
+  DEFAULT_PROJECT_CONFIG,
   canvasItemValidator,
   maxGridIndex,
   projectConfigValidator,
@@ -187,13 +188,27 @@ function sanitizeName(raw: string): string {
   return name.length > 0 ? name : "لوحة بلا عنوان";
 }
 
-function sanitizeConfig(config: ProjectConfig): ProjectConfig {
+/**
+ * Stored config: the live fields, with the ones that may be missing on an
+ * older document optional so the sanitiser can default them.
+ */
+type StoredConfig = Omit<ProjectConfig, "straightLinesAsSquares"> & {
+  straightLinesAsSquares?: boolean;
+  /** Legacy flag (≤ model v2): merged a straight pen stroke into a `line`. */
+  mergeLines?: boolean;
+};
+
+function sanitizeConfig(config: StoredConfig): ProjectConfig {
   return {
-    ...config,
+    gridType: config.gridType,
     ratio: snapRatio(config.ratio),
     base: clamp(config.base, 4, 100),
     ink: config.ink.slice(0, MAX_COLOR_LENGTH),
     background: config.background.slice(0, MAX_COLOR_LENGTH),
+    showGrid: config.showGrid,
+    straightLinesAsSquares:
+      config.straightLinesAsSquares ??
+      DEFAULT_PROJECT_CONFIG.straightLinesAsSquares,
   };
 }
 
@@ -228,7 +243,7 @@ const configPatchValidator = v.object({
   ink: v.optional(v.string()),
   background: v.optional(v.string()),
   showGrid: v.optional(v.boolean()),
-  mergeLines: v.optional(v.boolean()),
+  straightLinesAsSquares: v.optional(v.boolean()),
 });
 
 /* ------------------------------------------------------------------ */
@@ -283,7 +298,9 @@ export const get = query({
     const userId = await requireUserId(ctx);
     const project = await ctx.db.get("projects", projectId);
     if (!project || project.userId !== userId) return null;
-    return project;
+    // A document written before a config field existed is repaired on read, so
+    // the editor never sees a half-filled `ProjectConfig` (docs/BACKEND.md).
+    return { ...project, config: sanitizeConfig(project.config) };
   },
 });
 
@@ -410,7 +427,7 @@ export const applyOps = mutation({
   handler: async (ctx, { projectId, ops }) => {
     const userId = await requireUserId(ctx);
     const project = await requireOwnedProject(ctx, projectId, userId);
-    const config = project.config;
+    const config = sanitizeConfig(project.config);
 
     const map = new Map<string, CanvasItem>();
     for (const stored of project.items) {

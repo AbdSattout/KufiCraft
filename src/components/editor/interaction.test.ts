@@ -12,7 +12,6 @@ import {
   DEFAULT_ARC_STYLE,
   DEFAULT_STYLE,
   anchorAt,
-  anchorsBetween,
   arcBetween,
   cellLimits,
   clampDelta,
@@ -150,53 +149,6 @@ describe("anchoring", () => {
       row: 0,
       zone: 0,
     });
-  });
-});
-
-describe("anchorsBetween", () => {
-  it("fills the cells a fast horizontal drag skipped", () => {
-    const swept = anchorsBetween(
-      { column: 2, row: 3, zone: 0 },
-      { column: 5, row: 3, zone: 0 },
-    );
-    expect(swept).toEqual([
-      { column: 2, row: 3, zone: 0 },
-      { column: 3, row: 3, zone: 0 },
-      { column: 4, row: 3, zone: 0 },
-      { column: 5, row: 3, zone: 0 },
-    ]);
-  });
-
-  it("walks backwards and vertically, endpoints included", () => {
-    expect(
-      anchorsBetween(
-        { column: 1, row: 4, zone: 2 },
-        { column: 1, row: 2, zone: 2 },
-      ),
-    ).toEqual([
-      { column: 1, row: 4, zone: 2 },
-      { column: 1, row: 3, zone: 2 },
-      { column: 1, row: 2, zone: 2 },
-    ]);
-    expect(
-      anchorsBetween(
-        { column: 0, row: 0, zone: 0 },
-        { column: 0, row: 0, zone: 0 },
-      ),
-    ).toEqual([{ column: 0, row: 0, zone: 0 }]);
-  });
-
-  it("carries the destination zone on every swept anchor", () => {
-    expect(
-      anchorsBetween(
-        { column: 0, row: 0, zone: 0 },
-        { column: 2, row: 0, zone: 1 },
-      ),
-    ).toEqual([
-      { column: 0, row: 0, zone: 1 },
-      { column: 1, row: 0, zone: 1 },
-      { column: 2, row: 0, zone: 1 },
-    ]);
   });
 });
 
@@ -486,13 +438,12 @@ describe("arcBetween + linePreview", () => {
       { column: 3, row: 1 },
       false,
     );
-    expect(preview).toHaveLength(1);
-    expect(preview[0]).toMatchObject({
-      type: "line",
-      from: { column: 1, row: 1 },
-      to: { column: 3, row: 1 },
-      color: square.ink,
-    });
+    expect(preview.map((item) => item.key)).toEqual([
+      tileKey(1, 1, 0),
+      tileKey(2, 1, 0),
+      tileKey(3, 1, 0),
+    ]);
+    expect(preview.every((item) => item.color === square.ink)).toBe(true);
   });
 
   it("makes a diagonal polyline open or closed on request", () => {

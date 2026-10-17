@@ -10,7 +10,6 @@ import {
 } from "./interaction";
 import type { ToolContext } from "./interaction";
 import {
-  MAX_PEN_GAP,
   NO_STATE,
   beginTool,
   endTool,
@@ -67,52 +66,39 @@ function expectArc(state: ToolState): Extract<ToolState, { kind: "arc" }> {
 /* ------------------------------------------------------------------ */
 
 describe("PenTool", () => {
-  it("fills the short gap a drag leaves, in order", () => {
+  it("paints the cell under the pointer and nothing in between", () => {
     const ctx = context();
     const start = beginTool("pen", ctx, NO_STATE, input(pointOf(1, 1)));
     const moved = moveTool("pen", ctx, start.state, input(pointOf(5, 1)));
+    // Only the positions the pointer reported — never the cells a Bresenham
+    // walk would have crossed on the way (docs/CANVAS.md §Pen).
     expect(expectPen(moved.state).anchors).toEqual([
       { column: 1, row: 1, zone: 0 },
-      { column: 2, row: 1, zone: 0 },
-      { column: 3, row: 1, zone: 0 },
-      { column: 4, row: 1, zone: 0 },
       { column: 5, row: 1, zone: 0 },
     ]);
   });
 
-  it("paints only the segment the pointer just swept, not a re-swept swath", () => {
+  it("keeps only the cells the pointer was actually over", () => {
     const ctx = context();
     let state = beginTool("pen", ctx, NO_STATE, input(pointOf(1, 1))).state;
     state = moveTool("pen", ctx, state, input(pointOf(5, 1))).state;
     state = moveTool("pen", ctx, state, input(pointOf(5, 5))).state;
 
-    const anchors = expectPen(state).anchors;
+    expect(expectPen(state).anchors).toEqual([
+      { column: 1, row: 1, zone: 0 },
+      { column: 5, row: 1, zone: 0 },
+      { column: 5, row: 5, zone: 0 },
+    ]);
+
+    // A cell the pointer jumped over stays blank.
+    state = moveTool("pen", ctx, state, input(pointOf(6, 5))).state;
     const keys = new Set(
-      anchors.map((anchor) => tileKey(anchor.column, anchor.row, anchor.zone)),
+      expectPen(state).anchors.map((anchor) =>
+        tileKey(anchor.column, anchor.row, anchor.zone),
+      ),
     );
-    // The two straight runs the pointer actually crossed.
-    expect(anchors).toHaveLength(9);
-    for (const cell of [
-      [2, 1],
-      [3, 1],
-      [4, 1],
-      [5, 1],
-      [5, 2],
-      [5, 3],
-      [5, 4],
-      [5, 5],
-    ] as const) {
-      expect(keys.has(tileKey(cell[0], cell[1], 0))).toBe(true);
-    }
-    // Bresenham from the first anchor to the cursor would have painted these;
-    // the pointer never crossed them, so they must stay blank.
-    for (const cell of [
-      [2, 2],
-      [3, 3],
-      [4, 4],
-    ] as const) {
-      expect(keys.has(tileKey(cell[0], cell[1], 0))).toBe(false);
-    }
+    expect(keys.has(tileKey(4, 1, 0))).toBe(false);
+    expect(keys.has(tileKey(5, 3, 0))).toBe(false);
   });
 
   it("is unchanged when the pointer stays inside the same cell", () => {
@@ -123,25 +109,6 @@ describe("PenTool", () => {
     expect(again.state).toBe(moved.state);
   });
 
-  it("treats a jump longer than MAX_PEN_GAP as a teleport", () => {
-    const ctx = context();
-    const start = beginTool("pen", ctx, NO_STATE, input(pointOf(0, 0)));
-
-    const filled = moveTool("pen", ctx, start.state, input(pointOf(MAX_PEN_GAP, 0)));
-    expect(expectPen(filled.state).anchors).toHaveLength(MAX_PEN_GAP + 1);
-
-    const jumped = moveTool(
-      "pen",
-      ctx,
-      start.state,
-      input(pointOf(MAX_PEN_GAP + 1, 0)),
-    );
-    expect(expectPen(jumped.state).anchors).toEqual([
-      { column: 0, row: 0, zone: 0 },
-      { column: MAX_PEN_GAP + 1, row: 0, zone: 0 },
-    ]);
-  });
-
   it("commits one paintItems batch labelled رسم and resets", () => {
     const ctx = context();
     let state = beginTool("pen", ctx, NO_STATE, input(pointOf(1, 1))).state;
@@ -150,12 +117,12 @@ describe("PenTool", () => {
 
     expect(out.state).toBe(NO_STATE);
     expect(out.commit?.label).toBe("رسم");
-    expect(out.commit?.items).toHaveLength(1);
-    expect(out.commit?.items[0]).toMatchObject({
-      type: "line",
-      from: { column: 1, row: 1 },
-      to: { column: 3, row: 1 },
-    });
+    // Two fragments — the pen never merges a straight run into a bar.
+    expect(out.commit?.items).toHaveLength(2);
+    expect(out.commit?.items.map((item) => item.type)).toEqual([
+      "tile",
+      "tile",
+    ]);
   });
 
   it("replaces a same-key item in place (recolour) and keeps one item", () => {
@@ -214,7 +181,7 @@ describe("LineTool", () => {
     expect(expectLine(third.state).points).toHaveLength(3);
   });
 
-  it("commits an open run when the last point is clicked again", () => {
+  it("draws an axis-aligned run as one square per cell", () => {
     const ctx = context();
     const first = beginTool("line", ctx, NO_STATE, input(pointOf(1, 1)));
     const second = beginTool("line", ctx, first.state, input(pointOf(3, 1)));
@@ -222,6 +189,22 @@ describe("LineTool", () => {
 
     expect(out.state).toBe(NO_STATE);
     expect(out.commit?.label).toBe("خط");
+    expect(out.commit?.items).toEqual([
+      makeTile({ column: 1, row: 1, zone: 0, color: CONFIG.ink }),
+      makeTile({ column: 2, row: 1, zone: 0, color: CONFIG.ink }),
+      makeTile({ column: 3, row: 1, zone: 0, color: CONFIG.ink }),
+    ]);
+  });
+
+  it("draws one solid bar when the squares option is off", () => {
+    const ctx = context([], {
+      config: { ...CONFIG, straightLinesAsSquares: false },
+    });
+    const first = beginTool("line", ctx, NO_STATE, input(pointOf(1, 1)));
+    const second = beginTool("line", ctx, first.state, input(pointOf(3, 1)));
+    const out = beginTool("line", ctx, second.state, input(pointOf(3, 1)));
+
+    expect(out.state).toBe(NO_STATE);
     expect(out.commit?.items).toHaveLength(1);
     expect(out.commit?.items[0]).toMatchObject({
       type: "line",
@@ -230,13 +213,29 @@ describe("LineTool", () => {
     });
   });
 
-  it("commits a closed run when the first point is clicked again", () => {
+  it("outlines a closed rectangle with squares", () => {
     const ctx = context();
-    const first = beginTool("line", ctx, NO_STATE, input(pointOf(1, 1)));
-    const second = beginTool("line", ctx, first.state, input(pointOf(3, 1)));
-    const out = beginTool("line", ctx, second.state, input(pointOf(1, 1)));
+    let state = beginTool("line", ctx, NO_STATE, input(pointOf(1, 1))).state;
+    state = beginTool("line", ctx, state, input(pointOf(4, 1))).state;
+    state = beginTool("line", ctx, state, input(pointOf(4, 4))).state;
+    state = beginTool("line", ctx, state, input(pointOf(1, 4))).state;
+    const out = beginTool("line", ctx, state, input(pointOf(1, 1)));
 
     expect(out.state).toBe(NO_STATE);
+    expect(out.commit?.items).toHaveLength(12);
+    expect(out.commit?.items.every((item) => item.type === "tile")).toBe(true);
+  });
+
+  it("commits a closed run with a diagonal part as a stroke", () => {
+    const ctx = context();
+    let state = beginTool("line", ctx, NO_STATE, input(pointOf(1, 1))).state;
+    state = beginTool("line", ctx, state, input(pointOf(3, 1))).state;
+    state = beginTool("line", ctx, state, input(pointOf(3, 3))).state;
+    // The closing segment (3,3) → (1,1) is diagonal, so the run is stroked.
+    const out = beginTool("line", ctx, state, input(pointOf(1, 1)));
+
+    expect(out.state).toBe(NO_STATE);
+    expect(out.commit?.items).toHaveLength(1);
     expect(out.commit?.items[0]).toMatchObject({ type: "stroke", closed: true });
   });
 
@@ -247,7 +246,9 @@ describe("LineTool", () => {
     const preview = previewTool("line", ctx, hovered.state);
 
     expect(preview.mode).toBe("ghost");
-    expect(preview.items).toHaveLength(1);
+    // The previewed run is the same squares the commit will paint.
+    expect(preview.items).toHaveLength(3);
+    expect(preview.items.every((item) => item.type === "tile")).toBe(true);
     expect(preview.marker).toEqual({ column: 1, row: 1, zone: 0 });
   });
 });

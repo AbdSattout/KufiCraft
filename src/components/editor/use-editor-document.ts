@@ -23,6 +23,7 @@ import { DEFAULT_PROJECT_CONFIG } from "@/lib/canvas/model";
 import type { CanvasItem, ProjectConfig } from "@/lib/canvas/model";
 import { toOps } from "@/lib/canvas/ops";
 import { renderThumbnail } from "@/lib/canvas/render";
+import { sanitizeProjectConfig } from "@/lib/kuficraft-file";
 import { configsEqual, itemsEqual } from "./interaction";
 import { errorMessage } from "./messages";
 
@@ -93,11 +94,14 @@ export function useEditorDocument(
     // A write is still in flight, or the echo is older than our last ack:
     // keep the optimistic overlay until the server caught up.
     if (pendingRef.current > 0 || doc.updatedAt < ackUpdatedAt.current) return;
+    // A deployment can be older than the client: normalise here so the editor
+    // only ever holds a complete `ProjectConfig`.
+    const nextConfig = sanitizeProjectConfig(doc.config);
     setItems((prev) =>
       prev !== null && itemsEqual(prev, doc.items) ? prev : doc.items,
     );
     setConfig((prev) =>
-      prev !== null && configsEqual(prev, doc.config) ? prev : doc.config,
+      prev !== null && configsEqual(prev, nextConfig) ? prev : nextConfig,
     );
     setName((prev) => (prev === doc.name ? prev : doc.name));
   }, [doc, pending]);
@@ -156,7 +160,7 @@ export function useEditorDocument(
         .catch((error: unknown) => {
           toast.error(errorMessage(error));
           const latest = docRef.current;
-          if (latest) setConfig(latest.config);
+          if (latest) setConfig(sanitizeProjectConfig(latest.config));
         })
         .finally(() => {
           pendingRef.current -= 1;

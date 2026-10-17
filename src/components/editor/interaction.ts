@@ -7,8 +7,8 @@
  *   • viewport → viewBox mapping (`clientToViewBox`) including CSS scaling
  *     and RTL — the SVG is fitted with `preserveAspectRatio="xMidYMid meet"`,
  *     so the mapping is a uniform scale plus a centred letterbox offset;
- *   • anchoring (`anchorAt`, `inkAnchorAt`, `anchorsBetween`) and hit testing
- *     (`hitTest`) — the item classes answer for their own geometry;
+ *   • anchoring (`anchorAt`, `inkAnchorAt`) and hit testing (`hitTest`) — the
+ *     item classes answer for their own geometry;
  *   • selection operations (move, recolour, reshape, duplicate, delete);
  *   • the shared types the tools speak: `ToolId`, `ToolContext`, `DrawStyle`,
  *     `ArcStyle`.
@@ -204,36 +204,6 @@ function anchorKey(anchor: Anchor): string {
 
 function wrapSector(row: number): number {
   return ((row % CIRCULAR_SECTORS) + CIRCULAR_SECTORS) % CIRCULAR_SECTORS;
-}
-
-/**
- * Cells swept between two anchors (integer Bresenham), endpoints included,
- * all carrying `to.zone`. Fills the gaps a fast drag leaves behind so a
- * stroke stays continuous.
- */
-export function anchorsBetween(from: Anchor, to: Anchor): Anchor[] {
-  const cells: Cell[] = [];
-  let column = from.column;
-  let row = from.row;
-  const dColumn = Math.abs(to.column - from.column);
-  const dRow = Math.abs(to.row - from.row);
-  const stepColumn = column < to.column ? 1 : -1;
-  const stepRow = row < to.row ? 1 : -1;
-  let error = dColumn - dRow;
-  for (let step = 0; step <= dColumn + dRow + 1; step++) {
-    cells.push({ column, row });
-    if (column === to.column && row === to.row) break;
-    const doubled = error * 2;
-    if (doubled > -dRow) {
-      error -= dRow;
-      column += stepColumn;
-    }
-    if (doubled < dColumn) {
-      error += dColumn;
-      row += stepRow;
-    }
-  }
-  return cells.map((cell) => ({ ...cell, zone: to.zone }));
 }
 
 /* ------------------------------------------------------------------ */
@@ -557,7 +527,7 @@ export function configsEqual(a: ProjectConfig, b: ProjectConfig): boolean {
     a.ink === b.ink &&
     a.background === b.background &&
     a.showGrid === b.showGrid &&
-    a.mergeLines === b.mergeLines
+    a.straightLinesAsSquares === b.straightLinesAsSquares
   );
 }
 

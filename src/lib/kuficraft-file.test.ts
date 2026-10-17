@@ -86,7 +86,7 @@ function sampleConfig(): ProjectConfig {
     ink: "#0f172a",
     background: "transparent",
     showGrid: true,
-    mergeLines: false,
+    straightLinesAsSquares: false,
   };
 }
 
@@ -186,7 +186,7 @@ describe("parseProjectFile — config and name", () => {
           ink: "#abcdef",
           background: "transparent",
           showGrid: "yes",
-          mergeLines: true,
+          straightLinesAsSquares: false,
           unknown: 1,
         },
       }),
@@ -198,8 +198,24 @@ describe("parseProjectFile — config and name", () => {
       ink: "#abcdef",
       background: "transparent",
       showGrid: DEFAULT_PROJECT_CONFIG.showGrid,
-      mergeLines: true,
+      straightLinesAsSquares: false,
     });
+  });
+
+  it("drops the legacy mergeLines flag and fills the new one", () => {
+    const parsed = parseProjectFile(
+      rawFile({
+        config: {
+          ...sampleConfig(),
+          mergeLines: true,
+          straightLinesAsSquares: undefined,
+        },
+      }),
+    );
+    expect(parsed.config.straightLinesAsSquares).toBe(
+      DEFAULT_PROJECT_CONFIG.straightLinesAsSquares,
+    );
+    expect(parsed.config).not.toHaveProperty("mergeLines");
   });
 
   it("defaults missing config fields", () => {

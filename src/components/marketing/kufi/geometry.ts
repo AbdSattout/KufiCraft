@@ -68,7 +68,7 @@ export type TileItem = {
   turn?: Turn;
 };
 
-/** A straight merged run: full cell thickness (the editor's “دمج الخطوط”). */
+/** A straight run drawn as one solid bar (the editor's `line` item). */
 export type BarItem = {
   t: "bar";
   i1: number;

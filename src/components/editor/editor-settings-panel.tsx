@@ -225,11 +225,16 @@ export function SettingsPanel({
           onCheckedChange={(checked) => patchConfig({ showGrid: checked })}
         />
         <ToggleRow
-          id="editor-merge-lines"
-          label={MESSAGES.mergeLines}
-          checked={config.mergeLines}
-          onCheckedChange={(checked) => patchConfig({ mergeLines: checked })}
+          id="editor-straight-lines"
+          label={MESSAGES.straightLinesAsSquares}
+          checked={config.straightLinesAsSquares}
+          onCheckedChange={(checked) =>
+            patchConfig({ straightLinesAsSquares: checked })
+          }
         />
+        <p className="text-xs text-muted-foreground/80">
+          {MESSAGES.straightLinesAsSquaresHint}
+        </p>
       </PanelSection>
 
       <Separator />
