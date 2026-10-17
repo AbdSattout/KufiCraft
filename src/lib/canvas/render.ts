@@ -5,23 +5,23 @@
  * and by the landing page; `renderThumbnail` produces the compact version the
  * dashboard stores (no grid, fixed light background, reduced precision, and
  * guaranteed to stay within `MAX_THUMBNAIL_LENGTH`).
+ *
+ * Every path comes from the item classes (`items.ts` → `KufiItem.render`), so
+ * the string renderer and the React canvas can never drift apart.
  */
 
-import {
-  CIRCULAR_ANGULAR_UNIT,
-  CIRCULAR_SECTORS,
-  MAX_THUMBNAIL_LENGTH,
-  VIEWBOX_SIZE,
-} from "./model";
+import { MAX_THUMBNAIL_LENGTH, VIEWBOX_SIZE } from "./model";
 import type { CanvasItem, ProjectConfig } from "./model";
-import { itemPath } from "./geometry";
+import { itemOf } from "./items";
+import { gridPaths } from "./grid";
 
 const TRANSPARENT = "transparent";
-const CENTER = VIEWBOX_SIZE / 2;
 
 /** Construction grid: neutral grey, subtle on light and dark backgrounds. */
 const GRID_STROKE = "#8a8a8a";
 const GRID_OPACITY = "0.28";
+/** The inner (ink) lines are the ones that show «قلم / فراغ», so they read stronger. */
+const INK_OPACITY = "0.55";
 const GRID_WIDTH = 1;
 
 /** Thumbnails use a fixed paper background so cards look uniform. */
@@ -62,43 +62,6 @@ function roundPathNumbers(d: string, digits: number): string {
   });
 }
 
-function squareGridPath(base: number): string {
-  let d = "";
-  const lines = Math.floor(VIEWBOX_SIZE / base);
-  for (let n = 0; n <= lines; n++) {
-    const at = num(n * base);
-    const size = num(VIEWBOX_SIZE);
-    d += (d === "" ? "" : " ") + `M ${at} 0 V ${size} M 0 ${at} H ${size}`;
-  }
-  return d;
-}
-
-function circularGridPath(base: number): string {
-  let d = "";
-  const rings = Math.floor(CENTER / base);
-  for (let n = 1; n <= rings; n++) {
-    const r = num(n * base);
-    d +=
-      (d === "" ? "" : " ") +
-      `M ${num(CENTER + n * base)} ${CENTER} ` +
-      `A ${r} ${r} 0 1 1 ${num(CENTER - n * base)} ${CENTER} ` +
-      `A ${r} ${r} 0 1 1 ${num(CENTER + n * base)} ${CENTER}`;
-  }
-  for (let sector = 0; sector < CIRCULAR_SECTORS; sector++) {
-    const angle = sector * CIRCULAR_ANGULAR_UNIT;
-    const x = num(CENTER + CENTER * Math.cos(angle));
-    const y = num(CENTER + CENTER * Math.sin(angle));
-    d += ` M ${CENTER} ${CENTER} L ${x} ${y}`;
-  }
-  return d;
-}
-
-function gridPath(config: ProjectConfig): string {
-  return config.gridType === "circular"
-    ? circularGridPath(config.base)
-    : squareGridPath(config.base);
-}
-
 interface SvgParts {
   showGrid: boolean;
   background: string;
@@ -112,7 +75,6 @@ function renderSvgString(
   items: readonly CanvasItem[],
   parts: SvgParts,
 ): string {
-  const strokeWidth = num(config.ratio * config.base);
   const out: string[] = [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${VIEWBOX_SIZE} ${VIEWBOX_SIZE}"` +
       ` width="${parts.size}" height="${parts.size}">`,
@@ -123,22 +85,31 @@ function renderSvgString(
     );
   }
   if (parts.showGrid) {
+    const grid = gridPaths(config);
     out.push(
-      `<path d="${gridPath(config)}" fill="none" stroke="${GRID_STROKE}"` +
+      `<path d="${grid.cellBorders}" fill="none" stroke="${GRID_STROKE}"` +
         ` stroke-opacity="${GRID_OPACITY}" stroke-width="${GRID_WIDTH}"/>`,
+    );
+    out.push(
+      `<path d="${grid.inkLines}" fill="none" stroke="${GRID_STROKE}"` +
+        ` stroke-opacity="${INK_OPACITY}" stroke-width="${GRID_WIDTH}"/>`,
     );
   }
   for (const item of items) {
-    const raw = itemPath(config, item);
+    const rendered = itemOf(item).render(config);
     const d =
       parts.precision === undefined
-        ? raw
-        : roundPathNumbers(raw, parts.precision);
-    const color = escapeXml(item.c ?? config.ink);
-    const key = parts.includeKeys ? ` data-k="${escapeXml(item.k)}"` : "";
-    if (item.t === "arch") {
+        ? rendered.path
+        : roundPathNumbers(rendered.path, parts.precision);
+    const color = escapeXml(itemOf(item).resolvedColor(config));
+    const key = parts.includeKeys ? ` data-k="${escapeXml(item.key)}"` : "";
+    if (rendered.mode === "stroke") {
+      // Butt caps and mitre joins: a rib ends flush with the ink edge, exactly
+      // like the reference app (no rounded heads).
       out.push(
-        `<path${key} d="${d}" fill="none" stroke="${color}" stroke-width="${strokeWidth}"/>`,
+        `<path${key} d="${d}" fill="none" stroke="${color}"` +
+          ` stroke-width="${num(rendered.width)}"` +
+          ` stroke-linecap="butt" stroke-linejoin="miter"/>`,
       );
     } else {
       out.push(`<path${key} d="${d}" fill="${color}"/>`);

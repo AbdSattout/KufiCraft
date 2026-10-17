@@ -4,7 +4,8 @@
  * Two keys, both private to the browser and never sent to the server:
  *
  *   • `kuficraft.editor-prefs.v1` — how the editor opens: tool, shape and
- *     rotation, arch bulge, zoom and the last few ink colours.
+ *     rotation, the arc style (direction + size), zoom and the last few ink
+ *     colours.
  *   • `kuficraft.last-config.v1` — the last committed project config, used as
  *     the default in the dashboard's «لوحة جديدة» dialog. The grid, merge and
  *     ratio settings live here, not in the prefs: they belong to the document,
@@ -15,9 +16,11 @@
  * or a full quota must never break the editor).
  */
 
-import type { ProjectConfig, TileShape } from "@/lib/canvas/model";
-import { SHAPE_ORDER, TOOL_ORDER } from "@/components/editor/interaction";
-import type { Tool } from "@/components/editor/interaction";
+import type { ArcDirection, ArcSize, ProjectConfig, ShapeId } from "@/lib/canvas/model";
+import { ARC_DIRECTIONS, ARC_SIZES } from "@/lib/canvas/model";
+import { SHAPE_ORDER } from "@/lib/canvas/shapes";
+import { TOOL_ORDER } from "@/components/editor/tools";
+import type { ArcStyle, Rotation, ToolId } from "@/components/editor/interaction";
 import { sanitizeProjectConfig } from "@/lib/kuficraft-file";
 
 export const EDITOR_PREFS_KEY = "kuficraft.editor-prefs.v1";
@@ -29,13 +32,11 @@ export const DEFAULT_ZOOM = 1;
 export const MIN_ZOOM = 0.5;
 export const MAX_ZOOM = 2;
 
-export type Rotation = 0 | 1 | 2 | 3;
-
 export interface EditorPrefs {
-  tool: Tool;
-  shape: TileShape;
+  tool: ToolId;
+  shape: ShapeId;
   rotation: Rotation;
-  bulge: 0 | 1;
+  arc: ArcStyle;
   zoom: number;
   /** Recent ink colours, most-recent-first, deduped case-insensitively. */
   inkSwatches: string[];
@@ -45,7 +46,7 @@ export const DEFAULT_EDITOR_PREFS: EditorPrefs = {
   tool: "pen",
   shape: "square",
   rotation: 0,
-  bulge: 0,
+  arc: { direction: "clockwise", size: "half" },
   zoom: DEFAULT_ZOOM,
   inkSwatches: [],
 };
@@ -94,13 +95,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isTool(value: unknown): value is Tool {
+function isTool(value: unknown): value is ToolId {
   return (
     typeof value === "string" && (TOOL_ORDER as readonly string[]).includes(value)
   );
 }
 
-function isShape(value: unknown): value is TileShape {
+function isShape(value: unknown): value is ShapeId {
   return (
     typeof value === "string" && (SHAPE_ORDER as readonly string[]).includes(value)
   );
@@ -110,8 +111,22 @@ function isRotation(value: unknown): value is Rotation {
   return value === 0 || value === 1 || value === 2 || value === 3;
 }
 
-function isBulge(value: unknown): value is 0 | 1 {
-  return value === 0 || value === 1;
+function isDirection(value: unknown): value is ArcDirection {
+  return (ARC_DIRECTIONS as readonly string[]).includes(value as string);
+}
+
+function isSize(value: unknown): value is ArcSize {
+  return (ARC_SIZES as readonly string[]).includes(value as string);
+}
+
+/** Arc style from prefs, tolerating the pre-2 field shape (`bulge: 0 | 1`). */
+function arcStyle(value: unknown): ArcStyle {
+  const record = isRecord(value) ? value : {};
+  const direction = isDirection(record.direction)
+    ? record.direction
+    : DEFAULT_EDITOR_PREFS.arc.direction;
+  const size = isSize(record.size) ? record.size : DEFAULT_EDITOR_PREFS.arc.size;
+  return { direction, size };
 }
 
 function clampZoom(value: unknown): number {
@@ -150,7 +165,7 @@ export function loadEditorPrefs(
     rotation: isRotation(record.rotation)
       ? record.rotation
       : DEFAULT_EDITOR_PREFS.rotation,
-    bulge: isBulge(record.bulge) ? record.bulge : DEFAULT_EDITOR_PREFS.bulge,
+    arc: arcStyle(record.arc),
     zoom: clampZoom(record.zoom),
     inkSwatches: normalizeSwatches(record.inkSwatches),
   };

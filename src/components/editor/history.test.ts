@@ -14,7 +14,7 @@ import type { HistoryEntry } from "./history";
 
 function entry(i: number): HistoryEntry {
   const items: CanvasItem[] = [
-    { t: "tile", k: tileKey(i, 0, 0), i, j: 0, q: 0 },
+    { type: "tile", key: tileKey(i, 0, 0), column: i, row: 0, zone: 0 },
   ];
   return { items, selection: [], label: "رسم" };
 }

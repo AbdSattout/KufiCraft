@@ -16,20 +16,14 @@ import type { PointerEvent as ReactPointerEvent, RefObject } from "react";
 import { Minus, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CanvasPreview } from "@/components/canvas/canvas-preview";
-import type { CanvasItem, ProjectConfig } from "@/lib/canvas/model";
+import type { Anchor, CanvasItem, ProjectConfig } from "@/lib/canvas/model";
 import type { Rect } from "@/lib/canvas/geometry";
 import { cn } from "@/lib/utils";
 import { MESSAGES } from "./messages";
 import { formatCount } from "./editor-palette";
 import { CanvasOverlay } from "./canvas-overlay";
-import type { Tool } from "./interaction";
-
-const TOOL_CURSORS: Record<Tool, string> = {
-  pen: "cursor-crosshair",
-  eraser: "cursor-cell",
-  arch: "cursor-crosshair",
-  select: "cursor-default",
-};
+import { toolOf } from "./tools";
+import type { ToolId } from "./interaction";
 
 export interface CanvasStageProps {
   config: ProjectConfig;
@@ -38,8 +32,10 @@ export interface CanvasStageProps {
   previewItems: readonly CanvasItem[];
   eraseItems: readonly CanvasItem[];
   marquee: Rect | null;
-  ghost: boolean;
-  tool: Tool;
+  /** The armed start anchor of a click sequence (line / arc), or null. */
+  marker: Anchor | null;
+  previewMode: "solid" | "ghost";
+  tool: ToolId;
   zoom: number;
   setZoom: (zoom: number) => void;
   surfaceRef: RefObject<HTMLDivElement | null>;
@@ -56,7 +52,8 @@ export function CanvasStage({
   previewItems,
   eraseItems,
   marquee,
-  ghost,
+  marker,
+  previewMode,
   tool,
   zoom,
   setZoom,
@@ -67,6 +64,8 @@ export function CanvasStage({
   onPointerCancel,
 }: CanvasStageProps) {
   const selected = selectionItems.length;
+  // The cursor comes from the tool class, so a new tool cannot forget one.
+  const cursor = toolOf(tool).cursor;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -82,7 +81,7 @@ export function CanvasStage({
               "relative aspect-square shrink-0 touch-none rounded-sm bg-background",
               "shadow-sm ring-1 ring-border/70 outline-none select-none",
               "focus-visible:ring-2 focus-visible:ring-ring",
-              TOOL_CURSORS[tool],
+              cursor,
             )}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
@@ -101,7 +100,8 @@ export function CanvasStage({
               previewItems={previewItems}
               eraseItems={eraseItems}
               marquee={marquee}
-              ghost={ghost}
+              marker={marker}
+              previewMode={previewMode}
             />
           </div>
         </div>
@@ -114,6 +114,11 @@ export function CanvasStage({
         {selected > 0 ? (
           <span className="tabular-nums text-foreground">
             · {MESSAGES.selectedCount} {formatCount(selected)}
+          </span>
+        ) : null}
+        {tool === "line" ? (
+          <span className="truncate text-muted-foreground/80">
+            · {MESSAGES.lineHint}
           </span>
         ) : null}
 

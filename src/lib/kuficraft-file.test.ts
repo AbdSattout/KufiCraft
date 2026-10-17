@@ -4,8 +4,9 @@ import {
   MAX_ITEMS,
   MAX_NAME_LENGTH,
   RATIO_PRESETS,
-  archKey,
+  arcKey,
   lineKey,
+  strokeKey,
   tileKey,
 } from "@/lib/canvas/model";
 import type { CanvasItem, ProjectConfig } from "@/lib/canvas/model";
@@ -28,10 +29,52 @@ const FIXED_AT = "2026-10-16T12:00:00.000Z";
 
 function sampleItems(): CanvasItem[] {
   return [
-    { t: "tile", k: tileKey(2, 3, 0), i: 2, j: 3, q: 0 },
-    { t: "tile", k: tileKey(4, 3, 0), i: 4, j: 3, q: 0, s: "circle", c: "#7c2d12", r: 2 },
-    { t: "line", k: lineKey(2, 3, 4, 3), i1: 2, j1: 3, i2: 4, j2: 3 },
-    { t: "arch", k: archKey(2, 2, 4, 2, 1), i1: 2, j1: 2, i2: 4, j2: 2, d: 1 },
+    { type: "tile", key: tileKey(2, 3, 0), column: 2, row: 3, zone: 0 },
+    {
+      type: "tile",
+      key: tileKey(4, 3, 0),
+      column: 4,
+      row: 3,
+      zone: 0,
+      shape: "circle",
+      color: "#7c2d12",
+      rotation: 2,
+    },
+    {
+      type: "line",
+      key: lineKey({ column: 2, row: 3 }, { column: 4, row: 3 }),
+      from: { column: 2, row: 3 },
+      to: { column: 4, row: 3 },
+    },
+    {
+      type: "stroke",
+      key: strokeKey(
+        [
+          { column: 1, row: 1 },
+          { column: 2, row: 2 },
+          { column: 3, row: 1 },
+        ],
+        false,
+      ),
+      points: [
+        { column: 1, row: 1 },
+        { column: 2, row: 2 },
+        { column: 3, row: 1 },
+      ],
+    },
+    {
+      type: "arc",
+      key: arcKey(
+        { column: 2, row: 2 },
+        { column: 4, row: 2 },
+        "counterclockwise",
+        "half",
+      ),
+      from: { column: 2, row: 2 },
+      to: { column: 4, row: 2 },
+      direction: "counterclockwise",
+      size: "half",
+    },
   ];
 }
 
@@ -50,7 +93,7 @@ function sampleConfig(): ProjectConfig {
 function rawFile(overrides: Record<string, unknown> = {}): string {
   return JSON.stringify({
     format: "kuficraft",
-    version: 1,
+    version: 2,
     name: "لوحة الاختبار",
     config: sampleConfig(),
     items: sampleItems(),
@@ -68,7 +111,7 @@ describe("exportProjectFile", () => {
     expect(text).not.toContain("\n");
     const parsed = JSON.parse(text) as Record<string, unknown>;
     expect(parsed.format).toBe("kuficraft");
-    expect(parsed.version).toBe(1);
+    expect(parsed.version).toBe(2);
     expect(parsed.name).toBe("لوحة الاختبار");
     expect(parsed.exportedAt).toBe(FIXED_AT);
     expect(parsed.config).toEqual(sampleConfig());
@@ -77,17 +120,17 @@ describe("exportProjectFile", () => {
 
   it("strips unknown fields from config and items", () => {
     const dirtyItem = {
-      t: "tile",
-      k: tileKey(0, 0, 0),
-      i: 0,
-      j: 0,
-      q: 0,
+      type: "tile",
+      key: tileKey(0, 0, 0),
+      column: 0,
+      row: 0,
+      zone: 0,
       extra: "nope",
     } as unknown as CanvasItem;
     const text = exportProjectFile({
       name: "x",
       config: { ...sampleConfig(), extra: "nope" } as unknown as ProjectConfig,
-      items: [dirtyItem],
+      items: [normalizeItem(dirtyItem, sampleConfig())!],
     });
     const parsed = JSON.parse(text) as {
       config: Record<string, unknown>;
@@ -124,7 +167,7 @@ describe("parseProjectFile — envelope", () => {
   });
 
   it("rejects unknown / non-integer versions", () => {
-    for (const version of [0, 2, "1", 1.5, null]) {
+    for (const version of [0, 3, "1", 1.5, null]) {
       expect(() => parseProjectFile(rawFile({ version }))).toThrow(
         FILE_ERRORS.unknownVersion,
       );
@@ -187,41 +230,146 @@ describe("parseProjectFile — items", () => {
     expect(parseProjectFile(rawFile({ items: "nope" })).items).toEqual([]);
   });
 
+  it("upgrades v1 abbreviated items", () => {
+    const parsed = parseProjectFile(
+      JSON.stringify({
+        format: "kuficraft",
+        version: 1,
+        name: "قديم",
+        config: { gridType: "square", base: 10 },
+        items: [
+          { t: "tile", i: 1, j: 2, q: 0, s: "semi-hexagone", r: 1, c: "#123456" },
+          { t: "tile", i: 5, j: 5, q: 0, s: "arc" },
+          { t: "line", i1: 0, j1: 0, i2: 3, j2: 0 },
+          { t: "arch", i1: 0, j1: 0, i2: 4, j2: 0, d: 1 },
+        ],
+      }),
+    );
+    expect(parsed.items).toEqual([
+      {
+        type: "tile",
+        key: tileKey(1, 2, 0),
+        column: 1,
+        row: 2,
+        zone: 0,
+        shape: "pentagon",
+        rotation: 1,
+        color: "#123456",
+      },
+      {
+        type: "tile",
+        key: tileKey(5, 5, 0),
+        column: 5,
+        row: 5,
+        zone: 0,
+        shape: "curve",
+      },
+      {
+        type: "line",
+        key: lineKey({ column: 0, row: 0 }, { column: 3, row: 0 }),
+        from: { column: 0, row: 0 },
+        to: { column: 3, row: 0 },
+      },
+      {
+        type: "arc",
+        key: arcKey(
+          { column: 0, row: 0 },
+          { column: 4, row: 0 },
+          "counterclockwise",
+          "half",
+        ),
+        from: { column: 0, row: 0 },
+        to: { column: 4, row: 0 },
+        direction: "counterclockwise",
+        size: "half",
+      },
+    ]);
+  });
+
   it("drops bad discriminants, NaN coordinates and missing keys", () => {
     const parsed = parseProjectFile(
       rawFile({
         items: [
-          { t: "circle", k: "x", i: 0, j: 0, q: 0 },
-          { t: "tile", k: "a", i: 0, j: 3, q: 0 },
-          { t: "tile", k: "b", i: Number.NaN, j: 0, q: 0 },
-          { t: "tile", k: "c", i: 0, j: 0, q: 9 },
-          { t: "tile", i: 0, j: 0, q: 0 },
-          { t: "line", k: "d", i1: 0, j1: 0, i2: 0, j2: Infinity },
-          { t: "arch", k: "e", i1: 0, j1: 0, i2: 0, j2: 0, d: 7 },
+          { type: "circle", key: "x", column: 0, row: 0, zone: 0 },
+          { type: "tile", key: "a", column: 0, row: 3, zone: 0 },
+          { type: "tile", key: "b", column: Number.NaN, row: 0, zone: 0 },
+          { type: "tile", key: "c", column: 0, row: 0, zone: 9 },
+          { type: "tile", column: 0, row: 0, zone: 0 },
+          {
+            type: "line",
+            key: "d",
+            from: { column: 0, row: 0 },
+            to: { column: 0, row: Infinity },
+          },
+          {
+            type: "arc",
+            key: "e",
+            from: { column: 0, row: 0 },
+            to: { column: 0, row: 0 },
+            direction: "clockwise",
+            size: "half",
+          },
           null,
           "nope",
         ],
       }),
     );
-    expect(parsed.items).toEqual([{ t: "tile", k: "a", i: 0, j: 3, q: 0 }]);
+    // `key` is ignored on read (re-derived), so the item without one is kept.
+    expect(parsed.items).toEqual([
+      { type: "tile", key: tileKey(0, 3, 0), column: 0, row: 3, zone: 0 },
+      { type: "tile", key: tileKey(0, 0, 0), column: 0, row: 0, zone: 0 },
+    ]);
   });
 
   it("dedupes by key (first wins)", () => {
-    const first = { t: "tile", k: "same", i: 1, j: 1, q: 0 };
-    const second = { t: "tile", k: "same", i: 9, j: 9, q: 3 };
+    const first = {
+      type: "tile",
+      key: "bogus-one",
+      column: 1,
+      row: 1,
+      zone: 0,
+      color: "#111827",
+    };
+    const second = {
+      type: "tile",
+      key: "bogus-two",
+      column: 1,
+      row: 1,
+      zone: 0,
+      color: "#7c2d12",
+    };
     const parsed = parseProjectFile(rawFile({ items: [first, second] }));
-    expect(parsed.items).toEqual([first]);
+    expect(parsed.items).toEqual([
+      {
+        type: "tile",
+        key: tileKey(1, 1, 0),
+        column: 1,
+        row: 1,
+        zone: 0,
+        color: "#111827",
+      },
+    ]);
   });
 
   it("caps at MAX_ITEMS and reports the excess", () => {
-    const items = Array.from({ length: MAX_ITEMS + 5 }, (_, index) => ({
-      t: "tile",
-      k: tileKey(index, 0, 0),
-      i: index,
-      j: 0,
-      q: 0,
-    }));
-    const parsed = parseProjectFile(rawFile({ items }));
+    const items = Array.from({ length: MAX_ITEMS + 5 }, (_, index) => {
+      const column = index % 251;
+      const row = Math.floor(index / 251);
+      const zone = (index % 4) as 0 | 1 | 2 | 3;
+      return {
+        type: "tile",
+        key: tileKey(column, row, zone),
+        column,
+        row,
+        zone,
+      };
+    });
+    const parsed = parseProjectFile(
+      rawFile({
+        config: { ...sampleConfig(), gridType: "square", base: 4 },
+        items,
+      }),
+    );
     expect(parsed.items).toHaveLength(MAX_ITEMS);
     expect(parsed.droppedItems).toBe(5);
   });
@@ -229,13 +377,30 @@ describe("parseProjectFile — items", () => {
 
 describe("normalizeItem", () => {
   it("keeps only the model fields of a valid item", () => {
-    expect(normalizeItem(sampleItems()[1])).toEqual(sampleItems()[1]);
+    expect(normalizeItem(sampleItems()[1], sampleConfig())).toEqual(
+      sampleItems()[1],
+    );
+    expect(normalizeItem(sampleItems()[3], sampleConfig())).toEqual(
+      sampleItems()[3],
+    );
+    expect(normalizeItem(sampleItems()[4], sampleConfig())).toEqual(
+      sampleItems()[4],
+    );
   });
 
   it("returns null for anything that is not a model item", () => {
-    expect(normalizeItem(undefined)).toBeNull();
-    expect(normalizeItem([])).toBeNull();
-    expect(normalizeItem({ t: "tile", k: "", i: 0, j: 0, q: 0 })).toBeNull();
+    const config = sampleConfig();
+    expect(normalizeItem(undefined, config)).toBeNull();
+    expect(normalizeItem([], config)).toBeNull();
+    expect(
+      normalizeItem({ type: "tile", column: 0, row: 0, zone: 9 }, config),
+    ).toBeNull();
+    expect(
+      normalizeItem(
+        { type: "stroke", points: [{ column: 0, row: 0 }] },
+        config,
+      ),
+    ).toBeNull();
   });
 });
 

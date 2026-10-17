@@ -1,8 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_PROJECT_CONFIG, archKey, lineKey, tileKey } from "@/lib/canvas/model";
-import type { CanvasItem, ProjectConfig, TileItem } from "@/lib/canvas/model";
+import { DEFAULT_PROJECT_CONFIG, arcKey, lineKey, tileKey } from "@/lib/canvas/model";
+import type {
+  CanvasItem,
+  ProjectConfig,
+  StrokeItem,
+  TileItem,
+  Zone,
+} from "@/lib/canvas/model";
+import { makeArc, makeLine, makeStroke, makeTile } from "@/lib/canvas/items";
 import {
+  DEFAULT_ARC_STYLE,
+  DEFAULT_STYLE,
+  anchorAt,
   anchorsBetween,
+  arcBetween,
   cellLimits,
   clampDelta,
   clampToCanvas,
@@ -10,44 +21,48 @@ import {
   configsEqual,
   deleteItems,
   duplicateItems,
-  finishGesture,
   hitTest,
+  hitsItem,
+  inkAnchorAt,
   isProjectId,
   itemBounds,
+  itemSignature,
   itemsEqual,
+  linePreview,
   marqueeSelection,
   moveItems,
-  previewItems,
-  previewKeys,
-  previewMarquee,
   recolourItems,
   rectFromPoints,
+  rectsIntersect,
   reshapeItems,
-  startGesture,
-  updateGesture,
+  shiftSelection,
 } from "./interaction";
-import type { GestureContext } from "./interaction";
-import { DEFAULT_STYLE } from "./interaction";
+import type { ToolContext } from "./interaction";
 
 const square: ProjectConfig = { ...DEFAULT_PROJECT_CONFIG };
-const squareNoMerge: ProjectConfig = { ...square, mergeLines: false };
 const circular: ProjectConfig = { ...square, gridType: "circular" };
+/** The space-less `1:1` cell: the ink fills the whole cell. */
+const mono: ProjectConfig = { ...square, ratio: 1 };
 
-function tile(i: number, j: number, q: 0 | 1 | 2 | 3 = 0, extra: Partial<TileItem> = {}): TileItem {
-  return { t: "tile", k: tileKey(i, j, q), i, j, q, ...extra };
+type TileExtra = Partial<Pick<TileItem, "shape" | "rotation" | "color">>;
+
+function tile(
+  column: number,
+  row: number,
+  zone: Zone = 0,
+  extra: TileExtra = {},
+): TileItem {
+  return makeTile({ column, row, zone, ...extra });
 }
 
-function context(
-  items: readonly CanvasItem[],
-  overrides: Partial<GestureContext> = {},
-): GestureContext {
+function context(overrides: Partial<ToolContext> = {}): ToolContext {
   return {
     config: square,
-    items,
+    items: [],
     selection: [],
     tool: "pen",
     style: DEFAULT_STYLE,
-    bulge: 0,
+    arc: DEFAULT_ARC_STYLE,
     ...overrides,
   };
 }
@@ -94,30 +109,93 @@ describe("clampToCanvas + grid limits", () => {
   });
 
   it("counts the cells of both grid types", () => {
-    expect(cellLimits(square)).toEqual({ maxI: 99, maxJ: 99 });
-    expect(cellLimits(circular)).toEqual({ maxI: 49, maxJ: 35 });
+    // 1000 / 10 = 100 cells, so indices run 0…99.
+    expect(cellLimits(square)).toEqual({ maxColumn: 99, maxRow: 99 });
+    // Circular: radius 500 → bands 0…49, and 36 sectors 0…35.
+    expect(cellLimits(circular)).toEqual({ maxColumn: 49, maxRow: 35 });
+  });
+});
+
+describe("anchoring", () => {
+  it("picks the zone quadrant of the cell under the pointer", () => {
+    expect(anchorAt(square, { x: 2, y: 2 })).toEqual({ column: 0, row: 0, zone: 0 });
+    expect(anchorAt(square, { x: 8, y: 2 })).toEqual({ column: 0, row: 0, zone: 1 });
+    expect(anchorAt(square, { x: 2, y: 8 })).toEqual({ column: 0, row: 0, zone: 2 });
+    expect(anchorAt(square, { x: 8, y: 8 })).toEqual({ column: 0, row: 0, zone: 3 });
+    expect(anchorAt(square, { x: 25, y: 5 })).toEqual({ column: 2, row: 0, zone: 0 });
+  });
+
+  it("clips the pointer to the canvas first", () => {
+    expect(anchorAt(square, { x: 1200, y: -5 })).toEqual({
+      column: 99,
+      row: 0,
+      zone: 1,
+    });
+  });
+
+  it("snaps the line / arc tools to the ink square (always zone 0)", () => {
+    expect(inkAnchorAt(square, { x: 2, y: 2 })).toEqual({
+      column: 0,
+      row: 0,
+      zone: 0,
+    });
+    // A click in the space corner still answers with the cell's ink square.
+    expect(inkAnchorAt(square, { x: 8, y: 8 })).toEqual({
+      column: 0,
+      row: 0,
+      zone: 0,
+    });
+    expect(inkAnchorAt(square, { x: 25, y: 5 })).toEqual({
+      column: 2,
+      row: 0,
+      zone: 0,
+    });
   });
 });
 
 describe("anchorsBetween", () => {
   it("fills the cells a fast horizontal drag skipped", () => {
-    const swept = anchorsBetween({ i: 2, j: 3, q: 0 }, { i: 5, j: 3, q: 0 });
+    const swept = anchorsBetween(
+      { column: 2, row: 3, zone: 0 },
+      { column: 5, row: 3, zone: 0 },
+    );
     expect(swept).toEqual([
-      { i: 2, j: 3, q: 0 },
-      { i: 3, j: 3, q: 0 },
-      { i: 4, j: 3, q: 0 },
-      { i: 5, j: 3, q: 0 },
+      { column: 2, row: 3, zone: 0 },
+      { column: 3, row: 3, zone: 0 },
+      { column: 4, row: 3, zone: 0 },
+      { column: 5, row: 3, zone: 0 },
     ]);
   });
 
-  it("walks backwards and vertically", () => {
-    expect(anchorsBetween({ i: 1, j: 4, q: 2 }, { i: 1, j: 2, q: 2 })).toEqual([
-      { i: 1, j: 4, q: 2 },
-      { i: 1, j: 3, q: 2 },
-      { i: 1, j: 2, q: 2 },
+  it("walks backwards and vertically, endpoints included", () => {
+    expect(
+      anchorsBetween(
+        { column: 1, row: 4, zone: 2 },
+        { column: 1, row: 2, zone: 2 },
+      ),
+    ).toEqual([
+      { column: 1, row: 4, zone: 2 },
+      { column: 1, row: 3, zone: 2 },
+      { column: 1, row: 2, zone: 2 },
     ]);
-    expect(anchorsBetween({ i: 0, j: 0, q: 0 }, { i: 0, j: 0, q: 0 })).toEqual([
-      { i: 0, j: 0, q: 0 },
+    expect(
+      anchorsBetween(
+        { column: 0, row: 0, zone: 0 },
+        { column: 0, row: 0, zone: 0 },
+      ),
+    ).toEqual([{ column: 0, row: 0, zone: 0 }]);
+  });
+
+  it("carries the destination zone on every swept anchor", () => {
+    expect(
+      anchorsBetween(
+        { column: 0, row: 0, zone: 0 },
+        { column: 2, row: 0, zone: 1 },
+      ),
+    ).toEqual([
+      { column: 0, row: 0, zone: 1 },
+      { column: 1, row: 0, zone: 1 },
+      { column: 2, row: 0, zone: 1 },
     ]);
   });
 });
@@ -125,42 +203,57 @@ describe("anchorsBetween", () => {
 describe("hit testing", () => {
   it("respects the zone rectangles of a tile", () => {
     const items = [tile(0, 0, 0), tile(1, 0, 3)];
-    expect(hitTest(square, items, { x: 2, y: 2 })?.k).toBe(tileKey(0, 0, 0));
+    expect(hitTest(square, items, { x: 2, y: 2 })?.key).toBe(tileKey(0, 0, 0));
     // Inside cell (0, 0) but in the space zone → no item there.
     expect(hitTest(square, items, { x: 8, y: 8 })).toBeNull();
     // Cell (1, 0) space-space fragment.
-    expect(hitTest(square, items, { x: 18, y: 8 })?.k).toBe(tileKey(1, 0, 3));
+    expect(hitTest(square, items, { x: 18, y: 8 })?.key).toBe(tileKey(1, 0, 3));
+  });
+
+  it("answers for a single item as well as the whole board", () => {
+    const only = tile(1, 0, 3);
+    expect(hitsItem(square, only, { x: 18, y: 8 })).toBe(true);
+    expect(hitsItem(square, only, { x: 2, y: 2 })).toBe(false);
   });
 
   it("returns the topmost item", () => {
-    const items = [tile(0, 0, 0), tile(0, 0, 0, { c: "#ff0000" })];
-    expect(hitTest(square, items, { x: 3, y: 3 })?.c).toBe("#ff0000");
+    const items = [tile(0, 0, 0), tile(0, 0, 0, { color: "#ff0000" })];
+    expect(hitTest(square, items, { x: 3, y: 3 })?.color).toBe("#ff0000");
   });
 
-  it("hits lines and arches on their ink", () => {
-    const line: CanvasItem = { t: "line", k: lineKey(0, 0, 4, 0), i1: 0, j1: 0, i2: 4, j2: 0 };
-    expect(hitTest(square, [line], { x: 25, y: 5 })?.k).toBe(line.k);
+  it("hits lines and arcs near their ink", () => {
+    const line = makeLine({ column: 0, row: 0 }, { column: 4, row: 0 });
+    expect(hitTest(square, [line], { x: 25, y: 5 })?.key).toBe(line.key);
     expect(hitTest(square, [line], { x: 25, y: 40 })).toBeNull();
 
-    const arch: CanvasItem = {
-      t: "arch",
-      k: archKey(0, 0, 4, 0, 0),
-      i1: 0,
-      j1: 0,
-      i2: 4,
-      j2: 0,
-      d: 0,
-    };
-    // Apex of the rib: the midpoint cell centre raised by the sagitta.
-    const apex = itemBounds(square, arch);
-    expect(hitTest(square, [arch], { x: 25, y: apex.y + apex.h / 2 })?.k).toBe(arch.k);
-    expect(hitTest(square, [arch], { x: 25, y: 95 })).toBeNull();
+    const arc = makeArc({
+      from: { column: 0, row: 0 },
+      to: { column: 4, row: 0 },
+      direction: "clockwise",
+      size: "half",
+    });
+    // The arc springs off the ink edge, so its start point lies on the curve.
+    expect(hitTest(square, [arc], { x: 3.75, y: 7.5 })?.key).toBe(arc.key);
+    expect(hitTest(square, [arc], { x: 25, y: 95 })).toBeNull();
+  });
+
+  it("hits a stroke near its line", () => {
+    const stroke = makeStroke(
+      [
+        { column: 0, row: 0 },
+        { column: 3, row: 3 },
+      ],
+      false,
+    );
+    // The cell centres are at 3.75…33.75; (10, 10) sits on the diagonal.
+    expect(hitTest(square, [stroke], { x: 10, y: 10 })?.key).toBe(stroke.key);
+    expect(hitTest(square, [stroke], { x: 10, y: 40 })).toBeNull();
   });
 
   it("hits circular slices by radius and angle", () => {
     const items = [tile(10, 0, 0)];
     // Band 10 covers radius 100…110; sector 0 is 0°…10°.
-    expect(hitTest(circular, items, { x: 500 + 103, y: 500 + 5 })?.k).toBe(
+    expect(hitTest(circular, items, { x: 500 + 103, y: 500 + 5 })?.key).toBe(
       tileKey(10, 0, 0),
     );
     expect(hitTest(circular, items, { x: 500 + 103, y: 500 - 5 })).toBeNull();
@@ -175,250 +268,288 @@ describe("hit testing", () => {
 });
 
 describe("marquee selection", () => {
+  it("builds a normalised rectangle from two points", () => {
+    expect(rectFromPoints({ x: 80, y: 60 }, { x: -20, y: -40 })).toEqual({
+      x: -20,
+      y: -40,
+      w: 100,
+      h: 100,
+    });
+  });
+
+  it("reports whether two rectangles meet", () => {
+    expect(
+      rectsIntersect({ x: 0, y: 0, w: 10, h: 10 }, { x: 5, y: 5, w: 10, h: 10 }),
+    ).toBe(true);
+    expect(
+      rectsIntersect({ x: 0, y: 0, w: 10, h: 10 }, { x: 20, y: 0, w: 5, h: 5 }),
+    ).toBe(false);
+  });
+
   it("selects every touched item", () => {
     const items = [tile(0, 0), tile(5, 5), tile(30, 30)];
-    const keys = marqueeSelection(square, items, rectFromPoints({ x: -5, y: -5 }, { x: 80, y: 80 }));
+    const keys = marqueeSelection(
+      square,
+      items,
+      rectFromPoints({ x: -5, y: -5 }, { x: 80, y: 80 }),
+    );
     expect(keys).toEqual([tileKey(0, 0, 0), tileKey(5, 5, 0)]);
   });
 });
 
 describe("selection operations", () => {
   const items: CanvasItem[] = [
-    tile(0, 0, 0, { s: "circle", r: 1, c: "#ff0000" }),
+    tile(0, 0, 0, { shape: "circle", rotation: 1, color: "#ff0000" }),
     tile(1, 0, 0),
     tile(9, 9, 0),
   ];
 
   it("moves items with their shape, rotation, colour and relative offset", () => {
-    const moved = moveItems(square, items, [tileKey(0, 0, 0), tileKey(1, 0, 0)], 2, 3);
-    const circle = moved.find((item) => item.k === tileKey(2, 3, 0));
-    expect(circle).toMatchObject({ i: 2, j: 3, s: "circle", r: 1, c: "#ff0000" });
-    expect(moved.some((item) => item.k === tileKey(3, 3, 0))).toBe(true);
+    const moved = moveItems(
+      square,
+      items,
+      [tileKey(0, 0, 0), tileKey(1, 0, 0)],
+      2,
+      3,
+    );
+    const circle = moved.find((item) => item.key === tileKey(2, 3, 0));
+    expect(circle).toMatchObject({
+      column: 2,
+      row: 3,
+      shape: "circle",
+      rotation: 1,
+      color: "#ff0000",
+    });
+    expect(moved.some((item) => item.key === tileKey(3, 3, 0))).toBe(true);
     // Untouched items keep their identity.
     expect(moved.some((item) => item === items[2])).toBe(true);
+  });
+
+  it("moves the listed items in their original order", () => {
+    const shifted = shiftSelection(
+      square,
+      items,
+      [tileKey(9, 9, 0), tileKey(0, 0, 0)],
+      1,
+      0,
+    );
+    expect(shifted.map((item) => item.key)).toEqual([
+      tileKey(1, 0, 0),
+      tileKey(10, 9, 0),
+    ]);
   });
 
   it("clamps a move to the grid", () => {
     const corner = [tile(99, 99, 0)];
     expect(clampDelta(square, corner, [tileKey(99, 99, 0)], 5, 5)).toEqual({
-      di: 0,
-      dj: 0,
+      dColumn: 0,
+      dRow: 0,
     });
     expect(clampDelta(square, corner, [tileKey(99, 99, 0)], -5, -5)).toEqual({
-      di: -5,
-      dj: -5,
+      dColumn: -5,
+      dRow: -5,
     });
     const moved = moveItems(square, items, [tileKey(9, 9, 0)], 4, 4);
-    expect(moved.some((item) => item.k === tileKey(13, 13, 0))).toBe(true);
+    expect(moved.some((item) => item.key === tileKey(13, 13, 0))).toBe(true);
   });
 
   it("wraps sectors when moving on the circular grid", () => {
     const items2 = [tile(2, 35, 0)];
     const moved = moveItems(circular, items2, [tileKey(2, 35, 0)], 1, 2);
-    expect(moved[0].k).toBe(tileKey(3, 1, 0));
+    expect(moved[0].key).toBe(tileKey(3, 1, 0));
   });
 
-  it("recolours and clears the override when the colour is the ink", () => {
+  it("recolours to a concrete colour and never clears it back to undefined", () => {
     const coloured = recolourItems(square, items, [tileKey(1, 0, 0)], "#00ff00");
-    expect(coloured.find((item) => item.k === tileKey(1, 0, 0))).toMatchObject({
-      c: "#00ff00",
+    expect(coloured.find((item) => item.key === tileKey(1, 0, 0))).toMatchObject({
+      color: "#00ff00",
     });
-    const cleared = recolourItems(
-      square,
-      coloured,
-      [tileKey(1, 0, 0)],
+    // `undefined` resolves to the document ink — it does not clear the colour.
+    const inked = recolourItems(square, coloured, [tileKey(1, 0, 0)], undefined);
+    expect(inked.find((item) => item.key === tileKey(1, 0, 0))).toHaveProperty(
+      "color",
       square.ink,
     );
-    expect("c" in cleared.find((item) => item.k === tileKey(1, 0, 0))!).toBe(false);
+  });
+
+  it("keeps unlisted and already-resolved items by identity", () => {
+    const coloured = recolourItems(square, items, [tileKey(1, 0, 0)], "#00ff00");
+    expect(coloured[0]).toBe(items[0]);
+    expect(coloured[2]).toBe(items[2]);
+    const again = recolourItems(square, coloured, [tileKey(1, 0, 0)], "#00ff00");
+    expect(again[1]).toBe(coloured[1]);
+  });
+
+  it("does not repaint items already on the board when config.ink changes", () => {
+    const onBoard = recolourItems(square, items, [tileKey(1, 0, 0)], "#00ff00");
+    const nextInk: ProjectConfig = { ...square, ink: "#222222" };
+    // An empty key list leaves the stored fragments exactly as they are.
+    const untouched = recolourItems(nextInk, onBoard, [], undefined);
+    expect(untouched[1]).toBe(onBoard[1]);
+    expect(untouched[1]).toMatchObject({ color: "#00ff00" });
+    expect(untouched[0]).toMatchObject({ color: "#ff0000" });
   });
 
   it("reshapes tiles only", () => {
     const reshaped = reshapeItems(
-      [tile(0, 0, 0), { t: "line", k: lineKey(0, 0, 2, 0), i1: 0, j1: 0, i2: 2, j2: 0 }],
-      [tileKey(0, 0, 0), lineKey(0, 0, 2, 0)],
-      { shape: "hexagon", rotation: 2 },
+      [tile(0, 0, 0), makeLine({ column: 0, row: 0 }, { column: 2, row: 0 })],
+      [tileKey(0, 0, 0), lineKey({ column: 0, row: 0 }, { column: 2, row: 0 })],
+      { shape: "circle", rotation: 2 },
     );
-    expect(reshaped[0]).toMatchObject({ s: "hexagon", r: 2 });
-    expect(reshaped[1]).not.toHaveProperty("s");
+    expect(reshaped[0]).toMatchObject({ shape: "circle", rotation: 2 });
+    expect(reshaped[1]).not.toHaveProperty("shape");
     const reset = reshapeItems(reshaped, [tileKey(0, 0, 0)], {
       shape: "square",
       rotation: 0,
     });
-    expect("s" in reset[0]).toBe(false);
-    expect("r" in reset[0]).toBe(false);
+    expect("shape" in reset[0]).toBe(false);
+    expect("rotation" in reset[0]).toBe(false);
   });
 
   it("duplicates with an offset and skips taken keys", () => {
-    const { items: copy, keys } = duplicateItems(
-      square,
-      items,
-      [tileKey(0, 0, 0), tileKey(1, 0, 0)],
-    );
+    const { items: copy, keys } = duplicateItems(square, items, [
+      tileKey(0, 0, 0),
+      tileKey(1, 0, 0),
+    ]);
     expect(keys).toEqual([tileKey(1, 1, 0), tileKey(2, 1, 0)]);
     expect(copy).toHaveLength(items.length + 2);
   });
 
+  it("never overwrites an existing key when duplicating", () => {
+    const board = [tile(0, 0, 0), tile(1, 1, 0)];
+    const { items: copy, keys } = duplicateItems(square, board, [tileKey(0, 0, 0)]);
+    expect(keys).toEqual([]);
+    expect(copy).toEqual(board);
+  });
+
   it("deletes by key", () => {
     const left = deleteItems(items, [tileKey(0, 0, 0)]);
-    expect(left.map((item) => item.k)).toEqual([tileKey(1, 0, 0), tileKey(9, 9, 0)]);
+    expect(left.map((item) => item.key)).toEqual([
+      tileKey(1, 0, 0),
+      tileKey(9, 9, 0),
+    ]);
   });
 });
 
-describe("gesture reducer", () => {
-  it("draws one tile on a click", () => {
-    const ctx = context([]);
-    const start = startGesture(ctx, { x: 5, y: 5 }, { shift: false });
-    const finish = finishGesture(ctx, start.gesture);
-    expect(finish.commit?.items).toEqual([tile(0, 0, 0)]);
-    expect(finish.commit?.label).toBe("رسم");
+describe("arcBetween + linePreview", () => {
+  it("takes direction / size from the context and the ink when no colour is set", () => {
+    const ctx = context({
+      arc: { direction: "counterclockwise", size: "threeQuarter" },
+    });
+    const arc = arcBetween(ctx, { column: 0, row: 0 }, { column: 4, row: 0 });
+    expect(arc).toMatchObject({
+      type: "arc",
+      from: { column: 0, row: 0 },
+      to: { column: 4, row: 0 },
+      direction: "counterclockwise",
+      size: "threeQuarter",
+      color: square.ink,
+    });
+    expect(arc?.key).toBe(
+      arcKey(
+        { column: 0, row: 0 },
+        { column: 4, row: 0 },
+        "counterclockwise",
+        "threeQuarter",
+      ),
+    );
   });
 
-  it("merges a straight stroke into one line", () => {
-    const ctx = context([]);
-    let gesture = startGesture(ctx, { x: 5, y: 5 }, { shift: false }).gesture;
-    gesture = updateGesture(ctx, gesture, { x: 15, y: 5 });
-    gesture = updateGesture(ctx, gesture, { x: 45, y: 5 });
-    const preview = previewItems(ctx, gesture);
+  it("resolves the tool colour when one is set", () => {
+    const ctx = context({ style: { ...DEFAULT_STYLE, color: "#ff0000" } });
+    const arc = arcBetween(ctx, { column: 0, row: 0 }, { column: 0, row: 4 });
+    expect(arc).toMatchObject({ color: "#ff0000" });
+  });
+
+  it("returns null for a same cell or an unsupported pair", () => {
+    const ctx = context();
+    expect(
+      arcBetween(ctx, { column: 1, row: 1 }, { column: 1, row: 1 }),
+    ).toBeNull();
+    // Two across, one down: neither one axis nor a 45° diagonal.
+    expect(
+      arcBetween(ctx, { column: 0, row: 0 }, { column: 2, row: 1 }),
+    ).toBeNull();
+  });
+
+  it("is empty below two points", () => {
+    expect(linePreview(square, [], null, false, undefined)).toEqual([]);
+    expect(
+      linePreview(square, [{ column: 1, row: 1 }], null, false, undefined),
+    ).toEqual([]);
+  });
+
+  it("adds the hovered cell as the pending segment", () => {
+    const preview = linePreview(
+      square,
+      [{ column: 1, row: 1 }],
+      { column: 3, row: 1 },
+      false,
+      undefined,
+    );
     expect(preview).toHaveLength(1);
-    expect(preview[0]).toMatchObject({ t: "line", i1: 0, i2: 4, j1: 0, j2: 0 });
-    const finish = finishGesture(ctx, gesture);
-    expect(finish.commit?.items).toHaveLength(1);
-    expect(finish.commit?.items[0].t).toBe("line");
-  });
-
-  it("keeps tiles when merging is off or the run is not straight", () => {
-    const noMerge = context([], { config: squareNoMerge });
-    let gesture = startGesture(noMerge, { x: 5, y: 5 }, { shift: false }).gesture;
-    gesture = updateGesture(noMerge, gesture, { x: 25, y: 5 });
-    expect(previewItems(noMerge, gesture)).toHaveLength(3);
-
-    const ctx = context([]);
-    let bent = startGesture(ctx, { x: 5, y: 5 }, { shift: false }).gesture;
-    bent = updateGesture(ctx, bent, { x: 25, y: 25 });
-    const items = previewItems(ctx, bent);
-    expect(items.every((item) => item.t === "tile")).toBe(true);
-    expect(items.length).toBeGreaterThan(2);
-  });
-
-  it("keeps an anchor unique when a bent stroke doubles back", () => {
-    const ctx = context([]);
-    let gesture = startGesture(ctx, { x: 5, y: 5 }, { shift: false }).gesture;
-    // A bent path is not merged into one line, so it stays a tile per anchor.
-    gesture = updateGesture(ctx, gesture, { x: 15, y: 15 });
-    gesture = updateGesture(ctx, gesture, { x: 25, y: 5 });
-    // Doubling back re-sweeps the run from the stroke's first anchor; the cell
-    // the pointer is standing on must not join the stroke a second time.
-    gesture = updateGesture(ctx, gesture, { x: 15, y: 5 });
-
-    const previewKeys = previewItems(ctx, gesture).map((item) => item.k);
-    expect(new Set(previewKeys).size).toBe(previewKeys.length);
-
-    const commitKeys = (finishGesture(ctx, gesture).commit?.items ?? []).map(
-      (item) => item.k,
-    );
-    expect(new Set(commitKeys).size).toBe(commitKeys.length);
-    expect(new Set(previewKeys)).toEqual(new Set(commitKeys));
-  });
-
-  it("applies the draw style to new items", () => {
-    const ctx = context([], {
-      style: { shape: "hexagon", rotation: 3, color: "#00ff00" },
+    expect(preview[0]).toMatchObject({
+      type: "line",
+      from: { column: 1, row: 1 },
+      to: { column: 3, row: 1 },
+      color: square.ink,
     });
-    const gesture = startGesture(ctx, { x: 5, y: 5 }, { shift: false }).gesture;
-    const [item] = finishGesture(ctx, gesture).commit?.items ?? [];
-    expect(item).toMatchObject({ s: "hexagon", r: 3, c: "#00ff00" });
   });
 
-  it("erases on click and along a drag", () => {
-    const items = [tile(0, 0, 0), tile(1, 0, 0), tile(2, 0, 0)];
-    const ctx = context(items, { tool: "eraser" });
-    let gesture = startGesture(ctx, { x: 5, y: 5 }, { shift: false }).gesture;
-    expect(previewKeys(gesture)).toEqual([tileKey(0, 0, 0)]);
-    gesture = updateGesture(ctx, gesture, { x: 15, y: 5 });
-    gesture = updateGesture(ctx, gesture, { x: 25, y: 5 });
-    expect(previewKeys(gesture)).toHaveLength(3);
-    const finish = finishGesture(ctx, gesture);
-    expect(finish.commit?.items).toHaveLength(0);
-    expect(finish.commit?.label).toBe("مسح");
+  it("makes a diagonal polyline open or closed on request", () => {
+    const points = [
+      { column: 0, row: 0 },
+      { column: 3, row: 3 },
+    ];
+    const open = linePreview(square, points, null, false, undefined);
+    expect(open[0]).toMatchObject({ type: "stroke", color: square.ink });
+    expect((open[0] as StrokeItem).closed).toBeFalsy();
+    const closed = linePreview(square, points, null, true, undefined);
+    expect((closed[0] as StrokeItem).closed).toBe(true);
   });
+});
 
-  it("snaps an arch to one row or column and keeps the bulge flag", () => {
-    const ctx = context([], { tool: "arch", bulge: 1 });
-    let gesture = startGesture(ctx, { x: 5, y: 5 }, { shift: false }).gesture;
-    // Diagonal drag → snapped onto the row of the first anchor.
-    gesture = updateGesture(ctx, gesture, { x: 55, y: 45 });
-    expect(gesture).toMatchObject({ kind: "arch", to: { i: 5, j: 0 } });
-    const preview = previewItems(ctx, gesture);
-    expect(preview[0]).toMatchObject({ t: "arch", i1: 0, j1: 0, i2: 5, j2: 0, d: 1 });
-    const finish = finishGesture(ctx, gesture);
-    expect(finish.commit?.items[0]).toMatchObject({ t: "arch", d: 1 });
-    expect(finish.commit?.label).toBe("قوس");
-  });
-
-  it("does not create a degenerate arch", () => {
-    const ctx = context([], { tool: "arch" });
-    const gesture = startGesture(ctx, { x: 5, y: 5 }, { shift: false }).gesture;
-    expect(finishGesture(ctx, gesture).commit).toBeNull();
-  });
-
-  it("selects with a click, extends with shift and clears on empty space", () => {
-    const items = [tile(0, 0, 0), tile(1, 0, 0)];
-    const ctx = context(items, { tool: "select" });
-    const first = startGesture(ctx, { x: 5, y: 5 }, { shift: false });
-    expect(first.selection).toEqual([tileKey(0, 0, 0)]);
-    expect(first.gesture.kind).toBe("move");
-    expect(finishGesture(ctx, first.gesture).commit).toBeNull();
-
-    const extended = startGesture(
-      { ...ctx, selection: [tileKey(0, 0, 0)] },
-      { x: 15, y: 5 },
-      { shift: true },
-    );
-    expect(extended.selection).toEqual([tileKey(0, 0, 0), tileKey(1, 0, 0)]);
-
-    const empty = startGesture(ctx, { x: 500, y: 500 }, { shift: false });
-    expect(empty.gesture.kind).toBe("marquee");
-    expect(empty.selection).toEqual([]);
-    expect(previewMarquee(empty.gesture)).toEqual({ x: 500, y: 500, w: 0, h: 0 });
-  });
-
-  it("selects with the marquee box and highlights the hits live", () => {
-    const items = [tile(0, 0, 0), tile(1, 0, 0), tile(50, 50, 0)];
-    const ctx = context(items, { tool: "select" });
-    let gesture = startGesture(ctx, { x: 200, y: 200 }, { shift: false }).gesture;
-    gesture = updateGesture(ctx, gesture, { x: -20, y: -20 });
-    const finish = finishGesture(ctx, gesture);
-    expect(finish.commit).toBeNull();
-    expect(finish.selection).toEqual([tileKey(0, 0, 0), tileKey(1, 0, 0)]);
-    expect(previewItems(ctx, gesture)).toHaveLength(2);
-  });
-
-  it("moves the selection by dragging and snaps to whole cells", () => {
-    const items = [tile(0, 0, 0), tile(1, 0, 0)];
-    const ctx = context(items, {
-      tool: "select",
-      selection: items.map((item) => item.k),
+describe("ratio 1 (the space-less cell)", () => {
+  it("always anchors in zone 0 — there is no space strip", () => {
+    expect(anchorAt(mono, { x: 8, y: 8 })).toEqual({
+      column: 0,
+      row: 0,
+      zone: 0,
     });
-    let gesture = startGesture(ctx, { x: 5, y: 5 }, { shift: false }).gesture;
-    gesture = updateGesture(ctx, gesture, { x: 25, y: 15 });
-    expect(previewItems(ctx, gesture).map((item) => item.k)).toEqual([
-      tileKey(2, 1, 0),
-      tileKey(3, 1, 0),
-    ]);
-    const finish = finishGesture(ctx, gesture);
-    expect(finish.commit?.label).toBe("تحريك");
-    expect(finish.commit?.items.map((item) => item.k)).toEqual([
-      tileKey(2, 1, 0),
-      tileKey(3, 1, 0),
-    ]);
+    expect(inkAnchorAt(mono, { x: 8, y: 8 })).toEqual({
+      column: 0,
+      row: 0,
+      zone: 0,
+    });
+  });
+
+  it("hits a full-ink tile across the whole cell", () => {
+    const items = [tile(0, 0, 0)];
+    expect(hitTest(mono, items, { x: 2, y: 2 })?.key).toBe(tileKey(0, 0, 0));
+    expect(hitTest(mono, items, { x: 8, y: 8 })?.key).toBe(tileKey(0, 0, 0));
   });
 });
 
 describe("comparison helpers", () => {
+  it("projects an item to a stable, colour-aware signature", () => {
+    expect(itemSignature(tile(0, 0, 0))).toBe(itemSignature(tile(0, 0, 0)));
+    expect(itemSignature(tile(0, 0, 0))).not.toBe(
+      itemSignature(tile(0, 0, 0, { color: "#000000" })),
+    );
+    // Absent optionals and their explicit spelling are the same item.
+    expect(itemSignature(tile(0, 0, 0))).toBe(
+      itemSignature(
+        makeTile({ column: 0, row: 0, zone: 0, shape: "square", rotation: 0 }),
+      ),
+    );
+  });
+
   it("compares items structurally regardless of object identity", () => {
     expect(itemsEqual([tile(0, 0, 0)], [tile(0, 0, 0)])).toBe(true);
     expect(itemsEqual([tile(0, 0, 0)], [tile(0, 0, 1)])).toBe(false);
-    expect(itemsEqual([tile(0, 0, 0, { c: "#000" })], [tile(0, 0, 0)])).toBe(false);
+    expect(itemsEqual([tile(0, 0, 0, { color: "#000000" })], [tile(0, 0, 0)])).toBe(
+      false,
+    );
     expect(itemsEqual([], [])).toBe(true);
   });
 
@@ -428,8 +559,12 @@ describe("comparison helpers", () => {
   });
 
   it("guards project ids from the URL", () => {
+    // Convex document ids are 12…64 lowercase alphanumerics.
     expect(isProjectId("j57863dx4nchfny4jyta44x7hh8gdsnm")).toBe(true);
+    expect(isProjectId("abc123456789")).toBe(true);
     expect(isProjectId("not-an-id")).toBe(false);
+    expect(isProjectId("abc12345678")).toBe(false);
+    expect(isProjectId("ABC123456789")).toBe(false);
     expect(isProjectId("../../etc/passwd")).toBe(false);
   });
 });

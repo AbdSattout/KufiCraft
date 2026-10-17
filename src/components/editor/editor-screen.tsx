@@ -190,7 +190,7 @@ export function EditorScreen() {
 
   const itemByKey = useMemo(() => {
     const map = new Map<string, CanvasItem>();
-    for (const item of editor.items) map.set(item.k, item);
+    for (const item of editor.items) map.set(item.key, item);
     return map;
   }, [editor.items]);
 
@@ -246,8 +246,9 @@ export function EditorScreen() {
           orientation="vertical"
           tool={editor.tool}
           setTool={editor.setTool}
-          bulge={editor.bulge}
-          setBulge={editor.setBulge}
+          arc={editor.arc}
+          setArcDirection={editor.setArcDirection}
+          setArcSize={editor.setArcSize}
           className="hidden md:flex"
         />
 
@@ -259,7 +260,8 @@ export function EditorScreen() {
             previewItems={editor.previewItems}
             eraseItems={eraseItems}
             marquee={editor.marquee}
-            ghost={editor.ghost}
+            marker={editor.previewMarker}
+            previewMode={editor.previewMode}
             tool={editor.tool}
             zoom={editor.zoom}
             setZoom={editor.setZoom}
@@ -273,8 +275,9 @@ export function EditorScreen() {
             orientation="horizontal"
             tool={editor.tool}
             setTool={editor.setTool}
-            bulge={editor.bulge}
-            setBulge={editor.setBulge}
+            arc={editor.arc}
+            setArcDirection={editor.setArcDirection}
+            setArcSize={editor.setArcSize}
             className="md:hidden"
           />
         </main>

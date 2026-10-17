@@ -115,6 +115,9 @@ export function SettingsPanel({
             </ToggleGroupItem>
           ))}
         </ToggleGroup>
+        <p className="text-xs text-muted-foreground/80">
+          {config.ratio >= 1 ? MESSAGES.ratioFullCell : MESSAGES.ratioHint}
+        </p>
       </PanelSection>
 
       <PanelSection title={MESSAGES.cellSize}>

@@ -9,7 +9,7 @@ import { SiteFooter } from "@/components/marketing/site-footer";
 export const metadata: Metadata = {
   title: { absolute: "KufiCraft — محرّر الكوفي المربع" },
   description:
-    "ارسم لوحات الكوفي المربع على شبكة مربعة أو دائرية، واضبط نسبة الحبر، وبدّل بين تسعة أشكال، ثم صدّرها SVG أو PNG مع مزامنة فورية.",
+    "ارسم لوحات الكوفي المربع على شبكة مربعة أو دائرية، واضبط نسبة الحبر، وبدّل بين عشرة أشكال، ثم صدّرها SVG أو PNG مع مزامنة فورية.",
 };
 
 export default function LandingPage() {

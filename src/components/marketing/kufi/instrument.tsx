@@ -14,8 +14,8 @@ const GRIDS = [
 
 type GridValue = (typeof GRIDS)[number]["value"];
 
-/** 1:1, the widest ink ratio — the medallion's opening frame. */
-const OPENING_RATIO = RATIO_PRESETS[0].label;
+/** The tool's default 1:3 — the medallion's opening frame. */
+const OPENING_RATIO = RATIO_PRESETS[2].label;
 
 /**
  * The hero's one live control: the ink ratio and the grid kind, driving the

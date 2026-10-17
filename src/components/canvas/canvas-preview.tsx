@@ -5,9 +5,14 @@
  *
  * `<CanvasPreview config items />` draws the document into a
  * `viewBox="0 0 1000 1000"` SVG: background, construction grid (only when
- * `config.showGrid`) and one element per item, each path coming from the
- * engine's `itemPath` — this component never hand-renders geometry
- * (docs/UI.md §Shared pieces).
+ * `config.showGrid`) and one element per item. Every path comes from the item
+ * class (`itemOf(item).render(config)`), exactly like the string renderer in
+ * `@/lib/canvas/render`, so the React canvas and exports can never drift.
+ *
+ * The grid has two families (`gridPaths` in `@/lib/canvas/grid`): the cell
+ * borders, and the inner ink lines that separate the ink square from the
+ * space around it. Both are drawn here so the editor shows what the engine
+ * means by «قلم / فراغ».
  *
  * Performance: the component and every single path are memoised, and items
  * that a gesture did not touch keep their object identity across commits
@@ -16,53 +21,11 @@
  */
 
 import { memo, useMemo } from "react";
-import {
-  CIRCULAR_ANGULAR_UNIT,
-  CIRCULAR_SECTORS,
-  VIEWBOX_SIZE,
-} from "@/lib/canvas/model";
+import { VIEWBOX_SIZE } from "@/lib/canvas/model";
 import type { CanvasItem, ProjectConfig } from "@/lib/canvas/model";
-import { itemPath } from "@/lib/canvas/geometry";
+import { gridPaths } from "@/lib/canvas/grid";
+import { itemOf } from "@/lib/canvas/items";
 import { cn } from "@/lib/utils";
-
-const CENTER = VIEWBOX_SIZE / 2;
-
-/** Cell / ring construction lines — mirrors `render.ts` (editor only). */
-function squareGridPath(base: number): string {
-  let d = "";
-  const lines = Math.floor(VIEWBOX_SIZE / base);
-  for (let n = 0; n <= lines; n++) {
-    const at = n * base;
-    d += `${d === "" ? "" : " "}M ${at} 0 V ${VIEWBOX_SIZE} M 0 ${at} H ${VIEWBOX_SIZE}`;
-  }
-  return d;
-}
-
-function circularGridPath(base: number): string {
-  let d = "";
-  const rings = Math.floor(CENTER / base);
-  for (let n = 1; n <= rings; n++) {
-    const radius = n * base;
-    d +=
-      `${d === "" ? "" : " "}M ${CENTER + radius} ${CENTER}` +
-      ` A ${radius} ${radius} 0 1 1 ${CENTER - radius} ${CENTER}` +
-      ` A ${radius} ${radius} 0 1 1 ${CENTER + radius} ${CENTER}`;
-  }
-  for (let sector = 0; sector < CIRCULAR_SECTORS; sector++) {
-    const angle = sector * CIRCULAR_ANGULAR_UNIT;
-    d += ` M ${CENTER} ${CENTER} L ${CENTER + CENTER * Math.cos(angle)} ${
-      CENTER + CENTER * Math.sin(angle)
-    }`;
-  }
-  return d;
-}
-
-/** Construction grid of a config, as one path (no stroke attributes). */
-export function canvasGridPath(config: ProjectConfig): string {
-  return config.gridType === "circular"
-    ? circularGridPath(config.base)
-    : squareGridPath(config.base);
-}
 
 interface CanvasItemShapeProps {
   config: ProjectConfig;
@@ -73,8 +36,8 @@ interface CanvasItemShapeProps {
 }
 
 /**
- * One item as one SVG element. Arches are stroked (fill none), everything
- * else filled — the rendering contract in docs/CANVAS.md §5.
+ * One item as one SVG element: the class decides the path and whether it is
+ * stroked (lines, polylines and arcs) or filled (tiles).
  */
 export const CanvasItemShape = memo(function CanvasItemShape({
   config,
@@ -82,15 +45,21 @@ export const CanvasItemShape = memo(function CanvasItemShape({
   className,
   opacity,
 }: CanvasItemShapeProps) {
-  const d = useMemo(() => itemPath(config, item), [config, item]);
-  if (item.t === "arch") {
+  const { path, mode, width } = useMemo(
+    () => itemOf(item).render(config),
+    [config, item],
+  );
+  const color = useMemo(() => itemOf(item).resolvedColor(config), [config, item]);
+  if (mode === "stroke") {
     return (
       <path
-        data-k={item.k}
-        d={d}
+        data-key={item.key}
+        d={path}
         fill="none"
-        stroke={item.c ?? config.ink}
-        strokeWidth={config.ratio * config.base}
+        stroke={color}
+        strokeWidth={width}
+        strokeLinecap="butt"
+        strokeLinejoin="miter"
         className={className}
         opacity={opacity}
       />
@@ -98,9 +67,9 @@ export const CanvasItemShape = memo(function CanvasItemShape({
   }
   return (
     <path
-      data-k={item.k}
-      d={d}
-      fill={item.c ?? config.ink}
+      data-key={item.key}
+      d={path}
+      fill={color}
       className={className}
       opacity={opacity}
     />
@@ -118,7 +87,7 @@ export const CanvasItems = memo(function CanvasItems({
   return (
     <>
       {items.map((item) => (
-        <CanvasItemShape key={item.k} config={config} item={item} />
+        <CanvasItemShape key={item.key} config={config} item={item} />
       ))}
     </>
   );
@@ -143,6 +112,11 @@ export const CanvasPreview = memo(function CanvasPreview({
   className,
   label,
 }: CanvasPreviewProps) {
+  const grid = useMemo(
+    () => (config.showGrid ? gridPaths(config) : null),
+    [config],
+  );
+
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -159,15 +133,27 @@ export const CanvasPreview = memo(function CanvasPreview({
           fill={config.background}
         />
       ) : null}
-      {config.showGrid ? (
-        <path
-          d={canvasGridPath(config)}
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={1}
-          vectorEffect="non-scaling-stroke"
-          className="text-muted-foreground/40"
-        />
+      {grid ? (
+        <>
+          <path
+            d={grid.cellBorders}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1}
+            strokeOpacity={0.28}
+            vectorEffect="non-scaling-stroke"
+            className="text-muted-foreground"
+          />
+          <path
+            d={grid.inkLines}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1}
+            strokeOpacity={0.55}
+            vectorEffect="non-scaling-stroke"
+            className="text-muted-foreground"
+          />
+        </>
       ) : null}
       <CanvasItems config={config} items={items} />
     </svg>

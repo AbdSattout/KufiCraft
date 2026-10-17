@@ -8,6 +8,10 @@ import {
   maxGridIndex,
   projectConfigValidator,
   snapRatio,
+  arcKey,
+  lineKey,
+  strokeKey,
+  tileKey,
   MAX_COLOR_LENGTH,
   MAX_ITEMS,
   MAX_KEY_LENGTH,
@@ -15,12 +19,17 @@ import {
   MAX_THUMBNAIL_LENGTH,
 } from "./lib/model";
 import type {
-  ArchItem,
+  ArcDirection,
+  ArcItem,
+  ArcSize,
   CanvasItem,
+  Cell,
   LineItem,
   ProjectConfig,
+  StrokeItem,
   TileItem,
 } from "./lib/model";
+import { ARC_DIRECTIONS } from "./lib/model";
 import { requireUserId } from "./lib/auth";
 
 /* ------------------------------------------------------------------ */
@@ -65,57 +74,92 @@ function requireKey(key: string): string {
 
 /**
  * Normalises one stored/received item: integer coordinates inside the legal
- * grid for `config.base`, the colour capped to `MAX_COLOR_LENGTH`, the key
- * length enforced. Runs on **every** write, so a document stored before this
- * contract is repaired the next time it is written. Optional fields that were
- * absent stay absent — Convex documents never carry `undefined`.
+ * grid for `config.base`, the colour capped to `MAX_COLOR_LENGTH`, and the
+ * **key re-derived from the geometry** — keys are identity (`docs/FORMAT.md`),
+ * so a document with a drifting key is repaired rather than trusted. Optional
+ * fields that were absent stay absent (Convex documents never carry
+ * `undefined`). Runs on **every** write.
  */
-function sanitizeItem(item: CanvasItem, config: ProjectConfig): CanvasItem {
-  const maxI = maxGridIndex(config.base);
-  const maxJ = config.gridType === "circular" ? CIRCULAR_SECTORS - 1 : maxI;
-  const i = (value: number) => sanitizeIndex(value, maxI);
-  const j = (value: number) => sanitizeIndex(value, maxJ);
-  const k = requireKey(item.k);
-  const color = capColor(item.c);
-  switch (item.t) {
+function sanitizeItem(item: CanvasItem, config: ProjectConfig): CanvasItem | null {
+  const maxColumn = maxGridIndex(config.base);
+  const maxRow =
+    config.gridType === "circular" ? CIRCULAR_SECTORS - 1 : maxColumn;
+  const column = (value: number) => sanitizeIndex(value, maxColumn);
+  const row = (value: number) => sanitizeIndex(value, maxRow);
+  const cell = (value: Cell): Cell => ({
+    column: column(value.column),
+    row: row(value.row),
+  });
+  const color = capColor(item.color);
+  const key = (value: string) => requireKey(value);
+
+  switch (item.type) {
     case "tile": {
       const next: TileItem = {
-        t: "tile",
-        k,
-        i: i(item.i),
-        j: j(item.j),
-        q: item.q,
+        type: "tile",
+        key: key(tileKey(column(item.column), row(item.row), item.zone)),
+        column: column(item.column),
+        row: row(item.row),
+        zone: item.zone,
       };
-      if (item.s !== undefined) next.s = item.s;
-      if (color !== undefined) next.c = color;
-      if (item.r !== undefined) next.r = item.r;
+      if (item.shape !== undefined && item.shape !== "square") {
+        next.shape = item.shape;
+      }
+      if (item.rotation !== undefined && item.rotation !== 0) {
+        next.rotation = item.rotation;
+      }
+      if (color !== undefined) next.color = color;
       return next;
     }
     case "line": {
+      const from = cell(item.from);
+      const to = cell(item.to);
       const next: LineItem = {
-        t: "line",
-        k,
-        i1: i(item.i1),
-        j1: j(item.j1),
-        i2: i(item.i2),
-        j2: j(item.j2),
+        type: "line",
+        key: key(lineKey(from, to)),
+        from,
+        to,
       };
-      if (color !== undefined) next.c = color;
+      if (color !== undefined) next.color = color;
       return next;
     }
-    case "arch": {
-      const next: ArchItem = {
-        t: "arch",
-        k,
-        i1: i(item.i1),
-        j1: j(item.j1),
-        i2: i(item.i2),
-        j2: j(item.j2),
-        d: item.d,
+    case "stroke": {
+      const points = item.points.map(cell);
+      if (points.length < 2) return null;
+      const closed = item.closed === true;
+      const next: StrokeItem = {
+        type: "stroke",
+        key: key(strokeKey(points, closed)),
+        points,
       };
-      if (color !== undefined) next.c = color;
+      if (closed) next.closed = true;
+      if (color !== undefined) next.color = color;
       return next;
     }
+    case "arc": {
+      const from = cell(item.from);
+      const to = cell(item.to);
+      // A degenerate arc has no geometry; dropping it beats storing a no-op.
+      if (from.column === to.column && from.row === to.row) return null;
+      const direction: ArcDirection = ARC_DIRECTIONS.includes(item.direction)
+        ? item.direction
+        : "clockwise";
+      const size: ArcSize = item.size === "threeQuarter" ? "threeQuarter" : "half";
+      const next: ArcItem = {
+        type: "arc",
+        key: key(arcKey(from, to, direction, size)),
+        from,
+        to,
+        direction,
+        size,
+      };
+      if (color !== undefined) next.color = color;
+      return next;
+    }
+    default:
+      // Unreachable for a typed `CanvasItem`; a stored document written by an
+      // older model can still arrive here, and dropping it beats crashing.
+      return null;
   }
 }
 
@@ -123,7 +167,12 @@ function sanitizeItems(
   items: readonly CanvasItem[],
   config: ProjectConfig,
 ): CanvasItem[] {
-  return items.map((item) => sanitizeItem(item, config));
+  const clean: CanvasItem[] = [];
+  for (const item of items) {
+    const next = sanitizeItem(item, config);
+    if (next !== null) clean.push(next);
+  }
+  return clean;
 }
 
 /** The Arabic limit error, thrown by every write path that can add items. */
@@ -363,18 +412,17 @@ export const applyOps = mutation({
     const project = await requireOwnedProject(ctx, projectId, userId);
     const config = project.config;
 
-    const map = new Map<string, CanvasItem>(
-      project.items.map((item) => {
-        const clean = sanitizeItem(item, config);
-        return [clean.k, clean];
-      }),
-    );
+    const map = new Map<string, CanvasItem>();
+    for (const stored of project.items) {
+      const clean = sanitizeItem(stored, config);
+      if (clean !== null) map.set(clean.key, clean);
+    }
     for (const op of ops) {
       switch (op.type) {
         case "add":
           for (const raw of op.items) {
             const item = sanitizeItem(raw, config);
-            if (!map.has(item.k)) map.set(item.k, item);
+            if (item !== null && !map.has(item.key)) map.set(item.key, item);
           }
           enforceItemLimit(map.size);
           break;
@@ -385,7 +433,7 @@ export const applyOps = mutation({
           map.clear();
           for (const raw of op.items) {
             const item = sanitizeItem(raw, config);
-            map.set(item.k, item);
+            if (item !== null) map.set(item.key, item);
           }
           enforceItemLimit(map.size);
           break;

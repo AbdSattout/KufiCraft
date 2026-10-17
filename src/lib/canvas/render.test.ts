@@ -2,14 +2,17 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_PROJECT_CONFIG,
   MAX_THUMBNAIL_LENGTH,
-  archKey,
+  SHAPE_IDS,
+  arcKey,
   lineKey,
+  strokeKey,
   tileKey,
 } from "@/lib/canvas/model";
 import type {
   CanvasItem,
   ProjectConfig,
-  TileShape,
+  Rotation,
+  Zone,
 } from "@/lib/canvas/model";
 import { renderSvg, renderThumbnail } from "@/lib/canvas/render";
 
@@ -112,35 +115,57 @@ function makeConfig(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
   return { ...DEFAULT_PROJECT_CONFIG, ...overrides };
 }
 
-const TILE: CanvasItem = { t: "tile", k: tileKey(1, 2, 0), i: 1, j: 2, q: 0 };
+const TILE: CanvasItem = {
+  type: "tile",
+  key: tileKey(1, 2, 0),
+  column: 1,
+  row: 2,
+  zone: 0,
+};
 const SHAPED_TILE: CanvasItem = {
-  t: "tile",
-  k: tileKey(3, 4, 3),
-  i: 3,
-  j: 4,
-  q: 3,
-  s: "hamza1",
-  c: "#ff0000",
+  type: "tile",
+  key: tileKey(3, 4, 3),
+  column: 3,
+  row: 4,
+  zone: 3,
+  shape: "hamza1",
+  color: "#ff0000",
 };
 const LINE: CanvasItem = {
-  t: "line",
-  k: lineKey(0, 5, 4, 5),
-  i1: 0,
-  j1: 5,
-  i2: 4,
-  j2: 5,
+  type: "line",
+  key: lineKey({ column: 0, row: 5 }, { column: 4, row: 5 }),
+  from: { column: 0, row: 5 },
+  to: { column: 4, row: 5 },
 };
-const ARCH: CanvasItem = {
-  t: "arch",
-  k: archKey(0, 6, 4, 6, 0),
-  i1: 0,
-  j1: 6,
-  i2: 4,
-  j2: 6,
-  d: 0,
+const STROKE: CanvasItem = {
+  type: "stroke",
+  key: strokeKey(
+    [
+      { column: 0, row: 7 },
+      { column: 2, row: 9 },
+    ],
+    false,
+  ),
+  points: [
+    { column: 0, row: 7 },
+    { column: 2, row: 9 },
+  ],
+};
+const ARC: CanvasItem = {
+  type: "arc",
+  key: arcKey(
+    { column: 0, row: 6 },
+    { column: 4, row: 6 },
+    "counterclockwise",
+    "half",
+  ),
+  from: { column: 0, row: 6 },
+  to: { column: 4, row: 6 },
+  direction: "counterclockwise",
+  size: "half",
 };
 
-const ITEMS: CanvasItem[] = [TILE, SHAPED_TILE, LINE, ARCH];
+const ITEMS: CanvasItem[] = [TILE, SHAPED_TILE, LINE, STROKE, ARC];
 
 describe("renderSvg", () => {
   it("emits XML with exactly one element per item", () => {
@@ -154,7 +179,7 @@ describe("renderSvg", () => {
     expect(rects[0].attrs.fill).toBe(DEFAULT_PROJECT_CONFIG.background);
     expect(paths).toHaveLength(ITEMS.length);
     expect(paths.map((path) => path.attrs["data-k"])).toEqual(
-      ITEMS.map((item) => item.k),
+      ITEMS.map((item) => item.key),
     );
     for (const path of paths) {
       expect(path.attrs.d.startsWith("M ")).toBe(true);
@@ -178,24 +203,27 @@ describe("renderSvg", () => {
     expect(paths[0].attrs.stroke).toBeUndefined();
   });
 
-  it("strokes arches with ratio · base", () => {
+  it("strokes arcs with ratio · base", () => {
     const config = makeConfig({ ratio: 0.75, base: 10, ink: "#123456" });
-    const root = rootOf(renderSvg(config, [ARCH]));
-    const arch = find(root, "path")[0];
-    expect(arch.attrs.fill).toBe("none");
-    expect(arch.attrs.stroke).toBe("#123456");
-    expect(arch.attrs["stroke-width"]).toBe("7.5");
+    const root = rootOf(renderSvg(config, [ARC]));
+    const arc = find(root, "path")[0];
+    expect(arc.attrs.fill).toBe("none");
+    expect(arc.attrs.stroke).toBe("#123456");
+    expect(arc.attrs["stroke-width"]).toBe("7.5");
   });
 
-  it("draws the grid only when asked", () => {
+  it("draws the grid as two paths only when asked", () => {
     expect(find(rootOf(renderSvg(makeConfig(), [TILE])), "path")).toHaveLength(1);
     const withConfig = rootOf(
       renderSvg(makeConfig({ showGrid: true }), [TILE]),
     );
-    expect(find(withConfig, "path")).toHaveLength(2);
-    const grid = find(withConfig, "path")[0];
-    expect(grid.attrs.fill).toBe("none");
-    expect(grid.attrs.stroke).not.toBeUndefined();
+    const paths = find(withConfig, "path");
+    expect(paths).toHaveLength(3);
+    // Cell borders first, then the stronger inner ink lines.
+    expect(paths[0].attrs.fill).toBe("none");
+    expect(paths[0].attrs.stroke).not.toBeUndefined();
+    expect(paths[0].attrs["stroke-opacity"]).toBe("0.28");
+    expect(paths[1].attrs["stroke-opacity"]).toBe("0.55");
     const withOption = rootOf(
       renderSvg(makeConfig({ showGrid: true }), [TILE], { showGrid: false }),
     );
@@ -207,7 +235,7 @@ describe("renderSvg", () => {
     const root = rootOf(renderSvg(config, [], { showGrid: true }));
     const grid = find(root, "path")[0];
     expect(grid.attrs.d).toContain("A 100 100");
-    expect(grid.attrs.d).toContain("A 500 500");
+    expect(grid.attrs.d).toContain("A 400 400");
     expect((grid.attrs.d.match(/\bL\b/g) ?? []).length).toBeGreaterThan(35);
   });
 
@@ -229,25 +257,15 @@ describe("renderSvg", () => {
   });
 
   it("renders every shape and both grid types without breaking the XML", () => {
-    const shapes: TileShape[] = [
-      "square",
-      "circle",
-      "triangle",
-      "quadrant",
-      "semicircle",
-      "hexagon",
-      "arc",
-      "hamza1",
-      "hamza2",
-    ];
+    const shapes = SHAPE_IDS;
     const items: CanvasItem[] = shapes.map((shape, index) => ({
-      t: "tile",
-      k: tileKey(index, 0, 0),
-      i: index,
-      j: 0,
-      q: 0,
-      s: shape,
-      r: (index % 4) as 0 | 1 | 2 | 3,
+      type: "tile",
+      key: tileKey(index, 0, 0),
+      column: index,
+      row: 0,
+      zone: 0,
+      shape,
+      rotation: (index % 4) as Rotation,
     }));
     for (const gridType of ["square", "circular"] as const) {
       const root = rootOf(renderSvg(makeConfig({ gridType }), items));
@@ -260,14 +278,15 @@ describe("renderThumbnail", () => {
   const dense = (count: number): CanvasItem[] => {
     const items: CanvasItem[] = [];
     for (let n = 0; n < count; n++) {
-      const i = n % 100;
-      const j = Math.floor(n / 100) % 100;
+      const column = n % 100;
+      const row = Math.floor(n / 100) % 100;
+      const zone = (n % 4) as Zone;
       items.push({
-        t: "tile",
-        k: tileKey(i, j, (n % 4) as 0 | 1 | 2 | 3),
-        i,
-        j,
-        q: (n % 4) as 0 | 1 | 2 | 3,
+        type: "tile",
+        key: tileKey(column, row, zone),
+        column,
+        row,
+        zone,
       });
     }
     return items;

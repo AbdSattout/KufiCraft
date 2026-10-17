@@ -8,7 +8,7 @@
  * fragment of that cell (see `LEGEND`).
  */
 
-import { ratioLabel } from "@/lib/canvas/model";
+import { RATIO_PRESETS, ratioLabel } from "@/lib/canvas/model";
 import type {
   FragmentShape,
   GridSpec,
@@ -34,6 +34,13 @@ export type Piece = {
 
 type Cell = { q: Quadrant; shape?: FragmentShape; turn?: Turn };
 
+/**
+ * The narrowest ratio that still has space (`1:2`). The pieces below used to be
+ * drawn half ink / half space; `1:1` is now the space-less mono cell, so their
+ * ink/space split is `2/3` — on the tool's own axis either way.
+ */
+const NARROW_RATIO = RATIO_PRESETS[1].ratio;
+
 const LEGEND: Record<string, Cell> = {
   "#": { q: 0 },
   "1": { q: 1 },
@@ -41,13 +48,14 @@ const LEGEND: Record<string, Cell> = {
   "3": { q: 3 },
   c: { q: 0, shape: "circle" },
   t: { q: 0, shape: "triangle" },
-  q: { q: 0, shape: "quadrant" },
-  Q: { q: 0, shape: "quadrant", turn: 1 },
-  s: { q: 0, shape: "semicircle" },
-  h: { q: 0, shape: "hexagon" },
-  a: { q: 0, shape: "arc" },
+  q: { q: 0, shape: "quarterCircle" },
+  Q: { q: 0, shape: "quarterCircle", turn: 1 },
+  s: { q: 0, shape: "semiCircle" },
+  p: { q: 0, shape: "pentagon" },
+  v: { q: 0, shape: "curve" },
   H: { q: 0, shape: "hamza1" },
   K: { q: 0, shape: "hamza2" },
+  w: { q: 0, shape: "comb" },
 };
 
 function tiles(map: string[]): TileItem[] {
@@ -121,7 +129,7 @@ export const medallion: Piece = {
   name: "الميدالية",
   note: "شبكة مربعة 13×13",
   spec: { kind: "square", cells: 13 },
-  ratio: 0.5,
+  ratio: NARROW_RATIO,
   items: tiles(MEDALLION),
 };
 
@@ -131,7 +139,7 @@ export const solar: Piece = {
   name: "الشمسية",
   note: "شبكة دائرية 4 مناطق",
   spec: { kind: "radial", bands: 4 },
-  ratio: 0.5,
+  ratio: NARROW_RATIO,
   items: [
     { t: "ring", band1: 0, band2: 0, sector1: 0, sector2: 17 },
     { t: "ring", band1: 0, band2: 0, sector1: 18, sector2: 35 },
@@ -189,9 +197,9 @@ function latticeMap(): string[] {
 export const lattice: Piece = {
   id: "lattice",
   name: "مشربية",
-  note: "شبكة مربعة 14×14 · نسبة 1:1",
+  note: "شبكة مربعة 14×14 · نسبة 1:2",
   spec: { kind: "square", cells: 14 },
-  ratio: 0.5,
+  ratio: NARROW_RATIO,
   items: tiles(latticeMap()),
 };
 
@@ -199,9 +207,9 @@ export const lattice: Piece = {
 export const ornament: Piece = {
   id: "ornament",
   name: "حلية",
-  note: "شبكة مربعة 13×13 · نسبة 1:1 · دوائر وأرباع",
+  note: "شبكة مربعة 13×13 · نسبة 1:2 · دوائر وأرباع",
   spec: { kind: "square", cells: 13 },
-  ratio: 0.5,
+  ratio: NARROW_RATIO,
   items: [
     ...tiles(ringMap(13)),
     { t: "tile", i: 6, j: 6, q: 0, shape: "circle" },
@@ -213,10 +221,10 @@ export const ornament: Piece = {
     { t: "tile", i: 8, j: 4, q: 0, shape: "circle" },
     { t: "tile", i: 4, j: 8, q: 0, shape: "circle" },
     { t: "tile", i: 8, j: 8, q: 0, shape: "circle" },
-    { t: "tile", i: 5, j: 5, q: 0, shape: "quadrant", turn: 1 },
-    { t: "tile", i: 7, j: 5, q: 0, shape: "quadrant", turn: 2 },
-    { t: "tile", i: 5, j: 7, q: 0, shape: "quadrant", turn: 0 },
-    { t: "tile", i: 7, j: 7, q: 0, shape: "quadrant", turn: 3 },
+    { t: "tile", i: 5, j: 5, q: 0, shape: "quarterCircle", turn: 1 },
+    { t: "tile", i: 7, j: 5, q: 0, shape: "quarterCircle", turn: 2 },
+    { t: "tile", i: 5, j: 7, q: 0, shape: "quarterCircle", turn: 0 },
+    { t: "tile", i: 7, j: 7, q: 0, shape: "quarterCircle", turn: 3 },
   ],
 };
 
@@ -280,18 +288,18 @@ export const mergedRun: Piece = {
   name: "دمج الخطوط",
   note: "خمس خلايا، ثم خط واحد",
   spec: { kind: "square", cells: 5, extent: { w: 5, h: 2 } },
-  ratio: 0.5,
+  ratio: NARROW_RATIO,
   items: [...tiles(["#####", "....."]), { t: "bar", i1: 0, j1: 1, i2: 4, j2: 1 }],
 };
 
-/** The nine fragment shapes, one to a cell. */
+/** All ten fragment shapes, one to a cell, in palette order. */
 export const shapeSet: Piece = {
   id: "shape-set",
-  name: "الأشكال التسعة",
-  note: "تسعة أشكال",
-  spec: { kind: "square", cells: 3 },
+  name: "عشرة أشكال",
+  note: "عشرة أشكال",
+  spec: { kind: "square", cells: 5, extent: { w: 5, h: 2 } },
   ratio: 0.75,
-  items: tiles(["#ct", "qQs", "haK"]),
+  items: tiles(["#ctqs", "pvHKw"]),
 };
 
 /** A board used as the subject of the sync and export drawings. */

@@ -46,15 +46,28 @@ describe("editor preferences", () => {
     const storage = new MemoryStorage();
     const prefs = {
       ...DEFAULT_EDITOR_PREFS,
-      tool: "arch" as const,
+      tool: "arc" as const,
       shape: "hamza2" as const,
       rotation: 3 as const,
-      bulge: 1 as const,
+      arc: {
+        direction: "counterclockwise" as const,
+        size: "threeQuarter" as const,
+      },
       zoom: 1.25,
       inkSwatches: ["#111827", "#7c2d12"],
     };
     saveEditorPrefs(prefs, storage);
     expect(loadEditorPrefs(storage)).toEqual(prefs);
+  });
+
+  it("migrates pre-2 prefs (arch tool, bulge) to the new defaults", () => {
+    const prefs = loadEditorPrefs(
+      new MemoryStorage({
+        [EDITOR_PREFS_KEY]: JSON.stringify({ tool: "arch", bulge: 1 }),
+      }),
+    );
+    expect(prefs.tool).toBe(DEFAULT_EDITOR_PREFS.tool);
+    expect(prefs.arc).toEqual(DEFAULT_EDITOR_PREFS.arc);
   });
 
   it("returns defaults for corrupt JSON and non-object values", () => {

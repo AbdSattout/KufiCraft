@@ -4,10 +4,11 @@
  * KufiCraft — editor controller.
  *
  * Composes the project document (Convex) with the editor's local concerns:
- * the tool + draw style, the selection, the in-flight gesture, the local
- * undo/redo stack and the keyboard shortcuts. All geometry/reducer logic
- * lives in `interaction.ts`, `history.ts` and `shortcuts.ts` so this hook
- * only wires React state to those pure functions.
+ * the active tool + draw style, the selection, the in-flight tool state, the
+ * local undo/redo stack and the keyboard shortcuts. All geometry and gesture
+ * logic lives in `interaction.ts` (helpers), `tools.ts` (the tool classes and
+ * their registry), `history.ts` and `shortcuts.ts`, so this hook only wires
+ * React state to those pure functions.
  *
  * Every completed gesture produces exactly one `applyOps` batch and one
  * history entry; undo/redo replay a snapshot as a `replace` op.
@@ -17,7 +18,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { toast } from "sonner";
 import { MAX_ITEMS } from "@/lib/canvas/model";
-import type { CanvasItem, ProjectConfig, TileShape } from "@/lib/canvas/model";
+import type {
+  Anchor,
+  ArcDirection,
+  ArcSize,
+  CanvasItem,
+  ProjectConfig,
+  ShapeId,
+} from "@/lib/canvas/model";
 import type { Id } from "../../../convex/_generated/dataModel";
 import {
   MAX_ZOOM,
@@ -29,29 +37,31 @@ import {
 } from "@/lib/editor-prefs";
 import { downloadProjectFile } from "@/lib/kuficraft-file";
 import {
-  IDLE_GESTURE,
   clientToViewBox,
   clampToCanvas,
   deleteItems,
   duplicateItems,
-  finishGesture,
   isProjectId,
   itemsEqual,
   nextRotation,
-  previewItems,
-  previewKeys,
-  previewMarquee,
   recolourItems,
   reshapeItems,
-  startGesture,
-  updateGesture,
 } from "./interaction";
 import type {
+  ArcStyle,
   DrawStyle,
-  Gesture,
-  GestureContext,
-  Tool,
+  ToolContext,
+  ToolId,
 } from "./interaction";
+import {
+  NO_STATE,
+  beginTool,
+  endTool,
+  moveTool,
+  previewTool,
+  toolOf,
+} from "./tools";
+import type { ToolOutcome, ToolState } from "./tools";
 import {
   EMPTY_HISTORY,
   canRedo,
@@ -73,11 +83,7 @@ export const ZOOM_STEP = 0.25;
 /** Quiet period before the last committed config is remembered for new boards. */
 export const LAST_CONFIG_DELAY_MS = 400;
 
-export type EditorStatus =
-  | "invalid"
-  | "loading"
-  | "missing"
-  | "ready";
+export type EditorStatus = "invalid" | "loading" | "missing" | "ready";
 
 export interface EditorController {
   status: EditorStatus;
@@ -91,17 +97,18 @@ export interface EditorController {
   items: readonly CanvasItem[];
   saving: boolean;
 
-  tool: Tool;
-  setTool: (tool: Tool) => void;
+  tool: ToolId;
+  setTool: (tool: ToolId) => void;
   style: DrawStyle;
+  arc: ArcStyle;
+  setArcDirection: (direction: ArcDirection) => void;
+  setArcSize: (size: ArcSize) => void;
   /** Recent ink colours, most-recent-first (from the persisted prefs). */
   inkSwatches: readonly string[];
-  selectShape: (shape: TileShape) => void;
+  selectShape: (shape: ShapeId) => void;
   rotateShape: () => void;
   setDrawColor: (color: string) => void;
   resetDrawColor: () => void;
-  bulge: 0 | 1;
-  setBulge: (bulge: 0 | 1) => void;
 
   selection: readonly string[];
   setSelection: (keys: readonly string[]) => void;
@@ -125,12 +132,14 @@ export interface EditorController {
   onPointerUp: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onPointerCancel: () => void;
 
-  /** Live overlay data while a gesture is in flight. */
-  gesture: Gesture;
+  /** Live overlay data while a tool state is in flight. */
+  state: ToolState;
   previewItems: readonly CanvasItem[];
   previewKeys: readonly string[];
   marquee: Rect | null;
-  ghost: boolean;
+  /** The armed start anchor of a click sequence (line / arc), or null. */
+  previewMarker: Anchor | null;
+  previewMode: "solid" | "ghost";
 
   exportSvg: () => void;
   exportPng: () => void;
@@ -154,30 +163,38 @@ export function useEditor(
   // Prefs are read synchronously on mount so the editor opens the way the
   // designer left it; the project `config` stays authoritative for rendering.
   const [initialPrefs] = useState(() => loadEditorPrefs());
-  const [tool, setToolState] = useState<Tool>(initialPrefs.tool);
+  const [tool, setToolState] = useState<ToolId>(initialPrefs.tool);
   const [style, setStyle] = useState<DrawStyle>({
     shape: initialPrefs.shape,
     rotation: initialPrefs.rotation,
     color: undefined,
   });
-  const [bulge, setBulge] = useState<0 | 1>(initialPrefs.bulge);
+  const [arc, setArc] = useState<ArcStyle>(initialPrefs.arc);
   const [inkSwatches, setInkSwatches] = useState<readonly string[]>(
     initialPrefs.inkSwatches,
   );
   const [selectionState, setSelectionState] = useState<readonly string[]>([]);
-  const [gesture, setGesture] = useState<Gesture>(IDLE_GESTURE);
+  const [state, setState] = useState<ToolState>(NO_STATE);
   const [history, setHistory] = useState<HistoryState>(EMPTY_HISTORY);
   const [zoom, setZoomState] = useState(initialPrefs.zoom);
   const labelRef = useRef("رسم");
+  /** The line tool's run survives re-renders without a pointer being down. */
+  const stateRef = useRef<ToolState>(NO_STATE);
 
   const surfaceRef = useRef<HTMLDivElement | null>(null);
+
+  const setToolStateAndReset = useCallback((next: ToolId) => {
+    setToolState(next);
+    stateRef.current = NO_STATE;
+    setState(NO_STATE);
+  }, []);
 
   /**
    * Live selection: entries whose item disappeared (erased here, changed in
    * another tab) are dropped during render, and the identity of the array is
    * kept when nothing was pruned so the memoised layers stay put.
    */
-  const liveKeys = useMemo(() => new Set(items.map((item) => item.k)), [items]);
+  const liveKeys = useMemo(() => new Set(items.map((item) => item.key)), [items]);
   const selection = useMemo(() => {
     const kept = selectionState.filter((key) => liveKeys.has(key));
     return kept.length === selectionState.length ? selectionState : kept;
@@ -214,13 +231,30 @@ export function useEditor(
     [commitItems, items, selection],
   );
 
+  /** Applies the outcome of one tool step to React state. */
+  const applyOutcome = useCallback(
+    (outcome: ToolOutcome) => {
+      if (outcome.selection !== undefined) {
+        setSelectionState(outcome.selection);
+      }
+      if (outcome.commit) {
+        applyCommit(
+          outcome.commit.items,
+          outcome.commit.label,
+          outcome.commit.selection,
+        );
+      }
+    },
+    [applyCommit],
+  );
+
   /* ---------------------------------------------------------------- */
-  /* Gesture context + pointer handlers                                */
+  /* Tool context + pointer handlers                                   */
   /* ---------------------------------------------------------------- */
 
-  const context = useMemo<GestureContext>(
-    () => ({ config, items, selection, tool, style, bulge }),
-    [bulge, config, items, selection, style, tool],
+  const context = useMemo<ToolContext>(
+    () => ({ config, items, selection, tool, style, arc }),
+    [arc, config, items, selection, style, tool],
   );
 
   const pointOf = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
@@ -236,53 +270,64 @@ export function useEditor(
       const point = pointOf(event);
       if (!point) return;
       event.preventDefault();
-      const start = startGesture(context, point, { shift: event.shiftKey });
-      if (start.selection !== undefined) setSelectionState(start.selection);
-      setGesture(start.gesture);
+      const outcome = beginTool(tool, context, stateRef.current, {
+        point,
+        shift: event.shiftKey,
+      });
+      applyOutcome(outcome);
+      stateRef.current = outcome.state;
+      setState(outcome.state);
       event.currentTarget.setPointerCapture(event.pointerId);
       surfaceRef.current?.focus({ preventScroll: true });
     },
-    [context, pointOf],
+    [applyOutcome, context, pointOf, tool],
   );
 
   const onPointerMove = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
-      if (gesture.kind === "none") return;
+      // Tools with a click sequence (the line tool) track the hover position
+      // even while no button is down; drag tools only move with the button.
+      if (stateRef.current.kind === "none" && !toolOf(tool).persistent) return;
       const point = pointOf(event);
       if (!point) return;
-      const next = updateGesture(context, gesture, point);
-      if (next !== gesture) setGesture(next);
+      const outcome = moveTool(tool, context, stateRef.current, {
+        point,
+        shift: event.shiftKey,
+      });
+      if (outcome.state === stateRef.current) return;
+      applyOutcome(outcome);
+      stateRef.current = outcome.state;
+      setState(outcome.state);
     },
-    [context, gesture, pointOf],
+    [applyOutcome, context, pointOf, tool],
   );
 
   const onPointerUp = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
-      if (gesture.kind === "none") return;
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId);
       }
-      const point = pointOf(event);
-      const settled = point ? updateGesture(context, gesture, point) : gesture;
-      const { commit, selection: nextSelection } = finishGesture(context, settled);
-      if (commit) {
-        applyCommit(commit.items, commit.label, commit.selection);
-      } else if (nextSelection !== undefined) {
-        setSelectionState(nextSelection);
-      }
-      setGesture(IDLE_GESTURE);
+      const settled = stateRef.current;
+      const outcome = endTool(tool, context, settled);
+      applyOutcome(outcome);
+      const next = outcome.keep ? outcome.state : NO_STATE;
+      stateRef.current = next;
+      setState(next);
     },
-    [applyCommit, context, gesture, pointOf],
+    [applyOutcome, context, tool],
   );
 
-  const onPointerCancel = useCallback(() => setGesture(IDLE_GESTURE), []);
+  const onPointerCancel = useCallback(() => {
+    stateRef.current = NO_STATE;
+    setState(NO_STATE);
+  }, []);
 
   /* ---------------------------------------------------------------- */
   /* Selection + style operations                                      */
   /* ---------------------------------------------------------------- */
 
   const selectShape = useCallback(
-    (shape: TileShape) => {
+    (shape: ShapeId) => {
       setStyle((previous) => ({ ...previous, shape }));
       if (selection.length > 0) {
         applyCommit(reshapeItems(items, selection, { shape }), "شكل", selection);
@@ -308,6 +353,14 @@ export function useEditor(
     setStyle((previous) => ({ ...previous, color: undefined }));
   }, []);
 
+  const setArcDirection = useCallback((direction: ArcDirection) => {
+    setArc((previous) => ({ ...previous, direction }));
+  }, []);
+
+  const setArcSize = useCallback((size: ArcSize) => {
+    setArc((previous) => ({ ...previous, size }));
+  }, []);
+
   const recolourSelection = useCallback(
     (color: string) => {
       setInkSwatches((previous) => rememberInkSwatch(previous, color));
@@ -331,11 +384,6 @@ export function useEditor(
   const clearAll = useCallback(() => {
     applyCommit([], "مسح الكل", []);
   }, [applyCommit]);
-
-  const setTool = useCallback((next: Tool) => {
-    setToolState(next);
-    setGesture(IDLE_GESTURE);
-  }, []);
 
   /* ---------------------------------------------------------------- */
   /* History                                                           */
@@ -386,7 +434,7 @@ export function useEditor(
       event.preventDefault();
       switch (shortcut.kind) {
         case "tool":
-          setTool(shortcut.tool);
+          setToolStateAndReset(shortcut.tool);
           break;
         case "shape":
           selectShape(shortcut.shape);
@@ -407,7 +455,8 @@ export function useEditor(
           redo();
           break;
         case "cancel":
-          setGesture(IDLE_GESTURE);
+          stateRef.current = NO_STATE;
+          setState(NO_STATE);
           break;
       }
     };
@@ -420,7 +469,7 @@ export function useEditor(
     redo,
     rotateShape,
     selectShape,
-    setTool,
+    setToolStateAndReset,
     undo,
   ]);
 
@@ -428,12 +477,10 @@ export function useEditor(
   /* Overlay previews                                                  */
   /* ---------------------------------------------------------------- */
 
-  const overlayItems = useMemo(
-    () => previewItems(context, gesture),
-    [context, gesture],
+  const preview = useMemo(
+    () => previewTool(tool, context, state),
+    [context, state, tool],
   );
-  const overlayKeys = useMemo(() => previewKeys(gesture), [gesture]);
-  const marquee = useMemo(() => previewMarquee(gesture), [gesture]);
 
   /* ---------------------------------------------------------------- */
   /* Exports                                                           */
@@ -470,12 +517,12 @@ export function useEditor(
       tool,
       shape: style.shape,
       rotation: style.rotation,
-      bulge,
+      arc,
       zoom,
       inkSwatches: [...inkSwatches],
     });
   }, [
-    bulge,
+    arc,
     document.status,
     enabled,
     inkSwatches,
@@ -513,15 +560,16 @@ export function useEditor(
     items,
     saving: document.saving,
     tool,
-    setTool,
+    setTool: setToolStateAndReset,
     style,
+    arc,
+    setArcDirection,
+    setArcSize,
     inkSwatches,
     selectShape,
     rotateShape,
     setDrawColor,
     resetDrawColor,
-    bulge,
-    setBulge,
     selection,
     setSelection,
     clearSelection,
@@ -540,11 +588,12 @@ export function useEditor(
     onPointerMove,
     onPointerUp,
     onPointerCancel,
-    gesture,
-    previewItems: overlayItems,
-    previewKeys: overlayKeys,
-    marquee,
-    ghost: gesture.kind === "move",
+    state,
+    previewItems: preview.items,
+    previewKeys: preview.keys,
+    marquee: preview.marquee,
+    previewMarker: preview.marker,
+    previewMode: preview.mode,
     exportSvg,
     exportPng,
     exportFile,

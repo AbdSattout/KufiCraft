@@ -5,15 +5,19 @@
  * shape and refuses to fire while the user is typing in a field. The global
  * shortcuts are exactly the ones documented in docs/UI.md §Editor plus
  * `Ctrl+D` (duplicate) and `R` (rotate the current shape).
+ *
+ * Tool keys come from the tool classes (`TOOL_SHORTCUTS`) and shape digits from
+ * the shape registry (`SHAPE_ORDER`), so this map cannot drift from the UI.
  */
 
-import type { TileShape } from "@/lib/canvas/model";
-import { SHAPE_ORDER } from "./interaction";
-import type { Tool } from "./interaction";
+import type { ShapeId } from "@/lib/canvas/model";
+import { SHAPE_ORDER } from "@/lib/canvas/shapes";
+import { toolForShortcut } from "./tools";
+import type { ToolId } from "./interaction";
 
 export type EditorShortcut =
-  | { kind: "tool"; tool: Tool }
-  | { kind: "shape"; shape: TileShape }
+  | { kind: "tool"; tool: ToolId }
+  | { kind: "shape"; shape: ShapeId }
   | { kind: "delete" }
   | { kind: "undo" }
   | { kind: "redo" }
@@ -67,24 +71,15 @@ export function shortcutFor(event: ShortcutEvent): EditorShortcut | null {
 
   if (key === "Delete" || key === "Backspace") return { kind: "delete" };
   if (key === "Escape") return { kind: "cancel" };
+  if (key === "Enter") return { kind: "cancel" };
 
   if (/^[1-9]$/.test(key)) {
     const shape = SHAPE_ORDER[Number(key) - 1];
     return shape ? { kind: "shape", shape } : null;
   }
 
-  switch (key.toLowerCase()) {
-    case "v":
-      return { kind: "tool", tool: "select" };
-    case "p":
-      return { kind: "tool", tool: "pen" };
-    case "e":
-      return { kind: "tool", tool: "eraser" };
-    case "a":
-      return { kind: "tool", tool: "arch" };
-    case "r":
-      return { kind: "rotate" };
-    default:
-      return null;
-  }
+  if (key.toLowerCase() === "r") return { kind: "rotate" };
+
+  const tool = toolForShortcut(key);
+  return tool ? { kind: "tool", tool } : null;
 }

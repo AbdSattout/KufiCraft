@@ -11,18 +11,27 @@
 import { Copy, RotateCw, Trash2 } from "lucide-react";
 import { useMemo } from "react";
 import { Button } from "@/components/ui/button";
-import { shapePath } from "@/lib/canvas/geometry";
-import type { TileShape } from "@/lib/canvas/model";
+import { tileIconPath } from "@/lib/canvas/items";
+import type { Rotation, ShapeId } from "@/lib/canvas/model";
 import { MESSAGES } from "./messages";
 import { INK_SWATCHES, formatCount, swatchLabel } from "./editor-palette";
 import { ColourField, PanelSection } from "./editor-controls";
 import { SHAPE_LABELS, SHAPE_ORDER } from "./interaction";
 import type { DrawStyle } from "./interaction";
 
-const GLYPH_BOX = { x: 3, y: 3, w: 18, h: 18 };
-
-function ShapeGlyph({ shape }: { shape: TileShape }) {
-  const d = useMemo(() => shapePath(shape, GLYPH_BOX, 0), [shape]);
+/**
+ * The palette glyph is the pen's own path — `tileIconPath` runs the very same
+ * `Tile.render` the canvas uses — so the icons follow the current rotation and
+ * can never show a shape the pen would not paint.
+ */
+function ShapeGlyph({
+  shape,
+  rotation,
+}: {
+  shape: ShapeId;
+  rotation: Rotation;
+}) {
+  const d = useMemo(() => tileIconPath(shape, rotation, 24), [shape, rotation]);
   return (
     <svg viewBox="0 0 24 24" aria-hidden className="size-5">
       <path d={d} fill="currentColor" />
@@ -36,7 +45,7 @@ export interface ShapePanelProps {
   /** Recent ink colours (most-recent-first) shown ahead of the defaults. */
   recentSwatches: readonly string[];
   selectionCount: number;
-  selectShape: (shape: TileShape) => void;
+  selectShape: (shape: ShapeId) => void;
   rotateShape: () => void;
   setDrawColor: (color: string) => void;
   resetDrawColor: () => void;
@@ -85,7 +94,7 @@ export function ShapePanel({
               title={`${SHAPE_LABELS[shape]} (${index + 1})`}
               onClick={() => selectShape(shape)}
             >
-              <ShapeGlyph shape={shape} />
+              <ShapeGlyph shape={shape} rotation={style.rotation} />
             </Button>
           ))}
         </div>

@@ -1,5 +1,5 @@
 /**
- * KufiCraft — the `.kuficraft` project file (format v1).
+ * KufiCraft — the `.kuficraft` project file (format v2).
  *
  * One small JSON document holding everything needed to redraw an artwork,
  * independent of the server: the shared `ProjectConfig` + `CanvasItem[]` from
@@ -7,9 +7,17 @@
  * dashboard both use this module; it is client-only and never runs on the
  * server.
  *
+ * Field names are spelled out (`column`, `row`, `zone`, `from`, `to`, …) — a
+ * file has to be readable, so nothing here is abbreviated. `key` is written
+ * for readability but **re-derived on read** from the geometry, because keys
+ * are identity: two documents that describe the same fragment must agree on it.
+ *
  * Reads are total: a corrupt or hostile file is *sanitised* like the backend
  * (`sanitizeConfig`) or rejected with the exact Arabic messages the doc lists.
  * Writers emit minified JSON and never include unknown fields.
+ *
+ * v1 files (abbreviated fields, nine shapes, no strokes) are still readable;
+ * see `upgradeItem`. Writing always emits v2.
  */
 
 import {
@@ -21,26 +29,39 @@ import {
   MAX_COLOR_LENGTH,
   MAX_ITEMS,
   MAX_NAME_LENGTH,
+  CIRCULAR_SECTORS,
+  arcKey,
+  lineKey,
+  maxGridIndex,
   snapRatio,
+  strokeKey,
+  tileKey,
 } from "@/lib/canvas/model";
 import type {
-  ArchItem,
+  ArcDirection,
+  ArcItem,
   CanvasItem,
+  Cell,
   GridType,
   LineItem,
   ProjectConfig,
+  Rotation,
+  ShapeId,
+  StrokeItem,
   TileItem,
-  TileShape,
-  ZoneQuadrant,
+  Zone,
 } from "@/lib/canvas/model";
-import { SHAPE_ORDER } from "@/components/editor/interaction";
+import { SHAPE_IDS } from "@/lib/canvas/model";
 
 /* ------------------------------------------------------------------ */
 /* Format constants                                                    */
 /* ------------------------------------------------------------------ */
 
 export const FILE_FORMAT = "kuficraft" as const;
-export const FILE_VERSION = 1 as const;
+/** Current writer version (`docs/FORMAT.md`). */
+export const FILE_VERSION = 2 as const;
+/** The version this module can still read. */
+export const FILE_VERSION_MIN = 1 as const;
 export const FILE_EXTENSION = ".kuficraft";
 
 /** Backend name default (`sanitizeName` in `convex/projects.ts`). */
@@ -96,18 +117,22 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
-function isQuadrant(value: unknown): value is ZoneQuadrant {
+function isZone(value: unknown): value is Zone {
   return value === 0 || value === 1 || value === 2 || value === 3;
 }
 
-function isRotation(value: unknown): value is 0 | 1 | 2 | 3 {
+function isRotation(value: unknown): value is Rotation {
   return value === 0 || value === 1 || value === 2 || value === 3;
 }
 
-function isShape(value: unknown): value is TileShape {
+function isShape(value: unknown): value is ShapeId {
   return (
-    typeof value === "string" && (SHAPE_ORDER as readonly string[]).includes(value)
+    typeof value === "string" && (SHAPE_IDS as readonly string[]).includes(value)
   );
+}
+
+function isDirection(value: unknown): value is ArcDirection {
+  return value === "clockwise" || value === "counterclockwise";
 }
 
 function clampNumber(
@@ -129,7 +154,24 @@ function sanitizeColour(value: unknown, fallback: string): string {
 
 /** Item colours keep the model type; empty strings degrade to "no override". */
 function itemColour(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
+  return typeof value === "string" && value.length > 0
+    ? value.slice(0, MAX_COLOR_LENGTH)
+    : undefined;
+}
+
+/** A grid index: finite, integral, and inside the cell grid of `base`. */
+function gridIndex(value: unknown, max: number): number | null {
+  if (!isFiniteNumber(value)) return null;
+  const index = Math.trunc(value);
+  return index < 0 || index > max ? null : index;
+}
+
+function cellOf(value: unknown, maxColumn: number, maxRow: number): Cell | null {
+  if (!isRecord(value)) return null;
+  const column = gridIndex(value.column, maxColumn);
+  const row = gridIndex(value.row, maxRow);
+  if (column === null || row === null) return null;
+  return { column, row };
 }
 
 /* ------------------------------------------------------------------ */
@@ -170,73 +212,91 @@ export function sanitizeProjectName(value: unknown): string {
 }
 
 /**
- * Structural validation against the shared model. Returns the canonical item
- * (only model fields) or `null`. Keys are identity: a non-empty string key is
- * required and preserved; NaN coordinates / bad discriminants are rejected.
+ * Structural validation of a **v2** item. Returns the canonical item (keys
+ * derived from the geometry) or `null`. Coordinates must be finite integers
+ * inside the grid for `config`; optional fields are dropped when absent.
  */
-export function normalizeItem(value: unknown): CanvasItem | null {
+export function normalizeItem(
+  value: unknown,
+  config: ProjectConfig,
+): CanvasItem | null {
   if (!isRecord(value)) return null;
-  const k = value.k;
-  if (typeof k !== "string" || k.length === 0) return null;
+  const maxColumn = maxGridIndex(config.base);
+  const maxRow =
+    config.gridType === "circular" ? CIRCULAR_SECTORS - 1 : maxColumn;
+  const colour = itemColour(value.color);
 
-  switch (value.t) {
+  switch (value.type) {
     case "tile": {
-      if (
-        !isFiniteNumber(value.i) ||
-        !isFiniteNumber(value.j) ||
-        !isQuadrant(value.q)
-      ) {
-        return null;
+      if (!isZone(value.zone)) return null;
+      const column = gridIndex(value.column, maxColumn);
+      const row = gridIndex(value.row, maxRow);
+      if (column === null || row === null) return null;
+      const item: TileItem = {
+        type: "tile",
+        key: tileKey(column, row, value.zone),
+        column,
+        row,
+        zone: value.zone,
+      };
+      if (isShape(value.shape) && value.shape !== "square") {
+        item.shape = value.shape;
       }
-      const item: TileItem = { t: "tile", k, i: value.i, j: value.j, q: value.q };
-      if (isShape(value.s)) item.s = value.s;
-      const c = itemColour(value.c);
-      if (c !== undefined) item.c = c;
-      if (isRotation(value.r)) item.r = value.r;
+      if (isRotation(value.rotation) && value.rotation !== 0) {
+        item.rotation = value.rotation;
+      }
+      if (colour !== undefined) item.color = colour;
       return item;
     }
     case "line": {
-      if (
-        !isFiniteNumber(value.i1) ||
-        !isFiniteNumber(value.j1) ||
-        !isFiniteNumber(value.i2) ||
-        !isFiniteNumber(value.j2)
-      ) {
-        return null;
-      }
+      const from = cellOf(value.from, maxColumn, maxRow);
+      const to = cellOf(value.to, maxColumn, maxRow);
+      if (!from || !to) return null;
       const item: LineItem = {
-        t: "line",
-        k,
-        i1: value.i1,
-        j1: value.j1,
-        i2: value.i2,
-        j2: value.j2,
+        type: "line",
+        key: lineKey(from, to),
+        from,
+        to,
       };
-      const c = itemColour(value.c);
-      if (c !== undefined) item.c = c;
+      if (colour !== undefined) item.color = colour;
       return item;
     }
-    case "arch": {
-      if (
-        !isFiniteNumber(value.i1) ||
-        !isFiniteNumber(value.j1) ||
-        !isFiniteNumber(value.i2) ||
-        !isFiniteNumber(value.j2) ||
-        (value.d !== 0 && value.d !== 1)
-      ) {
-        return null;
+    case "stroke": {
+      if (!Array.isArray(value.points) || value.points.length < 2) return null;
+      const points: Cell[] = [];
+      for (const candidate of value.points) {
+        const cell = cellOf(candidate, maxColumn, maxRow);
+        if (!cell) return null;
+        points.push(cell);
       }
-      const item: ArchItem = {
-        t: "arch",
-        k,
-        i1: value.i1,
-        j1: value.j1,
-        i2: value.i2,
-        j2: value.j2,
-        d: value.d,
+      const closed = value.closed === true;
+      const item: StrokeItem = {
+        type: "stroke",
+        key: strokeKey(points, closed),
+        points,
       };
-      const c = itemColour(value.c);
-      if (c !== undefined) item.c = c;
+      if (closed) item.closed = true;
+      if (colour !== undefined) item.color = colour;
+      return item;
+    }
+    case "arc": {
+      const from = cellOf(value.from, maxColumn, maxRow);
+      const to = cellOf(value.to, maxColumn, maxRow);
+      if (!from || !to) return null;
+      if (from.column === to.column && from.row === to.row) return null;
+      const direction: ArcDirection = isDirection(value.direction)
+        ? value.direction
+        : "clockwise";
+      const size = value.size === "threeQuarter" ? "threeQuarter" : "half";
+      const item: ArcItem = {
+        type: "arc",
+        key: arcKey(from, to, direction, size),
+        from,
+        to,
+        direction,
+        size,
+      };
+      if (colour !== undefined) item.color = colour;
       return item;
     }
     default:
@@ -244,48 +304,65 @@ export function normalizeItem(value: unknown): CanvasItem | null {
   }
 }
 
-/** Rebuilds an item with only the model fields (writers never emit extras). */
-function serializeItem(item: CanvasItem): CanvasItem {
-  switch (item.t) {
-    case "tile": {
-      const next: TileItem = {
-        t: "tile",
-        k: item.k,
-        i: item.i,
-        j: item.j,
-        q: item.q,
-      };
-      if (item.s !== undefined) next.s = item.s;
-      if (item.c !== undefined) next.c = item.c;
-      if (item.r !== undefined) next.r = item.r;
-      return next;
-    }
-    case "line": {
-      const next: LineItem = {
-        t: "line",
-        k: item.k,
-        i1: item.i1,
-        j1: item.j1,
-        i2: item.i2,
-        j2: item.j2,
-      };
-      if (item.c !== undefined) next.c = item.c;
-      return next;
-    }
-    case "arch": {
-      const next: ArchItem = {
-        t: "arch",
-        k: item.k,
-        i1: item.i1,
-        j1: item.j1,
-        i2: item.i2,
-        j2: item.j2,
-        d: item.d,
-      };
-      if (item.c !== undefined) next.c = item.c;
-      return next;
-    }
+/* ------------------------------------------------------------------ */
+/* v1 → v2                                                             */
+/* ------------------------------------------------------------------ */
+
+/** v1 shape ids that were renamed in v2 (docs/FORMAT.md §v1 → v2). */
+const V1_SHAPES: Record<string, ShapeId> = {
+  square: "square",
+  circle: "circle",
+  triangle: "triangle",
+  quarterCircle: "quarterCircle",
+  semiCircle: "semiCircle",
+  hamza1: "hamza1",
+  hamza2: "hamza2",
+  "semi-hexagone": "pentagon",
+  arc: "curve",
+  comb: "comb",
+};
+
+/**
+ * Rewrites one **v1** item into its v2 field names. Returns `null` for
+ * anything unrecognised; the result still goes through `normalizeItem`, so a
+ * v1 file cannot smuggle values past the validator.
+ */
+export function upgradeItem(value: unknown): unknown | null {
+  if (!isRecord(value)) return null;
+  const type = value.t;
+  const colour = value.c;
+  if (type === "tile") {
+    return {
+      type: "tile",
+      column: value.i,
+      row: value.j,
+      zone: value.q,
+      shape: typeof value.s === "string" ? V1_SHAPES[value.s] : undefined,
+      rotation: value.r,
+      color: colour,
+    };
   }
+  if (type === "line") {
+    return {
+      type: "line",
+      from: { column: value.i1, row: value.j1 },
+      to: { column: value.i2, row: value.j2 },
+      color: colour,
+    };
+  }
+  if (type === "arch") {
+    // v1 stored the bulge side as a flag; v2 stores the sweep direction. The
+    // two are equivalent for the half-circle arcs v1 could express.
+    return {
+      type: "arc",
+      from: { column: value.i1, row: value.j1 },
+      to: { column: value.i2, row: value.j2 },
+      direction: value.d === 1 ? "counterclockwise" : "clockwise",
+      size: "half",
+      color: colour,
+    };
+  }
+  return null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -297,12 +374,20 @@ export function exportProjectFile(
   input: ProjectFileInput,
   exportedAt: string = new Date().toISOString(),
 ): string {
+  const config = sanitizeProjectConfig(input.config);
+  // Items go through the same validator as an imported file, so a writer can
+  // never emit unknown fields or a non-canonical key (docs/FORMAT.md §Rules).
+  const items: CanvasItem[] = [];
+  for (const item of input.items) {
+    const clean = normalizeItem(item, config);
+    if (clean !== null) items.push(clean);
+  }
   const file: ProjectFile = {
     format: FILE_FORMAT,
     version: FILE_VERSION,
     name: sanitizeProjectName(input.name),
-    config: sanitizeProjectConfig(input.config),
-    items: input.items.map(serializeItem),
+    config,
+    items,
     exportedAt,
   };
   return JSON.stringify(file);
@@ -323,19 +408,23 @@ export function parseProjectFile(text: string): ParsedProjectFile {
   if (!isRecord(raw) || raw.format !== FILE_FORMAT) {
     throw new Error(FILE_ERRORS.notKuficraft);
   }
-  if (raw.version !== FILE_VERSION) {
+  const version = raw.version;
+  if (version !== 1 && version !== 2) {
     throw new Error(FILE_ERRORS.unknownVersion);
   }
 
+  const config = sanitizeProjectConfig(raw.config);
+  const legacy = version === 1;
   const candidates = Array.isArray(raw.items) ? raw.items : [];
   const items: CanvasItem[] = [];
   const seen = new Set<string>();
   let droppedItems = 0;
 
   for (const candidate of candidates) {
-    const item = normalizeItem(candidate);
-    if (!item || seen.has(item.k)) continue;
-    seen.add(item.k);
+    const source = legacy ? upgradeItem(candidate) : candidate;
+    const item = source === null ? null : normalizeItem(source, config);
+    if (!item || seen.has(item.key)) continue;
+    seen.add(item.key);
     if (items.length >= MAX_ITEMS) {
       droppedItems += 1;
       continue;
@@ -345,7 +434,7 @@ export function parseProjectFile(text: string): ParsedProjectFile {
 
   return {
     name: sanitizeProjectName(raw.name),
-    config: sanitizeProjectConfig(raw.config),
+    config,
     items,
     droppedItems,
   };

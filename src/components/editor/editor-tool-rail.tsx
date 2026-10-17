@@ -4,29 +4,57 @@
  * KufiCraft — tool rail.
  *
  * Vertical icon rail on desktop (RTL: right edge, labels under the icons),
- * horizontal bar above the status line on mobile. The arch tool reveals its
- * bulge toggle next to it.
+ * horizontal bar above the status line on mobile. It is generated from the
+ * tool registry (`TOOLS` in `tools.ts`): the order, the labels, the shortcut
+ * hints and the glyphs all come from the tool classes, so a new tool shows up
+ * here without touching this file.
+ *
+ * The arc tool reveals its own controls next to it: the sweep direction and
+ * the circle size (`docs/CANVAS.md` §5).
  */
 
-import { Eraser, MousePointer2, Pen, Spline } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { MESSAGES } from "./messages";
-import { TOOL_LABELS, TOOL_ORDER, TOOL_SHORTCUTS } from "./interaction";
-import type { Tool } from "./interaction";
+import { TOOLS, toolOf } from "./tools";
+import type { ToolIconPart } from "./tools";
+import type { ArcStyle, ToolId } from "./interaction";
 
-const TOOL_ICONS: Record<Tool, typeof Pen> = {
-  select: MousePointer2,
-  pen: Pen,
-  eraser: Eraser,
-  arch: Spline,
-};
+/** Renders one tool's glyph in a 24×24 box (paths are the tool's own). */
+export function ToolGlyph({
+  tool,
+  className,
+}: {
+  tool: ToolId;
+  className?: string;
+}) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden className={cn("size-4", className)}>
+      {toolOf(tool).icon.map((part: ToolIconPart, index: number) =>
+        part.mode === "fill" ? (
+          <path key={index} d={part.d} fill="currentColor" />
+        ) : (
+          <path
+            key={index}
+            d={part.d}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1.7}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        ),
+      )}
+    </svg>
+  );
+}
 
 export interface ToolRailProps {
-  tool: Tool;
-  setTool: (tool: Tool) => void;
-  bulge: 0 | 1;
-  setBulge: (bulge: 0 | 1) => void;
+  tool: ToolId;
+  setTool: (tool: ToolId) => void;
+  arc: ArcStyle;
+  setArcDirection: (direction: ArcStyle["direction"]) => void;
+  setArcSize: (size: ArcStyle["size"]) => void;
   orientation: "vertical" | "horizontal";
   className?: string;
 }
@@ -34,12 +62,14 @@ export interface ToolRailProps {
 export function ToolRail({
   tool,
   setTool,
-  bulge,
-  setBulge,
+  arc,
+  setArcDirection,
+  setArcSize,
   orientation,
   className,
 }: ToolRailProps) {
   const vertical = orientation === "vertical";
+
   return (
     <div
       role="toolbar"
@@ -53,62 +83,104 @@ export function ToolRail({
         className,
       )}
     >
-      {TOOL_ORDER.map((entry) => {
-        const Icon = TOOL_ICONS[entry];
-        const active = entry === tool;
+      {TOOLS.map((entry) => {
+        const active = entry.id === tool;
+        const hint = `${entry.label} (${entry.shortcut})`;
         return (
           <Button
-            key={entry}
+            key={entry.id}
             variant={active ? "secondary" : "ghost"}
             aria-pressed={active}
-            aria-label={`${TOOL_LABELS[entry]} (${TOOL_SHORTCUTS[entry]})`}
-            title={`${TOOL_LABELS[entry]} (${TOOL_SHORTCUTS[entry]})`}
-            onClick={() => setTool(entry)}
+            aria-label={hint}
+            title={hint}
+            onClick={() => setTool(entry.id)}
             className={cn(
               "h-auto flex-col gap-0.5 px-1 py-1.5 text-[0.7rem]",
               vertical ? "w-full" : "min-w-16 shrink-0",
             )}
           >
-            <Icon className="size-4" aria-hidden />
-            <span>{TOOL_LABELS[entry]}</span>
+            <ToolGlyph tool={entry.id} />
+            <span>{entry.label}</span>
           </Button>
         );
       })}
 
-      {tool === "arch" ? (
-        <div
-          role="group"
-          aria-label={MESSAGES.bulgeUp}
-          className={cn(
-            "flex gap-1",
-            vertical ? "flex-col" : "flex-row items-center",
-          )}
-        >
-          <Button
-            variant={bulge === 0 ? "secondary" : "ghost"}
-            aria-pressed={bulge === 0}
-            aria-label={MESSAGES.bulgeUp}
-            onClick={() => setBulge(0)}
-            className="h-auto flex-col gap-0.5 px-1 py-1.5 text-[0.7rem]"
+      {tool === "arc" ? (
+        <>
+          <div
+            role="group"
+            aria-label={MESSAGES.arcDirection}
+            className={cn(
+              "flex gap-1",
+              vertical ? "flex-col" : "flex-row items-center",
+            )}
           >
-            <span aria-hidden className="text-base leading-none">
-              ⌒
-            </span>
-            <span>علوية</span>
-          </Button>
-          <Button
-            variant={bulge === 1 ? "secondary" : "ghost"}
-            aria-pressed={bulge === 1}
-            aria-label={MESSAGES.bulgeDown}
-            onClick={() => setBulge(1)}
-            className="h-auto flex-col gap-0.5 px-1 py-1.5 text-[0.7rem]"
+            <Button
+              variant={arc.direction === "clockwise" ? "secondary" : "ghost"}
+              aria-pressed={arc.direction === "clockwise"}
+              aria-label={MESSAGES.arcClockwise}
+              title={MESSAGES.arcClockwise}
+              onClick={() => setArcDirection("clockwise")}
+              className="h-auto flex-col gap-0.5 px-1 py-1.5 text-[0.7rem]"
+            >
+              <span aria-hidden className="text-base leading-none">
+                ⟳
+              </span>
+              <span>{MESSAGES.arcClockwiseShort}</span>
+            </Button>
+            <Button
+              variant={
+                arc.direction === "counterclockwise" ? "secondary" : "ghost"
+              }
+              aria-pressed={arc.direction === "counterclockwise"}
+              aria-label={MESSAGES.arcCounterclockwise}
+              title={MESSAGES.arcCounterclockwise}
+              onClick={() => setArcDirection("counterclockwise")}
+              className="h-auto flex-col gap-0.5 px-1 py-1.5 text-[0.7rem]"
+            >
+              <span aria-hidden className="text-base leading-none">
+                ⟲
+              </span>
+              <span>{MESSAGES.arcCounterclockwiseShort}</span>
+            </Button>
+          </div>
+
+          <div
+            role="group"
+            aria-label={MESSAGES.arcSize}
+            className={cn(
+              "flex gap-1",
+              vertical ? "flex-col" : "flex-row items-center",
+            )}
           >
-            <span aria-hidden className="text-base leading-none">
-              ⌣
-            </span>
-            <span>سفلية</span>
-          </Button>
-        </div>
+            <Button
+              variant={arc.size === "half" ? "secondary" : "ghost"}
+              aria-pressed={arc.size === "half"}
+              aria-label={MESSAGES.arcHalf}
+              title={MESSAGES.arcHalf}
+              onClick={() => setArcSize("half")}
+              className="h-auto flex-col gap-0.5 px-1 py-1.5 text-[0.7rem]"
+            >
+              <span aria-hidden className="text-base leading-none">
+                ⌒
+              </span>
+              <span>{MESSAGES.arcHalfShort}</span>
+            </Button>
+            <Button
+              variant={arc.size === "threeQuarter" ? "secondary" : "ghost"}
+              aria-pressed={arc.size === "threeQuarter"}
+              aria-label={MESSAGES.arcThreeQuarter}
+              title={MESSAGES.arcThreeQuarter}
+              onClick={() => setArcSize("threeQuarter")}
+              className="h-auto flex-col gap-0.5 px-1 py-1.5 text-[0.7rem]"
+            >
+              <span aria-hidden className="text-base leading-none">
+                ◠
+              </span>
+              <span>{MESSAGES.arcThreeQuarterShort}</span>
+            </Button>
+          </div>
+        </>
       ) : null}
     </div>
   );

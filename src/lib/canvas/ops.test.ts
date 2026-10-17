@@ -1,31 +1,49 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_PROJECT_CONFIG,
-  archKey,
+  arcKey,
   lineKey,
+  strokeKey,
   tileKey,
 } from "@/lib/canvas/model";
 import type {
+  Anchor,
   CanvasItem,
   ProjectConfig,
   TileItem,
+  Zone,
 } from "@/lib/canvas/model";
 import type { CanvasState } from "@/lib/canvas/ops";
 import {
   addItems,
+  lineItems,
+  paintItems,
+  penItems,
   removeItems,
   replaceItems,
-  strokeToItems,
   toOps,
 } from "@/lib/canvas/ops";
-import type { Anchor } from "@/lib/canvas/grid";
+import { itemColor } from "@/lib/canvas/items";
+import { inkUnit, zoneRect } from "@/lib/canvas/geometry";
 
 function makeConfig(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
   return { ...DEFAULT_PROJECT_CONFIG, ...overrides };
 }
 
-function tile(i: number, j: number, q: 0 | 1 | 2 | 3, extra: Partial<TileItem> = {}): TileItem {
-  return { t: "tile", k: tileKey(i, j, q), i, j, q, ...extra };
+function tile(
+  column: number,
+  row: number,
+  zone: Zone,
+  extra: Partial<TileItem> = {},
+): TileItem {
+  return {
+    type: "tile",
+    key: tileKey(column, row, zone),
+    column,
+    row,
+    zone,
+    ...extra,
+  };
 }
 
 function state(items: CanvasItem[]): CanvasState {
@@ -39,12 +57,12 @@ const C = tile(2, 0, 0);
 describe("addItems", () => {
   it("appends new keys and ignores existing ones", () => {
     const next = addItems(state([A]), [B, A, C]);
-    expect(next.items.map((item) => item.k)).toEqual([A.k, B.k, C.k]);
+    expect(next.items.map((item) => item.key)).toEqual([A.key, B.key, C.key]);
   });
 
   it("keeps the first occurrence of a duplicated key inside the batch", () => {
-    const first = tile(3, 3, 1, { c: "#111111" });
-    const second = tile(3, 3, 1, { c: "#222222" });
+    const first = tile(3, 3, 1, { color: "#111111" });
+    const second = tile(3, 3, 1, { color: "#222222" });
     const next = addItems(state([]), [first, second]);
     expect(next.items).toEqual([first]);
   });
@@ -58,7 +76,7 @@ describe("addItems", () => {
 
 describe("removeItems", () => {
   it("removes listed keys and ignores unknown ones", () => {
-    const next = removeItems(state([A, B, C]), [B.k, "missing"]);
+    const next = removeItems(state([A, B, C]), [B.key, "missing"]);
     expect(next.items).toEqual([A, C]);
   });
 
@@ -68,11 +86,34 @@ describe("removeItems", () => {
   });
 });
 
+describe("paintItems", () => {
+  it("replaces a same-key item in place and leaves the rest untouched", () => {
+    const recoloured = tile(0, 0, 0, { color: "#ff0000" });
+    const next = paintItems(state([A, B]), [recoloured]);
+    expect(next.items).toEqual([recoloured, B]);
+    // Untouched items keep their object identity so React can skip them.
+    expect(next.items[1]).toBe(B);
+  });
+
+  it("appends new keys", () => {
+    expect(paintItems(state([A]), [B]).items).toEqual([A, B]);
+  });
+
+  it("returns the same state when nothing changes", () => {
+    const before = state([A, B]);
+    expect(paintItems(before, [])).toBe(before);
+    expect(paintItems(before, [A])).toBe(before);
+  });
+});
+
 describe("replaceItems", () => {
   it("replaces the list and dedupes by key (last occurrence wins)", () => {
-    const first = tile(4, 4, 2, { c: "#111111" });
-    const second = tile(4, 4, 2, { c: "#222222" });
-    expect(replaceItems(state([A, B]), [C, first, second]).items).toEqual([C, second]);
+    const first = tile(4, 4, 2, { color: "#111111" });
+    const second = tile(4, 4, 2, { color: "#222222" });
+    expect(replaceItems(state([A, B]), [C, first, second]).items).toEqual([
+      C,
+      second,
+    ]);
   });
 });
 
@@ -85,118 +126,130 @@ describe("toOps", () => {
     expect(toOps([A, B], [A, B, C])).toEqual([{ type: "add", items: [C] }]);
   });
 
-  it("diffs removed items as a remove batch", () => {
+  it("re-emits the tail as remove + add when an item is dropped", () => {
     expect(toOps([A, B, C], [A, C])).toEqual([
-      { type: "remove", keys: [B.k] },
+      { type: "remove", keys: [B.key, C.key] },
+      { type: "add", items: [C] },
     ]);
   });
 
   it("combines remove + add when the run style survives", () => {
     const D = tile(5, 5, 3);
     expect(toOps([A, B, C], [A, C, D])).toEqual([
-      { type: "remove", keys: [B.k] },
-      { type: "add", items: [D] },
+      { type: "remove", keys: [B.key, C.key] },
+      { type: "add", items: [C, D] },
     ]);
   });
 
-  it("replaces when an item changed under the same key", () => {
-    const recoloured = { ...A, c: "#ff0000" } as CanvasItem;
+  it("re-emits the tail when an item changed under the same key", () => {
+    const recoloured = tile(0, 0, 0, { color: "#ff0000" });
     expect(toOps([A, B], [recoloured, B])).toEqual([
-      { type: "replace", items: [recoloured, B] },
+      { type: "remove", keys: [A.key, B.key] },
+      { type: "add", items: [recoloured, B] },
     ]);
   });
 
-  it("replaces when the order changed", () => {
-    expect(toOps([A, B], [B, A])).toEqual([{ type: "replace", items: [B, A] }]);
+  it("re-emits the tail when the order changed", () => {
+    expect(toOps([A, B], [B, A])).toEqual([
+      { type: "remove", keys: [A.key, B.key] },
+      { type: "add", items: [B, A] },
+    ]);
   });
 
   it("treats default and explicit optional fields as equal", () => {
-    const explicit = { ...A, s: "square", r: 0 } as CanvasItem;
+    const explicit = tile(0, 0, 0, { shape: "square", rotation: 0 });
     expect(toOps([A], [explicit])).toEqual([]);
   });
 
   it("produces batches the backend applyOps accepts", () => {
     const line = {
-      t: "line",
-      k: lineKey(0, 1, 3, 1),
-      i1: 0,
-      j1: 1,
-      i2: 3,
-      j2: 1,
+      type: "line",
+      key: lineKey({ column: 0, row: 1 }, { column: 3, row: 1 }),
+      from: { column: 0, row: 1 },
+      to: { column: 3, row: 1 },
     } as const;
-    const arch = {
-      t: "arch",
-      k: archKey(0, 2, 3, 2, 1),
-      i1: 0,
-      j1: 2,
-      i2: 3,
-      j2: 2,
-      d: 1,
+    const arc = {
+      type: "arc",
+      key: arcKey(
+        { column: 0, row: 2 },
+        { column: 3, row: 2 },
+        "clockwise",
+        "half",
+      ),
+      from: { column: 0, row: 2 },
+      to: { column: 3, row: 2 },
+      direction: "clockwise",
+      size: "half",
     } as const;
-    expect(toOps([], [line, arch])).toEqual([
-      { type: "add", items: [line, arch] },
+    expect(toOps([], [line, arc])).toEqual([
+      { type: "add", items: [line, arc] },
     ]);
   });
 });
 
 /* ------------------------------------------------------------------ */
-/* strokeToItems                                                       */
+/* penItems                                                            */
 /* ------------------------------------------------------------------ */
 
-const run = (from: number, to: number, q: 0 | 1 | 2 | 3, j = 4): Anchor[] => {
+const run = (from: number, to: number, zone: Zone, row = 4): Anchor[] => {
   const anchors: Anchor[] = [];
   const step = from <= to ? 1 : -1;
-  for (let i = from; step > 0 ? i <= to : i >= to; i += step) {
-    anchors.push({ i, j, q });
+  for (let column = from; step > 0 ? column <= to : column >= to; column += step) {
+    anchors.push({ column, row, zone });
   }
   return anchors;
 };
 
-describe("strokeToItems", () => {
+describe("penItems", () => {
   it("merges a straight run into one line", () => {
     const config = makeConfig();
-    const items = strokeToItems(config, run(2, 5, 0));
+    const items = penItems(config, run(2, 5, 0));
     expect(items).toHaveLength(1);
     expect(items[0]).toEqual({
-      t: "line",
-      k: lineKey(2, 4, 5, 4),
-      i1: 2,
-      j1: 4,
-      i2: 5,
-      j2: 4,
+      type: "line",
+      key: lineKey({ column: 2, row: 4 }, { column: 5, row: 4 }),
+      from: { column: 2, row: 4 },
+      to: { column: 5, row: 4 },
+      color: config.ink,
     });
   });
 
   it("canonicalises the run direction", () => {
     const config = makeConfig();
-    expect(strokeToItems(config, run(5, 2, 0))).toEqual(
-      strokeToItems(config, run(2, 5, 0)),
+    expect(penItems(config, run(5, 2, 0))).toEqual(
+      penItems(config, run(2, 5, 0)),
     );
   });
 
   it("merges vertical runs into a column line", () => {
     const config = makeConfig();
     const anchors: Anchor[] = [
-      { i: 3, j: 7, q: 2 },
-      { i: 3, j: 6, q: 2 },
-      { i: 3, j: 5, q: 2 },
+      { column: 3, row: 7, zone: 0 },
+      { column: 3, row: 6, zone: 0 },
+      { column: 3, row: 5, zone: 0 },
     ];
-    expect(strokeToItems(config, anchors)).toEqual([
-      { t: "line", k: lineKey(3, 5, 3, 7), i1: 3, j1: 5, i2: 3, j2: 7 },
+    expect(penItems(config, anchors)).toEqual([
+      {
+        type: "line",
+        key: lineKey({ column: 3, row: 5 }, { column: 3, row: 7 }),
+        from: { column: 3, row: 5 },
+        to: { column: 3, row: 7 },
+        color: config.ink,
+      },
     ]);
   });
 
   it("keeps tiles for an L-shaped run", () => {
     const config = makeConfig();
     const anchors: Anchor[] = [
-      { i: 0, j: 0, q: 0 },
-      { i: 1, j: 0, q: 0 },
-      { i: 1, j: 1, q: 0 },
+      { column: 0, row: 0, zone: 0 },
+      { column: 1, row: 0, zone: 0 },
+      { column: 1, row: 1, zone: 0 },
     ];
-    const items = strokeToItems(config, anchors);
+    const items = penItems(config, anchors);
     expect(items).toHaveLength(3);
-    expect(items.every((item) => item.t === "tile")).toBe(true);
-    expect(items.map((item) => item.k)).toEqual([
+    expect(items.every((item) => item.type === "tile")).toBe(true);
+    expect(items.map((item) => item.key)).toEqual([
       tileKey(0, 0, 0),
       tileKey(1, 0, 0),
       tileKey(1, 1, 0),
@@ -205,110 +258,412 @@ describe("strokeToItems", () => {
 
   it("keeps tiles when mergeLines is off", () => {
     const config = makeConfig();
-    const items = strokeToItems(config, run(2, 5, 0), { mergeLines: false });
+    const items = penItems(config, run(2, 5, 0), { mergeLines: false });
     expect(items).toHaveLength(4);
-    expect(items.every((item) => item.t === "tile")).toBe(true);
+    expect(items.every((item) => item.type === "tile")).toBe(true);
   });
 
   it("keeps tiles when the zone quadrant changes inside the run", () => {
     const config = makeConfig();
     const anchors: Anchor[] = [
-      { i: 2, j: 4, q: 0 },
-      { i: 3, j: 4, q: 0 },
-      { i: 4, j: 4, q: 1 },
+      { column: 2, row: 4, zone: 0 },
+      { column: 3, row: 4, zone: 0 },
+      { column: 4, row: 4, zone: 1 },
     ];
-    expect(strokeToItems(config, anchors)).toHaveLength(3);
+    expect(penItems(config, anchors)).toHaveLength(3);
   });
 
   it("collapses consecutive identical anchors", () => {
     const config = makeConfig();
     const anchors: Anchor[] = [
-      { i: 1, j: 1, q: 0 },
-      { i: 1, j: 1, q: 0 },
-      { i: 1, j: 1, q: 0 },
-      { i: 2, j: 1, q: 0 },
-      { i: 2, j: 1, q: 0 },
+      { column: 1, row: 1, zone: 0 },
+      { column: 1, row: 1, zone: 0 },
+      { column: 1, row: 1, zone: 0 },
+      { column: 2, row: 1, zone: 0 },
+      { column: 2, row: 1, zone: 0 },
     ];
-    expect(strokeToItems(config, anchors)).toEqual([
-      { t: "line", k: lineKey(1, 1, 2, 1), i1: 1, j1: 1, i2: 2, j2: 1 },
+    expect(penItems(config, anchors)).toEqual([
+      {
+        type: "line",
+        key: lineKey({ column: 1, row: 1 }, { column: 2, row: 1 }),
+        from: { column: 1, row: 1 },
+        to: { column: 2, row: 1 },
+        color: config.ink,
+      },
     ]);
   });
 
   it("draws a single tap as one tile", () => {
     const config = makeConfig();
-    expect(strokeToItems(config, [{ i: 3, j: 9, q: 1 }])).toEqual([
-      { t: "tile", k: tileKey(3, 9, 1), i: 3, j: 9, q: 1 },
+    expect(penItems(config, [{ column: 3, row: 9, zone: 1 }])).toEqual([
+      {
+        type: "tile",
+        key: tileKey(3, 9, 1),
+        column: 3,
+        row: 9,
+        zone: 1,
+        color: config.ink,
+      },
     ]);
-    expect(strokeToItems(config, [])).toEqual([]);
+    expect(penItems(config, [])).toEqual([]);
   });
 
   it("applies the shape / rotation palette and colour override", () => {
     const config = makeConfig({ ink: "#1a1a2e" });
-    const shaped = strokeToItems(config, [{ i: 0, j: 0, q: 0 }], {
+    const shaped = penItems(config, [{ column: 0, row: 0, zone: 0 }], {
       shape: "circle",
       rotation: 3,
       color: "#ff0000",
     });
     expect(shaped).toEqual([
       {
-        t: "tile",
-        k: tileKey(0, 0, 0),
-        i: 0,
-        j: 0,
-        q: 0,
-        s: "circle",
-        r: 3,
-        c: "#ff0000",
+        type: "tile",
+        key: tileKey(0, 0, 0),
+        column: 0,
+        row: 0,
+        zone: 0,
+        shape: "circle",
+        rotation: 3,
+        color: "#ff0000",
       },
     ]);
   });
 
-  it("drops defaults and the config ink colour from the payload", () => {
+  it("drops the shape / rotation defaults but always keeps a concrete colour", () => {
     const config = makeConfig({ ink: "#1a1a2e" });
+    // The shape / rotation defaults are canonicalised away…
     expect(
-      strokeToItems(config, [{ i: 0, j: 0, q: 0 }], {
+      penItems(config, [{ column: 0, row: 0, zone: 0 }], {
         shape: "square",
         rotation: 0,
-        color: "#1a1a2e",
       }),
-    ).toEqual([{ t: "tile", k: tileKey(0, 0, 0), i: 0, j: 0, q: 0 }]);
-    expect(
-      strokeToItems(config, run(0, 2, 0), { color: "#00ff00" }),
     ).toEqual([
       {
-        t: "line",
-        k: lineKey(0, 4, 2, 4),
-        i1: 0,
-        j1: 4,
-        i2: 2,
-        j2: 4,
-        c: "#00ff00",
+        type: "tile",
+        key: tileKey(0, 0, 0),
+        column: 0,
+        row: 0,
+        zone: 0,
+        color: "#1a1a2e",
+      },
+    ]);
+    // …but the resolved colour is always stored, even when it is the ink.
+    expect(penItems(config, run(0, 2, 0))).toEqual([
+      {
+        type: "line",
+        key: lineKey({ column: 0, row: 4 }, { column: 2, row: 4 }),
+        from: { column: 0, row: 4 },
+        to: { column: 2, row: 4 },
+        color: "#1a1a2e",
       },
     ]);
   });
 
-  it("merges circular runs of one band, wrapping sectors", () => {
+  it("stores the document ink when the pen has no colour of its own", () => {
+    const config = makeConfig({ ink: "#101010" });
+    expect(penItems(config, [{ column: 0, row: 0, zone: 0 }])).toEqual([
+      {
+        type: "tile",
+        key: tileKey(0, 0, 0),
+        column: 0,
+        row: 0,
+        zone: 0,
+        color: "#101010",
+      },
+    ]);
+    expect(penItems(config, run(2, 5, 0))).toEqual([
+      {
+        type: "line",
+        key: lineKey({ column: 2, row: 4 }, { column: 5, row: 4 }),
+        from: { column: 2, row: 4 },
+        to: { column: 5, row: 4 },
+        color: "#101010",
+      },
+    ]);
+  });
+
+  it("stores the tool colour on every fragment it returns", () => {
+    const config = makeConfig({ ink: "#101010" });
+    expect(
+      penItems(config, [{ column: 0, row: 0, zone: 0 }], { color: "#ff0000" }),
+    ).toEqual([
+      {
+        type: "tile",
+        key: tileKey(0, 0, 0),
+        column: 0,
+        row: 0,
+        zone: 0,
+        color: "#ff0000",
+      },
+    ]);
+    const tiles = penItems(config, run(0, 2, 0), {
+      color: "#ff0000",
+      mergeLines: false,
+    });
+    expect(tiles).toHaveLength(3);
+    expect(tiles.every((item) => item.color === "#ff0000")).toBe(true);
+  });
+
+  it("keeps tiles for a circular run (no line merge on a polar grid)", () => {
     const config = makeConfig({ gridType: "circular" });
     const anchors: Anchor[] = [
-      { i: 5, j: 35, q: 0 },
-      { i: 5, j: 0, q: 0 },
+      { column: 5, row: 35, zone: 0 },
+      { column: 5, row: 0, zone: 0 },
     ];
-    expect(strokeToItems(config, anchors)).toEqual([
+    expect(penItems(config, anchors)).toEqual([
       {
-        t: "line",
-        k: lineKey(5, 0, 5, 35),
-        i1: 5,
-        j1: 0,
-        i2: 5,
-        j2: 35,
+        type: "tile",
+        key: tileKey(5, 35, 0),
+        column: 5,
+        row: 35,
+        zone: 0,
+        color: config.ink,
+      },
+      {
+        type: "tile",
+        key: tileKey(5, 0, 0),
+        column: 5,
+        row: 0,
+        zone: 0,
+        color: config.ink,
       },
     ]);
   });
 
   it("feeds an applyOps add batch straight from a stroke", () => {
     const config = makeConfig();
-    const items = strokeToItems(config, run(2, 5, 0));
+    const items = penItems(config, run(2, 5, 0));
     expect(toOps([], items)).toEqual([{ type: "add", items }]);
     expect(addItems(state([]), items).items).toEqual(items);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* lineItems                                                           */
+/* ------------------------------------------------------------------ */
+
+describe("lineItems", () => {
+  it("turns a two-point same-axis segment into one line bar", () => {
+    const config = makeConfig();
+    const items = lineItems(
+      config,
+      [
+        { column: 0, row: 4 },
+        { column: 5, row: 4 },
+      ],
+      false,
+    );
+    expect(items).toEqual([
+      {
+        type: "line",
+        key: lineKey({ column: 0, row: 4 }, { column: 5, row: 4 }),
+        from: { column: 0, row: 4 },
+        to: { column: 5, row: 4 },
+        color: config.ink,
+      },
+    ]);
+  });
+
+  it("canonicalises the two points", () => {
+    const config = makeConfig();
+    expect(
+      lineItems(
+        config,
+        [
+          { column: 5, row: 4 },
+          { column: 0, row: 4 },
+        ],
+        false,
+      ),
+    ).toEqual(
+      lineItems(
+        config,
+        [
+          { column: 0, row: 4 },
+          { column: 5, row: 4 },
+        ],
+        false,
+      ),
+    );
+  });
+
+  it("strokes a diagonal instead of a bar", () => {
+    const items = lineItems(
+      makeConfig(),
+      [
+        { column: 0, row: 0 },
+        { column: 3, row: 3 },
+      ],
+      false,
+    );
+    expect(items).toHaveLength(1);
+    expect(items[0].type).toBe("stroke");
+  });
+
+  it("strokes a closed two-point run even on one axis", () => {
+    const points = [
+      { column: 0, row: 4 },
+      { column: 5, row: 4 },
+    ];
+    const config = makeConfig();
+    const items = lineItems(config, points, true);
+    expect(items).toEqual([
+      {
+        type: "stroke",
+        key: strokeKey(points, true),
+        points: [
+          { column: 0, row: 4 },
+          { column: 5, row: 4 },
+        ],
+        closed: true,
+        color: config.ink,
+      },
+    ]);
+  });
+
+  it("returns nothing for fewer than two unique points", () => {
+    const config = makeConfig();
+    expect(lineItems(config, [], false)).toEqual([]);
+    expect(lineItems(config, [{ column: 1, row: 1 }], false)).toEqual([]);
+    expect(
+      lineItems(
+        config,
+        [
+          { column: 1, row: 1 },
+          { column: 1, row: 1 },
+        ],
+        false,
+      ),
+    ).toEqual([]);
+  });
+
+  it("keeps the colour override in the payload", () => {
+    const items = lineItems(
+      makeConfig(),
+      [
+        { column: 0, row: 0 },
+        { column: 2, row: 0 },
+      ],
+      false,
+      "#00ff00",
+    );
+    expect(items).toEqual([
+      {
+        type: "line",
+        key: lineKey({ column: 0, row: 0 }, { column: 2, row: 0 }),
+        from: { column: 0, row: 0 },
+        to: { column: 2, row: 0 },
+        color: "#00ff00",
+      },
+    ]);
+  });
+
+  it("stores the document ink on a bar and on a polyline", () => {
+    const config = makeConfig({ ink: "#101010" });
+    expect(
+      lineItems(
+        config,
+        [
+          { column: 0, row: 4 },
+          { column: 5, row: 4 },
+        ],
+        false,
+      ),
+    ).toEqual([
+      {
+        type: "line",
+        key: lineKey({ column: 0, row: 4 }, { column: 5, row: 4 }),
+        from: { column: 0, row: 4 },
+        to: { column: 5, row: 4 },
+        color: "#101010",
+      },
+    ]);
+    // A diagonal is a polyline, and it carries the same resolved colour.
+    const stroke = lineItems(
+      config,
+      [
+        { column: 0, row: 0 },
+        { column: 3, row: 3 },
+      ],
+      false,
+    );
+    expect(stroke).toHaveLength(1);
+    expect(stroke[0]).toMatchObject({ type: "stroke", color: "#101010" });
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Per-item colour                                                     */
+/* ------------------------------------------------------------------ */
+
+describe("per-item colour", () => {
+  it("keeps the colour on the fragment when the document ink changes", () => {
+    const ink1 = makeConfig({ ink: "#111111" });
+    const items: CanvasItem[] = [
+      ...penItems(ink1, run(2, 5, 0)),
+      ...penItems(ink1, [{ column: 0, row: 0, zone: 0 }]),
+    ];
+    const ink2 = makeConfig({ ink: "#222222" });
+    // The colour is stored on the item, so reading the same fragment under a
+    // different document ink does not repaint it.
+    for (const item of items) {
+      expect(item.color).toBe("#111111");
+      expect(itemColor(ink2, item)).toBe("#111111");
+    }
+    // An item that carries no colour of its own still follows the config.
+    expect(itemColor(ink2, tile(7, 7, 0))).toBe("#222222");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* ratio 1 (the space-less cell)                                       */
+/* ------------------------------------------------------------------ */
+
+describe("ratio 1 (the space-less cell)", () => {
+  it("draws one whole-cell tile per anchor of a bent pen stroke", () => {
+    const config = makeConfig({ ratio: 1 });
+    const anchors: Anchor[] = [
+      { column: 0, row: 0, zone: 0 },
+      { column: 1, row: 0, zone: 0 },
+      { column: 1, row: 1, zone: 0 },
+    ];
+    const items = penItems(config, anchors);
+    expect(items).toHaveLength(3);
+    expect(items.every((item) => item.type === "tile")).toBe(true);
+    expect(items.map((item) => item.key)).toEqual([
+      tileKey(0, 0, 0),
+      tileKey(1, 0, 0),
+      tileKey(1, 1, 0),
+    ]);
+    // The ink fills the whole cell, so a fragment is one base × base square.
+    expect(inkUnit(config)).toBe(config.base);
+    expect(zoneRect(config, 1, 1, 0)).toEqual({
+      x: 1 * config.base,
+      y: 1 * config.base,
+      w: inkUnit(config),
+      h: inkUnit(config),
+    });
+  });
+
+  it("still resolves the document ink on the line tool", () => {
+    const config = makeConfig({ ratio: 1 });
+    expect(
+      lineItems(
+        config,
+        [
+          { column: 0, row: 0 },
+          { column: 4, row: 0 },
+        ],
+        false,
+      ),
+    ).toEqual([
+      {
+        type: "line",
+        key: lineKey({ column: 0, row: 0 }, { column: 4, row: 0 }),
+        from: { column: 0, row: 0 },
+        to: { column: 4, row: 0 },
+        color: config.ink,
+      },
+    ]);
   });
 });

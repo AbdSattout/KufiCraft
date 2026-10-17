@@ -8,14 +8,20 @@
  * marquee touches, the eraser's hit list and the marquee box itself. It is
  * `pointer-events-none` and independent of the item layer, so pointer-move
  * only ever re-renders this small node.
+ *
+ * Selected items are ringed in the theme's `--ring` colour (the artwork itself
+ * is painted by the layer underneath), the armed start cell of a click
+ * sequence gets a plain filled highlight with no border, and the eraser's
+ * sweep is ringed in `--destructive`.
  */
 
 import { memo } from "react";
 import { CanvasItemShape } from "@/components/canvas/canvas-preview";
 import { VIEWBOX_SIZE } from "@/lib/canvas/model";
-import type { CanvasItem, ProjectConfig } from "@/lib/canvas/model";
-import { itemPath } from "@/lib/canvas/geometry";
+import type { Anchor, CanvasItem, ProjectConfig } from "@/lib/canvas/model";
 import type { Rect } from "@/lib/canvas/geometry";
+import { anchorPath } from "@/lib/canvas/grid";
+import { itemOf } from "@/lib/canvas/items";
 
 interface RingProps {
   config: ProjectConfig;
@@ -32,9 +38,10 @@ const Outline = memo(function Outline({
   width,
   dashed,
 }: RingProps) {
+  const { path } = itemOf(item).render(config);
   return (
     <path
-      d={itemPath(config, item)}
+      d={path}
       fill="none"
       stroke={stroke}
       strokeWidth={width}
@@ -53,8 +60,10 @@ export interface CanvasOverlayProps {
   /** Items the eraser has swept. */
   eraseItems: readonly CanvasItem[];
   marquee: Rect | null;
-  /** `true` while dragging a selection (preview is a ghost). */
-  ghost: boolean;
+  /** The armed start anchor of a click sequence, ringed before the preview. */
+  marker: Anchor | null;
+  /** How the preview is painted: `solid` (the pen) or `ghost`. */
+  previewMode: "solid" | "ghost";
 }
 
 export const CanvasOverlay = memo(function CanvasOverlay({
@@ -63,8 +72,11 @@ export const CanvasOverlay = memo(function CanvasOverlay({
   previewItems,
   eraseItems,
   marquee,
-  ghost,
+  marker,
+  previewMode,
 }: CanvasOverlayProps) {
+  const ghost = previewMode === "ghost";
+
   return (
     <svg
       viewBox={`0 0 ${VIEWBOX_SIZE} ${VIEWBOX_SIZE}`}
@@ -86,10 +98,15 @@ export const CanvasOverlay = memo(function CanvasOverlay({
         />
       ) : null}
 
+      {marker ? (
+        // The armed start cell: a plain, near-opaque highlight, no border.
+        <path d={anchorPath(config, marker)} fill="var(--primary)" fillOpacity={0.9} />
+      ) : null}
+
       {ghost
         ? previewItems.map((item) => (
             <CanvasItemShape
-              key={`ghost-${item.k}`}
+              key={`ghost-${item.key}`}
               config={config}
               item={item}
               opacity={0.5}
@@ -99,7 +116,7 @@ export const CanvasOverlay = memo(function CanvasOverlay({
 
       {selectionItems.map((item) => (
         <Outline
-          key={`sel-${item.k}`}
+          key={`sel-${item.key}`}
           config={config}
           item={item}
           stroke="var(--ring)"
@@ -109,20 +126,18 @@ export const CanvasOverlay = memo(function CanvasOverlay({
 
       {!ghost
         ? previewItems.map((item) => (
-            <Outline
-              key={`hit-${item.k}`}
+            <CanvasItemShape
+              key={`live-${item.key}`}
               config={config}
               item={item}
-              stroke="var(--ring)"
-              width={2}
-              dashed
+              opacity={0.9}
             />
           ))
         : null}
 
       {eraseItems.map((item) => (
         <Outline
-          key={`erase-${item.k}`}
+          key={`erase-${item.key}`}
           config={config}
           item={item}
           stroke="var(--destructive)"

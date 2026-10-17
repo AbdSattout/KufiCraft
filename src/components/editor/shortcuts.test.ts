@@ -17,8 +17,9 @@ describe("editor keyboard map", () => {
 
   it("maps the tool keys", () => {
     expect(shortcutFor({ key: "p" })).toEqual({ kind: "tool", tool: "pen" });
+    expect(shortcutFor({ key: "l" })).toEqual({ kind: "tool", tool: "line" });
     expect(shortcutFor({ key: "E" })).toEqual({ kind: "tool", tool: "eraser" });
-    expect(shortcutFor({ key: "a" })).toEqual({ kind: "tool", tool: "arch" });
+    expect(shortcutFor({ key: "a" })).toEqual({ kind: "tool", tool: "arc" });
     expect(shortcutFor({ key: "v" })).toEqual({ kind: "tool", tool: "select" });
   });
 
@@ -26,6 +27,7 @@ describe("editor keyboard map", () => {
     expect(shortcutFor({ key: "Delete" })).toEqual({ kind: "delete" });
     expect(shortcutFor({ key: "Backspace" })).toEqual({ kind: "delete" });
     expect(shortcutFor({ key: "Escape" })).toEqual({ kind: "cancel" });
+    expect(shortcutFor({ key: "Enter" })).toEqual({ kind: "cancel" });
     expect(shortcutFor({ key: "r" })).toEqual({ kind: "rotate" });
   });
 

@@ -10,6 +10,7 @@ import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
 import {
+  CIRCULAR_SECTORS,
   DEFAULT_PROJECT_CONFIG,
   DEFAULT_RATIO,
   MAX_COLOR_LENGTH,
@@ -20,12 +21,16 @@ import {
   MAX_THUMBNAIL_LENGTH,
   MIN_RATIO,
   RATIO_PRESETS,
+  arcKey,
+  lineKey,
+  strokeKey,
+  tileKey,
 } from "./lib/model";
 import type {
   CanvasItem,
   ProjectConfig,
   TileItem,
-  ZoneQuadrant,
+  Zone,
 } from "./lib/model";
 
 /**
@@ -59,7 +64,6 @@ const USER_B = { subject: "user-b" };
 const AUTH_REQUIRED = "يجب تسجيل الدخول أولًا";
 const NOT_FOUND = "المشروع غير موجود";
 const ITEMS_LIMIT = "تجاوزت اللوحة الحد الأقصى للعناصر";
-const KEY_TOO_LONG = "مفتاح العنصر أطول من الحد المسموح";
 const UNTITLED = "لوحة بلا عنوان";
 
 const newTest = () => convexTest(schema, modules);
@@ -71,13 +75,29 @@ function config(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
 }
 
 function tile(
-  k: string,
-  i = 0,
-  j = 0,
-  q: ZoneQuadrant = 0,
+  column = 0,
+  row = 0,
+  zone: Zone = 0,
   extra: Partial<TileItem> = {},
 ): TileItem {
-  return { t: "tile", k, i, j, q, ...extra };
+  return {
+    type: "tile",
+    key: tileKey(column, row, zone),
+    column,
+    row,
+    zone,
+    ...extra,
+  };
+}
+
+/**
+ * A batch of `MAX_ITEMS` items needs that many distinct keys, and keys are
+ * derived from geometry: with the default `base` of 10 the grid has 101 × 101
+ * cells, so `index → (index % 101, ⌊index / 101⌋)` is injective for every
+ * index below `MAX_ITEMS`.
+ */
+function tileAt(index: number): TileItem {
+  return tile(index % 101, Math.floor(index / 101));
 }
 
 async function createProject(
@@ -151,7 +171,7 @@ describe("auth seam", () => {
     {
       name: "updateConfig",
       call: (t, projectId) =>
-        t.mutation(api.projects.updateConfig, { projectId, patch: { ratio: 0.5 } }),
+        t.mutation(api.projects.updateConfig, { projectId, patch: { ratio: 2 / 3 } }),
     },
     {
       name: "updateThumbnail",
@@ -253,7 +273,7 @@ describe("create", () => {
     const low = await createProject(t, USER_A, "صغير", { base: 1 });
     const high = await createProject(t, USER_A, "كبير", { base: 500 });
     const valid = await createProject(t, USER_A, "صالح", {
-      ratio: 0.5,
+      ratio: 2 / 3,
       base: 7,
       gridType: "circular",
     });
@@ -271,7 +291,7 @@ describe("create", () => {
     );
     expect(lowDoc.config.base).toBe(4);
     expect(highDoc.config.base).toBe(100);
-    expect(validDoc.config).toEqual(config({ ratio: 0.5, base: 7, gridType: "circular" }));
+    expect(validDoc.config).toEqual(config({ ratio: 2 / 3, base: 7, gridType: "circular" }));
   });
 
   it("truncates ink and background to MAX_COLOR_LENGTH characters", async () => {
@@ -346,7 +366,7 @@ describe("list", () => {
     const projectId = await createProject(t, USER_A, "ملخصة");
     await t.withIdentity(USER_A).mutation(api.projects.applyOps, {
       projectId,
-      ops: [{ type: "add", items: [tile("0:0:0"), tile("1:0:0")] }],
+      ops: [{ type: "add", items: [tile(0, 0, 0), tile(1, 0, 0)] }],
     });
 
     const list = await t.withIdentity(USER_A).query(api.projects.list);
@@ -372,7 +392,7 @@ describe("get", () => {
     const projectId = await createProject(t, USER_A, "كاملة");
     await asA.mutation(api.projects.applyOps, {
       projectId,
-      ops: [{ type: "add", items: [tile("0:0:0"), tile("2:0:1", 2, 0, 1)] }],
+      ops: [{ type: "add", items: [tile(0, 0, 0), tile(2, 0, 1)] }],
     });
 
     const doc = required(
@@ -381,7 +401,10 @@ describe("get", () => {
     );
     expect(doc._id).toBe(projectId);
     expect(doc.name).toBe("كاملة");
-    expect(doc.items.map((item) => item.k)).toEqual(["0:0:0", "2:0:1"]);
+    expect(doc.items.map((item) => item.key)).toEqual([
+      tileKey(0, 0, 0),
+      tileKey(2, 0, 1),
+    ]);
     expect(doc.itemCount).toBe(2);
   });
 
@@ -439,12 +462,12 @@ describe("duplicate", () => {
     const asA = t.withIdentity(USER_A);
     const projectId = await createProject(t, USER_A, "الأصل", {
       gridType: "circular",
-      ratio: 0.5,
+      ratio: 2 / 3,
       base: 8,
     });
     await asA.mutation(api.projects.applyOps, {
       projectId,
-      ops: [{ type: "add", items: [tile("0:0:0"), tile("3:0:2", 3, 0, 2)] }],
+      ops: [{ type: "add", items: [tile(0, 0, 0), tile(3, 0, 2)] }],
     });
     await asA.mutation(api.projects.updateThumbnail, {
       projectId,
@@ -492,14 +515,14 @@ describe("duplicate", () => {
     const projectId = await createProject(t, USER_A, "مستقلة");
     await asA.mutation(api.projects.applyOps, {
       projectId,
-      ops: [{ type: "add", items: [tile("0:0:0")] }],
+      ops: [{ type: "add", items: [tile(0, 0, 0)] }],
     });
 
     const copyId = await asA.mutation(api.projects.duplicate, { projectId });
     await asA.mutation(api.projects.rename, { projectId: copyId, name: "النسخة" });
     await asA.mutation(api.projects.applyOps, {
       projectId: copyId,
-      ops: [{ type: "add", items: [tile("9:9:3", 9, 9, 3)] }],
+      ops: [{ type: "add", items: [tile(9, 9, 3)] }],
     });
 
     const original = required(
@@ -511,9 +534,12 @@ describe("duplicate", () => {
       "copy should exist",
     );
     expect(original.name).toBe("مستقلة");
-    expect(original.items.map((item) => item.k)).toEqual(["0:0:0"]);
+    expect(original.items.map((item) => item.key)).toEqual([tileKey(0, 0, 0)]);
     expect(copy.name).toBe("النسخة");
-    expect(copy.items.map((item) => item.k)).toEqual(["0:0:0", "9:9:3"]);
+    expect(copy.items.map((item) => item.key)).toEqual([
+      tileKey(0, 0, 0),
+      tileKey(9, 9, 3),
+    ]);
   });
 });
 
@@ -555,7 +581,7 @@ describe("updateConfig", () => {
     const t = newTest();
     const asA = t.withIdentity(USER_A);
     const projectId = await createProject(t, USER_A, "جزئية", {
-      ratio: 0.5,
+      ratio: 2 / 3,
       base: 8,
     });
 
@@ -569,7 +595,7 @@ describe("updateConfig", () => {
       "project should exist",
     );
     expect(doc.config).toEqual(
-      config({ ratio: 0.5, base: 12, showGrid: true }),
+      config({ ratio: 2 / 3, base: 12, showGrid: true }),
     );
   });
 
@@ -737,18 +763,20 @@ describe("applyOps", () => {
     const t = newTest();
     const asA = t.withIdentity(USER_A);
     const projectId = await createProject(t, USER_A);
-    const first = tile("0:0:0", 0, 0, 0);
+    const first = tile(0, 0, 0);
 
     await asA.mutation(api.projects.applyOps, {
       projectId,
-      ops: [{ type: "add", items: [first, tile("1:0:0", 1, 0, 0)] }],
+      ops: [{ type: "add", items: [first, tile(1, 0, 0)] }],
     });
     await asA.mutation(api.projects.applyOps, {
       projectId,
       ops: [
         {
+          // Same key as `first` (a key is derived from the geometry), so the
+          // stored version wins and the colour of this copy is discarded.
           type: "add",
-          items: [tile("0:0:0", 9, 9, 3), tile("2:0:0", 2, 0, 0)],
+          items: [tile(0, 0, 0, { color: "#ff0000" }), tile(2, 0, 0)],
         },
       ],
     });
@@ -757,7 +785,11 @@ describe("applyOps", () => {
       await asA.query(api.projects.get, { projectId }),
       "project should exist",
     );
-    expect(doc.items.map((item) => item.k)).toEqual(["0:0:0", "1:0:0", "2:0:0"]);
+    expect(doc.items.map((item) => item.key)).toEqual([
+      tileKey(0, 0, 0),
+      tileKey(1, 0, 0),
+      tileKey(2, 0, 0),
+    ]);
     expect(doc.items[0]).toEqual(first);
   });
 
@@ -765,21 +797,24 @@ describe("applyOps", () => {
     const t = newTest();
     const asA = t.withIdentity(USER_A);
     const projectId = await createProject(t, USER_A);
+    const a = tile(0, 0, 0);
+    const b = tile(1, 0, 0);
+    const c = tile(2, 0, 0);
     await asA.mutation(api.projects.applyOps, {
       projectId,
-      ops: [{ type: "add", items: [tile("a"), tile("b"), tile("c")] }],
+      ops: [{ type: "add", items: [a, b, c] }],
     });
 
     await asA.mutation(api.projects.applyOps, {
       projectId,
-      ops: [{ type: "remove", keys: ["a", "c", "ghost"] }],
+      ops: [{ type: "remove", keys: [a.key, c.key, "ghost"] }],
     });
 
     const doc = required(
       await asA.query(api.projects.get, { projectId }),
       "project should exist",
     );
-    expect(doc.items.map((item) => item.k)).toEqual(["b"]);
+    expect(doc.items.map((item) => item.key)).toEqual([b.key]);
   });
 
   it("replaces the whole list with a replace op", async () => {
@@ -788,37 +823,37 @@ describe("applyOps", () => {
     const projectId = await createProject(t, USER_A);
     await asA.mutation(api.projects.applyOps, {
       projectId,
-      ops: [{ type: "add", items: [tile("a"), tile("b")] }],
+      ops: [{ type: "add", items: [tile(0, 0, 0), tile(1, 0, 0)] }],
     });
 
     await asA.mutation(api.projects.applyOps, {
       projectId,
-      ops: [{ type: "replace", items: [tile("z")] }],
+      ops: [{ type: "replace", items: [tile(2, 0, 0)] }],
     });
 
     const doc = required(
       await asA.query(api.projects.get, { projectId }),
       "project should exist",
     );
-    expect(doc.items.map((item) => item.k)).toEqual(["z"]);
+    expect(doc.items.map((item) => item.key)).toEqual([tileKey(2, 0, 0)]);
   });
 
   it("applies a mixed batch in order", async () => {
     const t = newTest();
     const asA = t.withIdentity(USER_A);
     const projectId = await createProject(t, USER_A);
-    const a = tile("a");
-    const b = tile("b");
-    const c = tile("c");
-    const d = tile("d");
-    const e = tile("e");
-    const f = tile("f");
+    const a = tile(0, 0, 0);
+    const b = tile(1, 0, 0);
+    const c = tile(2, 0, 0);
+    const d = tile(3, 0, 0);
+    const e = tile(4, 0, 0);
+    const f = tile(5, 0, 0);
 
     const result = await asA.mutation(api.projects.applyOps, {
       projectId,
       ops: [
         { type: "add", items: [a, b] },
-        { type: "remove", keys: [a.k] },
+        { type: "remove", keys: [a.key] },
         { type: "add", items: [c] },
         { type: "replace", items: [d, e] },
         { type: "add", items: [d, f] },
@@ -830,7 +865,7 @@ describe("applyOps", () => {
       await asA.query(api.projects.get, { projectId }),
       "project should exist",
     );
-    expect(doc.items.map((item) => item.k)).toEqual(["d", "e", "f"]);
+    expect(doc.items.map((item) => item.key)).toEqual([d.key, e.key, f.key]);
   });
 
   it("returns itemCount/updatedAt and persists them", async () => {
@@ -840,7 +875,7 @@ describe("applyOps", () => {
 
     const result = await asA.mutation(api.projects.applyOps, {
       projectId,
-      ops: [{ type: "add", items: [tile("0:0:0"), tile("1:0:0", 1, 0, 0)] }],
+      ops: [{ type: "add", items: [tile(0, 0, 0), tile(1, 0, 0)] }],
     });
 
     expect(result).toEqual({ itemCount: 2, updatedAt: expect.any(Number) });
@@ -863,7 +898,7 @@ describe("applyOps", () => {
     const asA = t.withIdentity(USER_A);
     const projectId = await createProject(t, USER_A);
     const items: CanvasItem[] = Array.from({ length: MAX_ITEMS }, (_, index) =>
-      tile(`k${index}`),
+      tileAt(index),
     );
 
     const result = await asA.mutation(api.projects.applyOps, {
@@ -886,7 +921,7 @@ describe("applyOps", () => {
     const projectId = await createProject(t, USER_A);
     await asA.mutation(api.projects.applyOps, {
       projectId,
-      ops: [{ type: "add", items: [tile("keep")] }],
+      ops: [{ type: "add", items: [tile(0, 0, 0)] }],
     });
     const before = required(
       await asA.query(api.projects.get, { projectId }),
@@ -894,7 +929,7 @@ describe("applyOps", () => {
     );
     const tooMany: CanvasItem[] = Array.from(
       { length: MAX_ITEMS + 1 },
-      (_, index) => tile(`k${index}`),
+      (_, index) => tileAt(index),
     );
 
     await expectConvexError(
@@ -917,7 +952,7 @@ describe("applyOps", () => {
     const asA = t.withIdentity(USER_A);
     const projectId = await createProject(t, USER_A);
     const full: CanvasItem[] = Array.from({ length: MAX_ITEMS }, (_, index) =>
-      tile(`k${index}`),
+      tileAt(index),
     );
     await asA.mutation(api.projects.applyOps, {
       projectId,
@@ -931,7 +966,7 @@ describe("applyOps", () => {
     await expectConvexError(
       asA.mutation(api.projects.applyOps, {
         projectId,
-        ops: [{ type: "add", items: [tile("one-too-many")] }],
+        ops: [{ type: "add", items: [tile(100, 100)] }],
       }),
       ITEMS_LIMIT,
     );
@@ -955,12 +990,12 @@ describe("ownership isolation", () => {
     const asA = t.withIdentity(USER_A);
     const asB = t.withIdentity(USER_B);
     const projectId = await createProject(t, USER_A, "لوحة أ", {
-      ratio: 0.5,
+      ratio: 2 / 3,
       base: 8,
     });
     await asA.mutation(api.projects.applyOps, {
       projectId,
-      ops: [{ type: "add", items: [tile("0:0:0")] }],
+      ops: [{ type: "add", items: [tile(0, 0, 0)] }],
     });
     await asA.mutation(api.projects.updateThumbnail, {
       projectId,
@@ -1009,8 +1044,8 @@ describe("ownership isolation", () => {
       "project should still exist",
     );
     expect(untouched.name).toBe("لوحة أ");
-    expect(untouched.config).toEqual(config({ ratio: 0.5, base: 8 }));
-    expect(untouched.items.map((item) => item.k)).toEqual(["0:0:0"]);
+    expect(untouched.config).toEqual(config({ ratio: 2 / 3, base: 8 }));
+    expect(untouched.items.map((item) => item.key)).toEqual([tileKey(0, 0, 0)]);
     expect(untouched.thumbnail).toBe("<svg></svg>");
   });
 
@@ -1111,12 +1146,24 @@ describe("item sanitisation", () => {
 
     // Default base is 10 → the largest legal index is 1000 / 10 = 100.
     const items: CanvasItem[] = [
-      tile("nan", Number.NaN, Number.NaN),
-      tile("inf", Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY),
-      tile("frac", 2.9, 3.1),
-      tile("over", 9999, 9999),
-      { t: "line", k: "line", i1: Number.NaN, j1: 1.9, i2: Number.POSITIVE_INFINITY, j2: 1000 },
-      { t: "arch", k: "arch", i1: -5, j1: 4.7, i2: 3, j2: 2, d: 1 },
+      tile(Number.NaN, Number.NaN),
+      tile(Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY),
+      tile(2.9, 3.1),
+      tile(9999, 9999),
+      {
+        type: "line",
+        key: "client-line",
+        from: { column: Number.NaN, row: 1.9 },
+        to: { column: Number.POSITIVE_INFINITY, row: 1000 },
+      },
+      {
+        type: "arc",
+        key: "client-arc",
+        from: { column: -5, row: 4.7 },
+        to: { column: 3, row: 2 },
+        direction: "counterclockwise",
+        size: "half",
+      },
     ];
     await asA.mutation(api.projects.applyOps, {
       projectId,
@@ -1127,18 +1174,132 @@ describe("item sanitisation", () => {
       await asA.query(api.projects.get, { projectId }),
       "project should exist",
     );
-    const byKey = new Map(doc.items.map((item) => [item.k, item]));
-    expect(byKey.get("nan")).toMatchObject({ i: 0, j: 0 });
-    expect(byKey.get("inf")).toMatchObject({ i: 100, j: 0 });
-    expect(byKey.get("frac")).toMatchObject({ i: 2, j: 3 });
-    expect(byKey.get("over")).toMatchObject({ i: 100, j: 100 });
-    expect(byKey.get("line")).toMatchObject({
-      i1: 0,
-      j1: 1,
-      i2: 100,
-      j2: 100,
+    // Client-sent keys are ignored: every key is re-derived from the geometry
+    // *after* clamping, and the array keeps the order the op listed.
+    expect(doc.items.map((item) => item.key)).toEqual([
+      tileKey(0, 0, 0),
+      tileKey(100, 0, 0),
+      tileKey(2, 3, 0),
+      tileKey(100, 100, 0),
+      lineKey({ column: 0, row: 1 }, { column: 100, row: 100 }),
+      arcKey(
+        { column: 0, row: 4 },
+        { column: 3, row: 2 },
+        "counterclockwise",
+        "half",
+      ),
+    ]);
+    expect(doc.items[0]).toMatchObject({ column: 0, row: 0 });
+    expect(doc.items[1]).toMatchObject({ column: 100, row: 0 });
+    expect(doc.items[2]).toMatchObject({ column: 2, row: 3 });
+    expect(doc.items[3]).toMatchObject({ column: 100, row: 100 });
+    expect(doc.items[4]).toMatchObject({
+      type: "line",
+      from: { column: 0, row: 1 },
+      to: { column: 100, row: 100 },
     });
-    expect(byKey.get("arch")).toMatchObject({ i1: 0, j1: 4, i2: 3, j2: 2, d: 1 });
+    expect(doc.items[5]).toMatchObject({
+      type: "arc",
+      from: { column: 0, row: 4 },
+      to: { column: 3, row: 2 },
+      direction: "counterclockwise",
+      size: "half",
+    });
+  });
+
+  it("caps the sector index to the circular grid's sector count", async () => {
+    const t = newTest();
+    const asA = t.withIdentity(USER_A);
+    const projectId = await createProject(t, USER_A, "دائري", {
+      gridType: "circular",
+    });
+    await asA.mutation(api.projects.applyOps, {
+      projectId,
+      ops: [{ type: "add", items: [tile(500, 99, 1)] }],
+    });
+    const doc = required(
+      await asA.query(api.projects.get, { projectId }),
+      "project should exist",
+    );
+    // On the circular grid the radial axis is capped by the base and the
+    // angular axis by CIRCULAR_SECTORS (36 sectors, indices 0…35).
+    expect(doc.items[0]).toMatchObject({
+      column: 100,
+      row: CIRCULAR_SECTORS - 1,
+      zone: 1,
+    });
+    expect(doc.items[0]?.key).toBe(tileKey(100, CIRCULAR_SECTORS - 1, 1));
+  });
+
+  it("drops a stroke with fewer than two points and a degenerate arc", async () => {
+    const t = newTest();
+    const asA = t.withIdentity(USER_A);
+    const projectId = await createProject(t, USER_A, "إسقاط");
+    const points = [
+      { column: 3, row: 0 },
+      { column: 4, row: 0 },
+    ];
+
+    const result = await asA.mutation(api.projects.applyOps, {
+      projectId,
+      ops: [
+        {
+          type: "add",
+          items: [
+            tile(0, 0, 0),
+            { type: "stroke", key: "empty", points: [] },
+            { type: "stroke", key: "single", points: [{ column: 1, row: 1 }] },
+            {
+              type: "arc",
+              key: "degenerate",
+              from: { column: 2, row: 2 },
+              to: { column: 2, row: 2 },
+              direction: "clockwise",
+              size: "half",
+            },
+            { type: "stroke", key: "seg", points, closed: true },
+          ],
+        },
+      ],
+    });
+
+    expect(result.itemCount).toBe(2);
+    const doc = required(
+      await asA.query(api.projects.get, { projectId }),
+      "project should exist",
+    );
+    expect(doc.items.map((item) => item.key)).toEqual([
+      tileKey(0, 0, 0),
+      strokeKey(points, true),
+    ]);
+    expect(doc.items[1]).toMatchObject({ type: "stroke", points, closed: true });
+  });
+
+  it("drops a default square shape and a zero rotation", async () => {
+    const t = newTest();
+    const asA = t.withIdentity(USER_A);
+    const projectId = await createProject(t, USER_A, "أشكال");
+
+    await asA.mutation(api.projects.applyOps, {
+      projectId,
+      ops: [
+        {
+          type: "add",
+          items: [
+            tile(0, 0, 0, { shape: "square", rotation: 0 }),
+            tile(1, 0, 0, { shape: "circle", rotation: 2 }),
+          ],
+        },
+      ],
+    });
+
+    const doc = required(
+      await asA.query(api.projects.get, { projectId }),
+      "project should exist",
+    );
+    expect(doc.items[0]).not.toHaveProperty("shape");
+    expect(doc.items[0]).not.toHaveProperty("rotation");
+    expect(doc.items[1]).toMatchObject({ shape: "circle", rotation: 2 });
   });
 
   it("uses the configured base to size the legal coordinate range", async () => {
@@ -1149,14 +1310,14 @@ describe("item sanitisation", () => {
     });
     await asA.mutation(api.projects.applyOps, {
       projectId,
-      ops: [{ type: "add", items: [tile("far", 500, 500)] }],
+      ops: [{ type: "add", items: [tile(500, 500)] }],
     });
     const doc = required(
       await asA.query(api.projects.get, { projectId }),
       "project should exist",
     );
     // base 100 → 1000 / 100 = 10.
-    expect(doc.items[0]).toMatchObject({ i: 10, j: 10 });
+    expect(doc.items[0]).toMatchObject({ column: 10, row: 10 });
   });
 
   it("caps an item colour to MAX_COLOR_LENGTH", async () => {
@@ -1170,7 +1331,7 @@ describe("item sanitisation", () => {
       ops: [
         {
           type: "add",
-          items: [tile("colored", 0, 0, 0, { c: long })],
+          items: [tile(0, 0, 0, { color: long })],
         },
       ],
     });
@@ -1179,36 +1340,31 @@ describe("item sanitisation", () => {
       await asA.query(api.projects.get, { projectId }),
       "project should exist",
     );
-    expect(doc.items[0]?.c).toBe(long.slice(0, MAX_COLOR_LENGTH));
+    expect(doc.items[0]?.color).toBe(long.slice(0, MAX_COLOR_LENGTH));
   });
 
-  it("rejects an oversized key with an Arabic error and no write", async () => {
+  it("ignores a client-sent key and re-derives it from the geometry", async () => {
     const t = newTest();
     const asA = t.withIdentity(USER_A);
     const projectId = await createProject(t, USER_A, "مفاتيح");
-    const before = required(
+    const clientKey = "k".repeat(MAX_KEY_LENGTH + 1);
+
+    await asA.mutation(api.projects.applyOps, {
+      projectId,
+      ops: [{ type: "add", items: [tile(0, 0, 0, { key: clientKey })] }],
+    });
+
+    const doc = required(
       await asA.query(api.projects.get, { projectId }),
       "project should exist",
     );
-
-    await expectConvexError(
-      asA.mutation(api.projects.applyOps, {
-        projectId,
-        ops: [
-          {
-            type: "add",
-            items: [tile("k".repeat(MAX_KEY_LENGTH + 1))],
-          },
-        ],
-      }),
-      KEY_TOO_LONG,
-    );
-
-    const after = required(
-      await asA.query(api.projects.get, { projectId }),
-      "project should still exist",
-    );
-    expect(after).toEqual(before);
+    // Keys are identity but they are derived, never trusted: an oversized
+    // client key can never reach the document, so it is dropped in favour of
+    // the derived one instead of being rejected.
+    expect(doc.items.map((item) => item.key)).toEqual([tileKey(0, 0, 0)]);
+    const storedKey = doc.items[0]?.key ?? "";
+    expect(storedKey).not.toBe(clientKey);
+    expect(storedKey.length).toBeLessThanOrEqual(MAX_KEY_LENGTH);
   });
 
   it("repairs a document written before this contract on its next write", async () => {
@@ -1216,18 +1372,18 @@ describe("item sanitisation", () => {
     const asA = t.withIdentity(USER_A);
     const projectId = await createProject(t, USER_A, "قديمة", { base: 10 });
     // A document stored before the sanitisation contract: NaN / fractional
-    // coordinates and an oversized colour are schema-valid `v.number()` /
-    // `v.string()` values, so they can already be in the table.
+    // coordinates, a drifting key and an oversized colour are all schema-valid
+    // `v.number()` / `v.string()` values, so they can already be in the table.
     await t.run(async (ctx) => {
       await ctx.db.patch("projects", projectId, {
         items: [
           {
-            t: "tile",
-            k: "legacy",
-            i: Number.NaN,
-            j: 4.5,
-            q: 0,
-            c: "z".repeat(MAX_COLOR_LENGTH + 10),
+            type: "tile",
+            key: "stale",
+            column: Number.NaN,
+            row: 4.5,
+            zone: 0,
+            color: "z".repeat(MAX_COLOR_LENGTH + 10),
           },
         ],
         itemCount: 1,
@@ -1236,18 +1392,21 @@ describe("item sanitisation", () => {
 
     await asA.mutation(api.projects.applyOps, {
       projectId,
-      ops: [{ type: "add", items: [tile("fresh", 1, 1)] }],
+      ops: [{ type: "add", items: [tile(1, 1)] }],
     });
 
     const doc = required(
       await asA.query(api.projects.get, { projectId }),
       "project should exist",
     );
-    const legacy = doc.items.find((item) => item.k === "legacy");
-    expect(legacy).toMatchObject({
-      i: 0,
-      j: 4,
-      c: "z".repeat(MAX_COLOR_LENGTH),
+    expect(doc.items.map((item) => item.key)).toEqual([
+      tileKey(0, 4, 0),
+      tileKey(1, 1, 0),
+    ]);
+    expect(doc.items[0]).toMatchObject({
+      column: 0,
+      row: 4,
+      color: "z".repeat(MAX_COLOR_LENGTH),
     });
     expect(doc.itemCount).toBe(2);
   });

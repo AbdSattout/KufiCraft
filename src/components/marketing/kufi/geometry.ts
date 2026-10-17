@@ -3,16 +3,19 @@
  *
  * It follows the cell/zone rules of `docs/CANVAS.md` §1–3: a 1000×1000 viewBox,
  * square cells of `base`, circular bands of `base` split into 36 sectors of 10°,
- * the ink/space split at `ratio` (ink ≥ space, 1:1 … 1:5), 2-bit quadrant
+ * the ink/space split at `ratio` (one of the five presets, `1:1` … `1:5`, where
+ * `1:1` is the space-less cell), 2-bit quadrant
  * fragments
  * (`q`), full-thickness merged lines and arcs stroked at `ratio · base`.
  *
- * It deliberately does **not** import `src/lib/canvas/**`: the engine is written
- * in parallel and the marketing page must render standalone, exactly like a
- * thumbnails/export string would. Only the items the hand-authored landing
- * compositions need are implemented, and the two fragments that the reference
- * file leaves undefined (hamza1/hamza2) are drawn as the two angular hooks.
+ * It deliberately does **not** import the item/ops engine: the landing page must
+ * render standalone, exactly like a thumbnail/export string would. The ten glyphs
+ * are the exception — they come from `@/lib/canvas/shapes`, so the palette on the
+ * landing page can never drift from the palette in the editor.
  */
+
+import { shapeById } from "@/lib/canvas/shapes";
+import type { ShapeId } from "@/lib/canvas/model";
 
 export const VIEW = 1000;
 export const SECTORS = 36;
@@ -21,16 +24,8 @@ export const SECTOR_ANGLE = 360 / SECTORS;
 export type Quadrant = 0 | 1 | 2 | 3;
 export type Turn = 0 | 1 | 2 | 3;
 
-export type FragmentShape =
-  | "square"
-  | "circle"
-  | "triangle"
-  | "quadrant"
-  | "semicircle"
-  | "hexagon"
-  | "arc"
-  | "hamza1"
-  | "hamza2";
+/** The model's shape vocabulary (`docs/CANVAS.md` §7). */
+export type FragmentShape = ShapeId;
 
 /**
  * `cells` sets the cell size (`base = VIEW / cells`). `extent` crops the
@@ -158,43 +153,14 @@ export function zoneRect(g: SquareGrid, i: number, j: number, q: Quadrant): Rect
   };
 }
 
-/** Shape geometry, ported from `docs/CANVAS.md` §4 (fallback definitions). */
-export function shapePath(shape: FragmentShape, r: Rect): string {
-  const { x, y, w, h } = r;
-  switch (shape) {
-    case "circle":
-      return `M ${n(x)} ${n(y + h / 2)} A ${n(w / 2)} ${n(h / 2)} 0 1 0 ${n(x + w)} ${n(y + h / 2)} A ${n(w / 2)} ${n(h / 2)} 0 1 0 ${n(x)} ${n(y + h / 2)} Z`;
-    case "triangle":
-      return `M ${n(x)} ${n(y + h)} L ${n(x + w / 2)} ${n(y)} L ${n(x + w)} ${n(y + h)} Z`;
-    case "quadrant":
-      return `M ${n(x)} ${n(y)} A ${n(w)} ${n(h)} 0 0 1 ${n(x + w)} ${n(y + h)} L ${n(x)} ${n(y + h)} Z`;
-    case "semicircle":
-      return `M ${n(x)} ${n(y + h)} A ${n(w / 2)} ${n(h)} 0 0 1 ${n(x + w)} ${n(y + h)} Z`;
-    case "hexagon":
-      return `M ${n(x)} ${n(y + h / 2)} L ${n(x + w / 4)} ${n(y)} L ${n(x + (3 * w) / 4)} ${n(y)} L ${n(x + w)} ${n(y + h / 2)} L ${n(x + (3 * w) / 4)} ${n(y + h)} L ${n(x + w / 4)} ${n(y + h)} Z`;
-    case "arc":
-      return `M ${n(x)} ${n(y + h)} A ${n(w)} ${n(h)} 0 0 1 ${n(x + w)} ${n(y)} L ${n(x + w)} ${n(y + h / 2)} A ${n(w / 2)} ${n(h / 2)} 0 0 0 ${n(x + w / 2)} ${n(y + h)} Z`;
-    case "hamza1":
-      return hookPath(r, "top");
-    case "hamza2":
-      return hookPath(r, "bottom");
-    default:
-      return rectPath(r);
-  }
-}
-
 /**
- * The two hamza fragments. `docs/reference/old-square-kufi.js` never
- * implemented them (its shape switch only returns `square`), so the landing
- * draws the classic pair of angular hooks: a limb along the top edge curving
- * down the end side, and the same hook turned over along the bottom edge.
+ * Shape geometry — the engine's own glyphs (`src/lib/canvas/shapes.ts`), so the
+ * landing page draws exactly what the editor draws. The caller applies the
+ * quarter-turn rotation as an SVG transform about the rect centre, which is the
+ * same composition `KufiShape.path` uses.
  */
-function hookPath({ x, y, w, h }: Rect, edge: "top" | "bottom"): string {
-  const t = Math.min(w, h) / 3;
-  if (edge === "top") {
-    return `M ${n(x)} ${n(y)} H ${n(x + w)} V ${n(y + h)} H ${n(x + w - t)} V ${n(y + t)} H ${n(x)} Z`;
-  }
-  return `M ${n(x + w)} ${n(y)} V ${n(y + h)} H ${n(x)} V ${n(y + h - t)} H ${n(x + w - t)} V ${n(y)} Z`;
+export function shapePath(shape: FragmentShape, r: Rect): string {
+  return shapeById(shape).path(r, 0);
 }
 
 function radialPoint(r: number, angleDeg: number): { x: number; y: number } {
