@@ -35,7 +35,10 @@ touches documents whose `userId === identity.subject`:
 `ops` is an ordered batch of `{type:"add", items}` | `{type:"remove", keys}` |
 `{type:"replace", items}` — one call per completed user gesture, atomic.
 
-`convex/auth.ts` — `getCurrentUser` (profile or `null`).
+`convex/auth.ts` — Better Auth options (`createAuthOptions`), the passkey
+`resolveUser`/`afterVerification` hooks, and `createAuth`. Nothing else: there is
+no user-profile query, because an account has no profile — it is its passkey
+(`docs/AUTH.md § Accounts`).
 
 ## Limits & conventions
 

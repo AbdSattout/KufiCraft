@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { SignInButton } from "@/components/auth/sign-in-dialog";
 import { RatioInstrument } from "./kufi/instrument";
 import { Reveal } from "./reveal";
 
@@ -25,13 +25,9 @@ export function Hero() {
             </p>
           </Reveal>
           <Reveal step={2} className="mk-hero__actions">
-            <Button
-              className="h-11 px-5 text-base"
-              nativeButton={false}
-              render={<Link href="/signin" />}
-            >
+            <SignInButton className="h-11 px-5 text-base">
               ابدأ الرسم
-            </Button>
+            </SignInButton>
             <Link href="/app" className="mk-link mk-body">
               افتح المحرر
               <ArrowLeft

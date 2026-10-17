@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { SignInLink } from "@/components/auth/sign-in-dialog";
 
 const REPO = "https://github.com/AbdSattout/KufiCraft";
 
@@ -15,9 +15,7 @@ export function SiteFooter() {
           <a href={REPO} target="_blank" rel="noreferrer" className="mk-link">
             GitHub
           </a>
-          <Link href="/signin" className="mk-link">
-            الدخول إلى المحرر
-          </Link>
+          <SignInLink className="mk-link">الدخول إلى المحرر</SignInLink>
         </nav>
         <p className="mk-small mk-footer__meta">
           2026 · واجهة عربية بالكامل

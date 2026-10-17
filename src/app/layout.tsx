@@ -3,6 +3,7 @@ import { Noto_Kufi_Arabic, IBM_Plex_Sans_Arabic } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 import { ConvexClientProvider } from "@/components/convex-client-provider";
+import { SignInDialogProvider } from "@/components/auth/sign-in-dialog";
 import { Toaster } from "@/components/ui/sonner";
 
 const kufi = Noto_Kufi_Arabic({
@@ -48,7 +49,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body>
         <ConvexClientProvider>
-          {children}
+          {/* Every page can open the passkey dialog: the landing's CTAs, the
+              header, and the guards that send a visitor home. */}
+          <SignInDialogProvider>{children}</SignInDialogProvider>
           <Toaster position="top-center" dir="rtl" richColors />
         </ConvexClientProvider>
       </body>

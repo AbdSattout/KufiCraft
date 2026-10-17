@@ -10,20 +10,12 @@ describe("guardRoute", () => {
     expect(guardRoute("/", false)).toEqual({ action: "next" });
   });
 
-  it.each(["/signin", "/signup"])(
-    "never bounces %s on the cookie, so a stale session cannot loop",
-    (pathname) => {
-      expect(guardRoute(pathname, true)).toEqual({ action: "next" });
-      expect(guardRoute(pathname, false)).toEqual({ action: "next" });
-    },
-  );
-
   it.each(["/app", "/app/j57195vyzfcckg0dv469vz6bzs8ge42s", "/account"])(
-    "sends an anonymous visitor from %s to sign-in",
+    "sends an anonymous visitor from %s home with the sign-in dialog",
     (pathname) => {
       expect(guardRoute(pathname, false)).toEqual({
         action: "redirect",
-        to: "/signin",
+        to: "/?signin=1",
       });
     },
   );
@@ -33,8 +25,23 @@ describe("guardRoute", () => {
     expect(guardRoute("/account", true)).toEqual({ action: "next" });
   });
 
+  it.each(["/signin", "/signup"])(
+    "redirects the removed %s route to the dialog, whatever the cookie says",
+    (pathname) => {
+      expect(guardRoute(pathname, true)).toEqual({
+        action: "redirect",
+        to: "/?signin=1",
+      });
+      expect(guardRoute(pathname, false)).toEqual({
+        action: "redirect",
+        to: "/?signin=1",
+      });
+    },
+  );
+
   it("matches whole segments only", () => {
     expect(guardRoute("/application", false)).toEqual({ action: "next" });
     expect(guardRoute("/accounts", false)).toEqual({ action: "next" });
+    expect(guardRoute("/signing", false)).toEqual({ action: "next" });
   });
 });

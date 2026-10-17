@@ -146,6 +146,39 @@ backend) · Better Auth (passkeys, local-install component) · Bun · vitest.
   its two anonymous buttons, and its account menu now sits inside a
   `DropdownMenuGroup`: Base UI's `Menu.GroupLabel` needs the group context, and
   the old markup threw `MenuGroupContext is missing`.
+* **Follow-up (live testing):** the account *model*. An account is not a profile
+  with keys attached — it **is** its passkey: exactly one, never added to or
+  deleted, and its name is the account's name. Everything that assumed otherwise
+  went: the display-name field and the whole `normalizeDisplayName` sanitiser
+  (with its bidi/zero-width hardening) on both sides of the sign-up token, the
+  name in the token payload (`{expiresAt, nonce}` now), the `name` in
+  `resolveUser`'s WebAuthn user, `api.auth.getCurrentUser`, the add/rename/delete
+  passkey list on `/account` (it is one name row with a pencil now, editing the
+  passkey itself) and the last-passkey guard that only existed because delete
+  did. `/signin` followed: no field, no “حساب جديد” section, **one button**. It
+  signs in; only when an attempt comes back without a session — the one symptom
+  of “no passkey on this device” a WebAuthn call can show, since `get()` rejects
+  identically for a cancel — does the same button switch to creating the
+  account's passkey. The ceremony is also attempted once on arrival, silently,
+  but **only** while `navigator.userActivation.isActive`, i.e. when the visitor
+  got here by clicking (that is what lets a browser open a prompt without a
+  fresh gesture); on a refresh nothing opens and the button is the way in. The
+  header reads the passkey's name for the account name, so a rename on
+  `/account` updates it through the plugin's `$listPasskeys` listener.
+* **Follow-up:** the sign-in *screen* became a **dialog on the landing**. `/signin`
+  was a page a signed-in visitor could not reach and that the landing linked to
+  for no reason; the ceremony is now `SignInDialogProvider` (the root layout)
+  opened by every CTA — the hero, the closing section, the footer and the
+  header's «تسجيل الدخول» — while `/signin` and `/signup` survive only as
+  redirects to `/?signin=1`. The guards send an anonymous visitor who wanted
+  `/app` or `/account` to that same flag, which the dialog reads with
+  `useSyncExternalStore` (server snapshot: closed) — so `/` stays statically
+  prerendered, hydration stays clean, and dismissing the dialog strips the flag.
+  Making the landing the anonymous fallback did add one real hazard: `/` is
+  rewritten on the cookie while `/?signin=1` is the same URL, so a *stale*
+  session would loop `/` → `/app` → `/`. `useRequireAuth`, now shared by the
+  dashboard, the editor and `/account`, breaks it by signing that cookie out
+  before navigating home.
 
 | wave | work | who |
 | --- | --- | --- |

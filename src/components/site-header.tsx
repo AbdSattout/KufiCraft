@@ -1,34 +1,30 @@
 "use client";
 
 import Link from "next/link";
-import { useQuery, useConvexAuth } from "convex/react";
+import { useConvexAuth } from "convex/react";
 import { KeyRound, LogOut, User } from "lucide-react";
-import { api } from "../../convex/_generated/api";
 import { authClient } from "@/lib/auth-client";
+import { SignInButton } from "@/components/auth/sign-in-dialog";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuGroup,
   DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
 /**
  * Shared shell header: the wordmark and the account menu. There is no board
  * link: the boards are the home route (`/`), so the wordmark already goes
- * there. Signed-out visitors get a single `تسجيل الدخول` button — sign-in and
- * sign-up live on the same screen (`/signin`).
+ * there. Signed-out visitors get a single `تسجيل الدخول` button, which opens the
+ * passkey dialog — signing in and creating an account are that one ceremony
+ * (`src/components/auth/sign-in-dialog.tsx`).
  *
  * Note: UI primitives are Base UI based — compose with `render={<Link … />}`
- * rather than Radix's `asChild`. `DropdownMenuLabel` is a Base UI
- * `Menu.GroupLabel`, so it must stay inside a `DropdownMenuGroup`.
+ * rather than Radix's `asChild`.
  */
 export function SiteHeader() {
   const { isAuthenticated, isLoading } = useConvexAuth();
-  const user = useQuery(api.auth.getCurrentUser);
 
   return (
     <header className="border-b border-border/70 bg-background/80 backdrop-blur">
@@ -47,50 +43,52 @@ export function SiteHeader() {
           {isLoading ? (
             <span className="h-8 w-24 animate-pulse rounded-md bg-muted" />
           ) : isAuthenticated ? (
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button variant="outline" size="sm" className="gap-2">
-                    <User className="size-4" />
-                    <span className="max-w-32 truncate">
-                      {user?.name ?? "حسابي"}
-                    </span>
-                  </Button>
-                }
-              />
-              <DropdownMenuContent align="start" className="w-52">
-                <DropdownMenuGroup>
-                  <DropdownMenuLabel className="truncate">
-                    {user?.name ?? "حسابي"}
-                  </DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem render={<Link href="/account" />}>
-                    <KeyRound className="size-4" />
-                    الحساب والأمان
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={() => {
-                      void authClient.signOut();
-                    }}
-                  >
-                    <LogOut className="size-4" />
-                    تسجيل الخروج
-                  </DropdownMenuItem>
-                </DropdownMenuGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <AccountMenu />
           ) : (
-            <Button
-              variant="outline"
-              size="sm"
-              nativeButton={false}
-              render={<Link href="/signin" />}
-            >
+            <SignInButton variant="outline" size="sm">
               تسجيل الدخول
-            </Button>
+            </SignInButton>
           )}
         </div>
       </div>
     </header>
+  );
+}
+
+/**
+ * The account's name **is** its passkey's name — there is no separate profile
+ * name (docs/AUTH.md § Accounts) — so this reads the passkey list and falls back
+ * to `حسابي` while it loads. Mounted only for a signed-in visitor so an
+ * anonymous page never asks for a passkey list it cannot have.
+ */
+function AccountMenu() {
+  const { data: passkeys } = authClient.useListPasskeys();
+  const accountName = passkeys?.[0]?.name?.trim() || "حسابي";
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button variant="outline" size="sm" className="gap-2">
+            <User className="size-4" />
+            <span className="max-w-32 truncate">{accountName}</span>
+          </Button>
+        }
+      />
+      <DropdownMenuContent align="start" className="w-52">
+        <DropdownMenuItem render={<Link href="/account" />}>
+          <KeyRound className="size-4" />
+          الحساب والأمان
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => {
+            void authClient.signOut();
+          }}
+        >
+          <LogOut className="size-4" />
+          تسجيل الخروج
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

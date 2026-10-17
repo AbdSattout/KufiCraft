@@ -7,9 +7,12 @@ import { betterAuth, type BetterAuthOptions } from "better-auth/minimal";
 import { passkey } from "@better-auth/passkey";
 import { components } from "./_generated/api";
 import type { DataModel } from "./_generated/dataModel";
-import { query } from "./_generated/server";
 import authConfig from "./auth.config";
-import { signUpEmail, verifySignUpContextToken, PASSKEY_EMAIL_DOMAIN } from "./authFlows";
+import {
+  DEFAULT_PASSKEY_NAME,
+  signUpEmail,
+  verifySignUpContextToken,
+} from "./authFlows";
 import authSchema from "./betterAuth/schema";
 
 /**
@@ -25,9 +28,6 @@ export const authComponent = createClient<DataModel, typeof authSchema>(
   components.betterAuth,
   { local: { schema: authSchema } },
 );
-
-/** Default label for the passkey created by the sign-up flow. */
-const SIGN_UP_PASSKEY_NAME = "مفتاح المرور";
 
 /**
  * `better-auth/*` type entries resolve `better-auth@1.6.33`'s nested
@@ -147,7 +147,8 @@ export const createAuthOptions = (
         rpName: "KufiCraft",
         origin: siteUrl,
         registration: {
-          // Passkey-first sign-up: `/signup` has no session and no email.
+          // Passkey-first sign-up: the sign-in dialog has no session and no
+          // email.
           requireSession: false,
           /**
            * Called by `GET /passkey/generate-register-options?context=…`.
@@ -181,14 +182,21 @@ export const createAuthOptions = (
                 message: "تم استخدام طلب إنشاء الحساب مسبقًا. ابدأ من جديد.",
               });
             }
+            /**
+             * The account has no name of its own — it **is** its passkey, and
+             * the passkey's name is the account's name (docs/AUTH.md §
+             * Accounts). These three strings are therefore the same label: the
+             * row, the WebAuthn user the OS prompt shows, and the passkey the
+             * ceremony creates below.
+             */
             const user = await endpointCtx.context.internalAdapter.createUser(
-              { name: payload.name, email },
+              { name: DEFAULT_PASSKEY_NAME, email },
               { method: "passkey" },
             );
             return {
               id: user.id,
-              name: payload.name,
-              displayName: payload.name,
+              name: DEFAULT_PASSKEY_NAME,
+              displayName: DEFAULT_PASSKEY_NAME,
             };
           },
           /**
@@ -211,7 +219,7 @@ export const createAuthOptions = (
                 user: fullUser,
               });
             }
-            return { name: SIGN_UP_PASSKEY_NAME };
+            return { name: DEFAULT_PASSKEY_NAME };
           },
         },
       }),
@@ -231,22 +239,3 @@ export const createAuth = (
   if (overrides === undefined && isLiveRequest(ctx)) assertAuthOrigins();
   return betterAuth(createAuthOptions(ctx, overrides));
 };
-
-/** Current user profile, or null when signed out. */
-export const getCurrentUser = query({
-  args: {},
-  handler: async (ctx) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) return null;
-    const email = identity.email ?? null;
-    return {
-      id: identity.subject,
-      name: identity.name ?? null,
-      // Login-less accounts carry a synthetic `<nonce>@passkey.local`
-      // address; never expose it (docs/AUTH.md).
-      email:
-        email !== null && email.endsWith(PASSKEY_EMAIL_DOMAIN) ? null : email,
-      image: identity.pictureUrl ?? null,
-    };
-  },
-});

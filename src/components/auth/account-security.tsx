@@ -1,8 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { Passkey } from "@better-auth/passkey/client";
-import { KeyRound, LogOut, Pencil, Plus, Trash2 } from "lucide-react";
+import { KeyRound, LogOut, Pencil } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import { AuthAlert } from "@/components/auth/auth-alert";
 import { hardNavigate } from "@/components/auth/hard-navigate";
@@ -10,17 +9,6 @@ import {
   passkeyErrorMessage,
   unexpectedErrorMessage,
 } from "@/components/auth/passkey-errors";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogMedia,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -43,91 +31,50 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 
-/** Label used for passkeys added from this screen (the sign-up one is "مفتاح المرور"). */
-const ADDED_PASSKEY_NAME = "مفتاح إضافي";
+/** Name shown while the passkey list loads, or if a passkey somehow has none. */
+const FALLBACK_ACCOUNT_NAME = "مفتاح المرور";
 
-function formatPasskeyDate(value: Date | number): string | null {
-  const date = typeof value === "number" ? new Date(value) : value;
-  if (Number.isNaN(date.getTime())) return null;
-  return new Intl.DateTimeFormat("ar", { dateStyle: "medium" }).format(date);
-}
-
-function passkeyLabel(passkey: Passkey): string {
-  const name = passkey.name?.trim();
-  return name && name.length > 0 ? name : "مفتاح مرور";
-}
-
-function passkeyMeta(passkey: Passkey): string {
-  const parts: string[] = [];
-  const created = formatPasskeyDate(passkey.createdAt);
-  if (created) parts.push(`أُنشئ في ${created}`);
-  if (passkey.deviceType === "multiDevice") {
-    parts.push("مزامَن عبر الأجهزة");
-  } else {
-    parts.push("مرتبط بهذا الجهاز");
-  }
-  if (passkey.backedUp) parts.push("منسوخ احتياطيًا");
-  return parts.join(" · ");
-}
+/** Matches the input's `maxLength`; the server accepts what the plugin gets. */
+const MAX_ACCOUNT_NAME_LENGTH = 60;
 
 /**
- * "الحساب والأمان": passkey management (list / add / rename / delete) plus
- * sign-out. Rendered by `/account`, which the header account menu links to.
+ * "الحساب والأمان" at `/account`. An account **is** its passkey
+ * (docs/AUTH.md § Accounts): exactly one, and its name is the account's name —
+ * so this screen shows that name with an edit action, plus sign-out. There is
+ * deliberately no "add another passkey" and no delete: a second key would be a
+ * second account's key, and deleting the only one would leave the account with
+ * no way back in (there is no email or password to recover with).
  */
-export function AccountSecurity({ userName }: { userName: string }) {
+export function AccountSecurity() {
   const {
     data: passkeys,
     error: listError,
     isPending,
     refetch,
   } = authClient.useListPasskeys();
-  const [addBusy, setAddBusy] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [renameTarget, setRenameTarget] = useState<Passkey | null>(null);
+  const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState("");
   const [renameBusy, setRenameBusy] = useState(false);
   const [renameError, setRenameError] = useState<string | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<Passkey | null>(null);
-  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [signOutBusy, setSignOutBusy] = useState(false);
 
-  const items = passkeys ?? [];
-  /** With passkeys only and no recovery, deleting the last one locks you out. */
-  const isOnlyPasskey = items.length <= 1;
+  const passkey = passkeys?.[0] ?? null;
+  const accountName = passkey?.name?.trim() || FALLBACK_ACCOUNT_NAME;
 
-  async function handleAddPasskey() {
-    if (addBusy) return;
-    setActionError(null);
-    setAddBusy(true);
-    try {
-      const result = await authClient.passkey.addPasskey({
-        name: ADDED_PASSKEY_NAME,
-      });
-      if (result.error || !result.data) {
-        setActionError(passkeyErrorMessage(result.error));
-      }
-      // On success the list refreshes on its own (the plugin's atom listens
-      // to `/passkey/verify-registration`).
-    } catch (cause) {
-      setActionError(unexpectedErrorMessage(cause));
-    } finally {
-      setAddBusy(false);
-    }
-  }
-
-  function openRenameDialog(passkey: Passkey) {
+  function openRenameDialog() {
     setRenameError(null);
-    setRenameValue(passkeyLabel(passkey));
-    setRenameTarget(passkey);
+    setRenameValue(accountName);
+    setRenameOpen(true);
   }
 
   async function handleRename(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const target = renameTarget;
+    const target = passkey;
     if (!target || renameBusy) return;
     const nextName = renameValue.trim();
     if (nextName.length === 0) {
-      setRenameError("اكتب اسمًا للمفتاح.");
+      setRenameError("اكتب اسمًا للحساب.");
       return;
     }
     setRenameBusy(true);
@@ -141,31 +88,11 @@ export function AccountSecurity({ userName }: { userName: string }) {
         setRenameError(passkeyErrorMessage(result.error));
         return;
       }
-      setRenameTarget(null);
+      setRenameOpen(false);
     } catch (cause) {
       setRenameError(unexpectedErrorMessage(cause));
     } finally {
       setRenameBusy(false);
-    }
-  }
-
-  async function handleDelete() {
-    const target = deleteTarget;
-    if (!target || deleteBusy) return;
-    // UI guard: the only passkey cannot be deleted (see the dialog copy).
-    if (isOnlyPasskey) return;
-    setDeleteBusy(true);
-    setActionError(null);
-    try {
-      const result = await authClient.passkey.deletePasskey({ id: target.id });
-      if (result.error || !result.data) {
-        setActionError(passkeyErrorMessage(result.error));
-      }
-      setDeleteTarget(null);
-    } catch (cause) {
-      setActionError(unexpectedErrorMessage(cause));
-    } finally {
-      setDeleteBusy(false);
     }
   }
 
@@ -186,36 +113,18 @@ export function AccountSecurity({ userName }: { userName: string }) {
       <CardHeader>
         <CardTitle className="text-xl">الحساب والأمان</CardTitle>
         <CardDescription>
-          مسجَّل الدخول باسم{" "}
-          <span className="font-medium text-foreground">{userName}</span>
+          اسمك في KufiCraft هو اسم مفتاح مرورك نفسه — مفتاح واحد يكفي للدخول.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         <div className="flex flex-col gap-2">
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="font-heading text-base font-medium">مفاتيح المرور</h2>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleAddPasskey}
-              disabled={addBusy}
-              aria-busy={addBusy}
-            >
-              {addBusy ? <Spinner /> : <Plus aria-hidden />}
-              إضافة مفتاح
-            </Button>
-          </div>
-
           {actionError ? <AuthAlert>{actionError}</AuthAlert> : null}
 
           {isPending ? (
-            <div className="flex flex-col gap-2" aria-hidden>
-              <Skeleton className="h-14 w-full rounded-lg" />
-              <Skeleton className="h-14 w-full rounded-lg" />
-            </div>
+            <Skeleton className="h-14 w-full rounded-lg" />
           ) : listError ? (
             <AuthAlert>
-              <span>تعذّر تحميل مفاتيح المرور.</span>{" "}
+              <span>تعذّر تحميل مفتاح المرور.</span>{" "}
               <button
                 type="button"
                 onClick={() => void refetch()}
@@ -224,53 +133,28 @@ export function AccountSecurity({ userName }: { userName: string }) {
                 إعادة المحاولة
               </button>
             </AuthAlert>
-          ) : items.length === 0 ? (
+          ) : passkey === null ? (
             <p className="rounded-lg border border-dashed border-border p-4 text-center text-sm text-muted-foreground">
-              لا توجد مفاتيح مرور مسجَّلة بعد. أضف مفتاحًا للدخول دون كلمة مرور.
+              لا يوجد مفتاح مرور مسجَّل لهذا الحساب على هذا الجهاز.
             </p>
           ) : (
-            <ul className="flex flex-col gap-2">
-              {items.map((passkey) => {
-                const label = passkeyLabel(passkey);
-                return (
-                  <li
-                    key={passkey.id}
-                    className="flex items-start justify-between gap-2 rounded-lg border border-border/70 p-3"
-                  >
-                    <div className="flex min-w-0 items-start gap-2">
-                      <KeyRound
-                        aria-hidden
-                        className="mt-0.5 size-4 shrink-0 text-muted-foreground"
-                      />
-                      <div className="min-w-0">
-                        <p className="truncate font-medium">{label}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {passkeyMeta(passkey)}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label={`إعادة تسمية ${label}`}
-                        onClick={() => openRenameDialog(passkey)}
-                      >
-                        <Pencil aria-hidden />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label={`حذف ${label}`}
-                        onClick={() => setDeleteTarget(passkey)}
-                      >
-                        <Trash2 aria-hidden />
-                      </Button>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
+            <div className="flex items-center justify-between gap-2 rounded-lg border border-border/70 p-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <KeyRound
+                  aria-hidden
+                  className="size-4 shrink-0 text-muted-foreground"
+                />
+                <p className="truncate font-medium">{accountName}</p>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="تغيير اسم الحساب"
+                onClick={openRenameDialog}
+              >
+                <Pencil aria-hidden />
+              </Button>
+            </div>
           )}
         </div>
 
@@ -294,23 +178,23 @@ export function AccountSecurity({ userName }: { userName: string }) {
       </CardContent>
 
       <Dialog
-        open={renameTarget !== null}
+        open={renameOpen}
         onOpenChange={(open) => {
-          if (!open) setRenameTarget(null);
+          if (!open) setRenameOpen(false);
         }}
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>إعادة تسمية مفتاح المرور</DialogTitle>
+            <DialogTitle>تغيير اسم الحساب</DialogTitle>
             <DialogDescription>
-              الاسم يساعدك على تمييز المفاتيح، مثل «جهاز العمل» أو «الآيفون».
+              هذا الاسم هو اسم مفتاح مرورك نفسه، وهو ما يظهر في الترويسة.
             </DialogDescription>
           </DialogHeader>
-          <form onSubmit={handleRename} noValidate>
+          <form onSubmit={handleRename} noValidate className="grid gap-4">
             <Field data-invalid={renameError !== null}>
-              <FieldLabel htmlFor="passkey-name">اسم المفتاح</FieldLabel>
+              <FieldLabel htmlFor="account-name">اسم الحساب</FieldLabel>
               <Input
-                id="passkey-name"
+                id="account-name"
                 dir="auto"
                 value={renameValue}
                 onChange={(event) => {
@@ -318,17 +202,17 @@ export function AccountSecurity({ userName }: { userName: string }) {
                   if (renameError) setRenameError(null);
                 }}
                 autoFocus
-                maxLength={60}
+                maxLength={MAX_ACCOUNT_NAME_LENGTH}
                 aria-invalid={renameError !== null}
                 disabled={renameBusy}
               />
               {renameError ? <FieldError>{renameError}</FieldError> : null}
             </Field>
-            <DialogFooter className="mt-4 border-t-0 bg-transparent px-0 pb-0">
+            <DialogFooter>
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setRenameTarget(null)}
+                onClick={() => setRenameOpen(false)}
                 disabled={renameBusy}
               >
                 إلغاء
@@ -341,44 +225,6 @@ export function AccountSecurity({ userName }: { userName: string }) {
           </form>
         </DialogContent>
       </Dialog>
-
-      <AlertDialog
-        open={deleteTarget !== null}
-        onOpenChange={(open) => {
-          if (!open) setDeleteTarget(null);
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogMedia className="bg-destructive/10 text-destructive">
-              <Trash2 aria-hidden />
-            </AlertDialogMedia>
-            <AlertDialogTitle>حذف مفتاح المرور؟</AlertDialogTitle>
-            <AlertDialogDescription>
-              سيُحذف «{deleteTarget ? passkeyLabel(deleteTarget) : ""}» نهائيًا
-              ولا يمكن استخدامه للدخول بعد ذلك.{" "}
-              {isOnlyPasskey
-                ? "لا يمكن حذف مفتاحك الوحيد — أضف مفتاحًا آخر أولًا حتى لا تفقد الوصول إلى حسابك."
-                : ""}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleteBusy}>إلغاء</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              onClick={(event) => {
-                event.preventDefault();
-                void handleDelete();
-              }}
-              disabled={deleteBusy || isOnlyPasskey}
-              aria-busy={deleteBusy}
-            >
-              {deleteBusy ? <Spinner /> : null}
-              حذف
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </Card>
   );
 }

@@ -15,11 +15,11 @@
  */
 
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
-import { useConvexAuth } from "convex/react";
+import { useParams } from "next/navigation";
+import { useMemo, useState } from "react";
 import { ArrowRight, FileQuestion } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useRequireAuth } from "@/components/auth/require-auth";
 import { Separator } from "@/components/ui/separator";
 import {
   Empty,
@@ -177,8 +177,7 @@ function StateScreen({
 
 export function EditorScreen() {
   const params = useParams<{ projectId?: string | string[] }>();
-  const router = useRouter();
-  const { isAuthenticated, isLoading: authLoading } = useConvexAuth();
+  const { isAuthenticated, isLoading: authLoading } = useRequireAuth();
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const routeParam = params.projectId;
@@ -186,10 +185,6 @@ export function EditorScreen() {
     typeof routeParam === "string" ? routeParam : (routeParam?.[0] ?? null);
 
   const editor = useEditor(projectId, !authLoading && isAuthenticated);
-
-  useEffect(() => {
-    if (!authLoading && !isAuthenticated) router.replace("/signin");
-  }, [authLoading, isAuthenticated, router]);
 
   const itemByKey = useMemo(() => {
     const map = new Map<string, CanvasItem>();

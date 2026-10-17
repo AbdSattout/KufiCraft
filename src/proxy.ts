@@ -4,7 +4,8 @@ import { guardRoute } from "@/lib/route-guards";
 
 /**
  * Routing guards that run before any route renders — see
- * `src/lib/route-guards.ts` for the rules and for why `/signin` is left alone.
+ * `src/lib/route-guards.ts` for the rules and for why the landing is the
+ * redirect target rather than a sign-in page.
  *
  * The session cookie is only *read* here (never validated), which keeps the
  * landing statically prerendered and the signed-in home flash-free: `/` is
@@ -18,8 +19,7 @@ export function proxy(request: NextRequest) {
 
   if (decision.action === "next") return NextResponse.next();
 
-  const target = request.nextUrl.clone();
-  target.pathname = decision.to;
+  const target = new URL(decision.to, request.nextUrl.origin);
 
   return decision.action === "rewrite"
     ? NextResponse.rewrite(target)
@@ -27,5 +27,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/", "/account", "/app", "/app/:path*"],
+  matcher: ["/", "/account", "/app", "/app/:path*", "/signin", "/signup"],
 };

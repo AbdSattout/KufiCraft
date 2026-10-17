@@ -1,5 +1,4 @@
-import Link from "next/link";
-import { Button } from "@/components/ui/button";
+import { SignInButton } from "@/components/auth/sign-in-dialog";
 import { RatioCycle } from "./kufi/ratio-cycle";
 import { Reveal } from "./reveal";
 
@@ -22,14 +21,9 @@ export function Closing() {
             </p>
           </Reveal>
           <Reveal step={2} className="mk-close__action">
-            <Button
-              className="h-11 px-5 text-base"
-              variant="secondary"
-              nativeButton={false}
-              render={<Link href="/signin" />}
-            >
+            <SignInButton className="h-11 px-5 text-base" variant="secondary">
               ابدأ الرسم
-            </Button>
+            </SignInButton>
           </Reveal>
         </div>
 

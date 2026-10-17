@@ -1,38 +1,40 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
 import { useConvexAuth } from "convex/react";
+import { authClient } from "@/lib/auth-client";
+import { hardNavigate } from "@/components/auth/hard-navigate";
+import { SIGN_IN_DIALOG_ROUTE } from "@/lib/route-guards";
 
 /**
- * Client-side guard for authenticated screens: redirects to `/signin` once
- * Convex reports an anonymous visitor. The dashboard/editor currently keep
- * their own inline version — import this when consolidating.
+ * Client guard for the screens that need a session (`/app`, `/account`). The
+ * proxy already turned anonymous visitors away, so reaching this with no session
+ * means the cookie is stale (an expired session, or a deployment whose users
+ * changed) — and because the proxy only *reads* that cookie, `/` would rewrite
+ * straight back to the dashboard. Signing out is what clears it: it drops the
+ * cookie, and the trip home then really lands on the landing, with the sign-in
+ * dialog open (`SIGN_IN_DIALOG_ROUTE`).
+ *
+ * Callers keep rendering their skeleton until `isAuthenticated` is true.
  */
-export function useRequireAuth(redirectTo = "/signin") {
-  const router = useRouter();
+export function useRequireAuth(): {
+  isLoading: boolean;
+  isAuthenticated: boolean;
+} {
   const { isLoading, isAuthenticated } = useConvexAuth();
 
   useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
-      router.replace(redirectTo);
-    }
-  }, [isLoading, isAuthenticated, router, redirectTo]);
+    if (isLoading || isAuthenticated) return;
+    void (async () => {
+      try {
+        await authClient.signOut();
+      } catch {
+        // Navigating away is the point of this effect; a failed sign-out only
+        // means the stale cookie survives and the banner shows again.
+      }
+      hardNavigate(SIGN_IN_DIALOG_ROUTE);
+    })();
+  }, [isLoading, isAuthenticated]);
 
   return { isLoading, isAuthenticated };
-}
-
-/** Renders `children` only for authenticated visitors; `fallback` otherwise. */
-export function RequireAuth({
-  children,
-  fallback = null,
-  redirectTo = "/signin",
-}: {
-  children: React.ReactNode;
-  fallback?: React.ReactNode;
-  redirectTo?: string;
-}) {
-  const { isLoading, isAuthenticated } = useRequireAuth(redirectTo);
-  if (isLoading || !isAuthenticated) return <>{fallback}</>;
-  return <>{children}</>;
 }

@@ -4,15 +4,18 @@
 
 | route | access | screen |
 | --- | --- | --- |
-| `/` | public | landing (Arabic marketing page) — **rewritten to `/app` for a session**, so a signed-in visitor lands on the boards |
-| `/signin` | public | the one account screen: passkey sign-in **and** account creation |
-| `/signup` | public | redirect to `/signin` (old links only) |
-| `/account` | auth | “الحساب والأمان”: passkey management and sign out |
+| `/` | public | landing (Arabic marketing page) — **rewritten to `/app` for a session**, so a signed-in visitor lands on the boards; **`/?signin=1`** opens the sign-in dialog |
+| `/account` | auth | “الحساب والأمان”: the account name (the passkey's) and sign out |
 | `/app` | auth | boards dashboard (“لوحاتي”) — what `/` rewrites to |
 | `/app/[projectId]` | auth | editor |
 
-Route groups: `src/app/(marketing)/` (landing) and `src/app/(auth)/`
-(`/signin`, `/signup`, `/account`). The authenticated screens live in a plain
+There is **no sign-in route**: the passkey ceremony is a dialog owned by the
+landing (`src/components/auth/sign-in-dialog.tsx`), opened by every CTA. `/signin`
+and `/signup` survive only as redirects to `/?signin=1`, so old links and
+bookmarks still land in it.
+
+Route groups: `src/app/(marketing)/` (landing) and `src/app/(auth)/` (`/account`).
+The authenticated screens live in a plain
 `src/app/app/` folder — no route group, so the folder name and the URL agree.
 All copy is **Arabic**, `dir="rtl"` comes from the root layout. Latin route
 slugs, Arabic UI text.
@@ -25,11 +28,18 @@ Auth session cookie — no validation round-trip — and the rules live in
 * with a session, `/` is **rewritten** to `/app`: the address bar keeps `/`, the
   landing stays a statically prerendered page for everyone else, and nothing
   flashes for a signed-in visitor;
-* without one, `/app`, `/app/…` and `/account` are redirected to `/signin`
-  instead of painting a skeleton and fixing it up on the client (the client
-  guards stay as a safety net for a session that expires mid-visit);
-* `/signin` is never bounced on the cookie — a stale session would loop
-  `/` → `/signin` → `/`. The screen itself sends a live session home.
+* without one, `/app`, `/app/…` and `/account` are redirected to `/?signin=1` —
+  the landing with the dialog already open — instead of painting a skeleton and
+  fixing it up on the client (the client guards stay as a safety net for a
+  session that expires mid-visit);
+* `/signin` and `/signup` are redirects to `/?signin=1` for everyone, cookie or
+  not, because the routes are gone.
+
+The one wrinkle worth remembering: `/` **is** bounced on the cookie while
+`/?signin=1` is the same URL, so a *stale* cookie (expired session, changed
+users) would loop `/` → `/app` → `/`. The dashboard's client guard breaks it by
+signing out — which clears that cookie — before going home
+(`useRequireAuth`, `src/components/auth/require-auth.tsx`).
 
 ## Design language
 
@@ -44,21 +54,41 @@ Auth session cookie — no validation round-trip — and the rules live in
 * Icons: `lucide-react`. Buttons/inputs/dialogs come from `src/components/ui/*`
   (shadcn, RTL-enabled) — do not invent parallel primitives.
 * **These primitives are Base UI based (`@base-ui/react`), not Radix.** Compose
-  with the `render` prop — `<Button render={<Link href="/signin" />}>تسجيل الدخول</Button>` —
+  with the `render` prop — `<DropdownMenuItem render={<Link href="/account" />}>` —
   menu items take `onClick`, and `asChild` does **not** exist. Menu group parts
   belong inside a group: `DropdownMenuLabel` is a `Menu.GroupLabel` and throws
   `MenuGroupContext is missing` outside `DropdownMenuGroup`/`DropdownMenuRadioGroup`.
 * Motion: 150–200 ms ease-out, `tw-animate-css` utilities; nothing bouncy.
 
-## Account screens (`/signin`, `/account`)
+## Account screens (`/account` and the sign-in dialog)
 
-`/signin` is a **single card**: “لديّ حساب” (the `username webauthn` field for
-conditional UI plus the passkey button) and, under an «أو» rule, “حساب جديد”
-(display name → passkey). There is no sign-in/sign-up split to travel between,
-and the card carries no session-management content — that is `/account`, which
-the header's account menu links to. A visitor with a live session never sees
-either card: `/signin` sends them to `/`, and `/account` renders the
-“الحساب والأمان” card (passkey list, add/rename/delete, sign out).
+An account **is** its passkey: one account, one passkey, and the passkey's name
+is the account's name (the model is documented in `docs/AUTH.md § Accounts`).
+
+Signing in is a **dialog on the landing**: one button and nothing else — no
+fields, no “حساب جديد” section, no conditional-UI input. `SignInDialogProvider`
+(root layout) renders it once, and the CTAs (`SignInButton`, `SignInLink`)
+open it, so no screen has a sign-in page to link to. The button runs the
+passkey sign-in ceremony; if the browser has no passkey for this site (the only
+reason to create one, and not something a WebAuthn call can report on its own),
+the *same* button switches to creating the account's passkey after that attempt
+comes back without a session. Opening the dialog by a click — which is what
+carries transient activation into the passkey sheet — also runs the sign-in
+ceremony once on its own, silently; a direct load or refresh has no activation,
+so nothing opens and the button is the way in.
+
+`/?signin=1` opens the dialog straight away: that is where the guards send an
+anonymous visitor who wanted a session screen. The flag is read with
+`useSyncExternalStore` (server snapshot: closed), so the statically prerendered
+landing never contains an open dialog and hydration stays clean; dismissing a
+dialog the URL asked for strips the flag.
+
+`/account` (“الحساب والأمان”) is the only session screen: one row with the
+account name (the passkey's) and a pencil that renames that same passkey, then
+sign out. No add, no delete, no metadata — a second passkey would be a second
+account's key and deleting the only one would lose the account. A visitor with a
+live session never sees the dialog: it lives on the landing, which rewrites them
+to `/app`.
 
 ## Dashboard (`/app`)
 
@@ -191,8 +221,8 @@ Marketing page for a craft tool: hero with **live kufi artwork rendered by the
 canvas engine** (static SVG string, no interaction), one-line value prop,
 “كيف يعمل” 3 steps, feature grid (شبكة مربعة ودائرية، نسب قابلة للتخصيص، حفظ
 تلقائي ومزامنة فورية، تصدير SVG/PNG), gallery strip, footer with the GitHub
-link and a CTA to `/signin` (the one account screen — no separate sign-up
-route). It is only ever shown to a visitor **without** a session. Follow the
+link and a CTA that opens the sign-in dialog (there is no separate sign-in or
+sign-up route). It is only ever shown to a visitor **without** a session. Follow the
 `design-taste-frontend` skill: researched
 composition, no generic template look, real typography scale, Arabic-first
 layout (numbers/Latin inline as needed).
@@ -200,8 +230,10 @@ layout (numbers/Latin inline as needed).
 ## Shared pieces
 
 * `src/components/site-header.tsx` — wordmark (the boards are the home route, so
-  there is no separate board link), links, user menu (name, account & security,
-  sign-out) when signed in, or a single “تسجيل الدخول” when not.
+  there is no separate board link), the account menu (account & security,
+  sign-out) when signed in — its button reads the passkey's name, because that
+  *is* the account's name — or a single “تسجيل الدخول” that opens the sign-in
+  dialog when not.
 * `src/components/canvas/canvas-preview.tsx` — read-only SVG renderer:
   `<CanvasPreview config items />` (used by editor, cards’ previews and the
   create dialog); it must call the engine, never hand-render paths itself.

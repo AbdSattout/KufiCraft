@@ -4,60 +4,38 @@ import { action } from "./_generated/server";
 /**
  * Passkey-first sign-up plumbing (see docs/AUTH.md).
  *
- * `/signup` is public: a visitor types a display name, the client asks
- * `createSignUpContext` for a short-lived signed context token, and hands that
- * token to `authClient.passkey.addPasskey({ context })`. The passkey plugin's
+ * The sign-in dialog is public: the client asks `createSignUpContext` for a
+ * short-lived signed context token, then hands that token to
+ * `authClient.passkey.addPasskey({ context })`. The passkey plugin's
  * `resolveUser` hook (convex/auth.ts) verifies the token and creates the
- * account — no email, password or prior session is involved.
+ * account — no email, password, display name or prior session is involved.
  *
- * The token is an HMAC-SHA256 signature over a JSON payload, keyed with the
- * deployment's `BETTER_AUTH_SECRET`. It only proves "this client asked to
- * create an account with this name a moment ago"; it is consumed by
- * `resolveUser` at the start of the WebAuthn ceremony and expires quickly.
+ * An account **is** its passkey: exactly one, never added to or deleted, and
+ * the name people see is that passkey's name (docs/AUTH.md § Accounts). The
+ * token is an HMAC-SHA256 signature over a JSON payload, keyed with the
+ * deployment's `BETTER_AUTH_SECRET`; it proves nothing except "this client
+ * asked for an account a moment ago", which is all a first passkey needs.
  */
 
 /** How long a client may take between requesting the token and starting registration. */
 const CONTEXT_TOKEN_TTL_MS = 5 * 60 * 1000;
 
 type SignUpContextPayload = {
-  name: string;
   expiresAt: number;
   nonce: string;
 };
-
-/** Matches MAX_DISPLAY_NAME_LENGTH on the client form. */
-export const MAX_DISPLAY_NAME_LENGTH = 60;
 
 /** Synthetic email domain for login-less accounts — never shown or sent to. */
 export const PASSKEY_EMAIL_DOMAIN = "@passkey.local";
 
 /**
- * Control / format characters that must never survive into a display name:
- * C0 + C1 controls (their whitespace members — `\t`, `\n`, `\r` — are *not*
- * listed, so they collapse to a space instead of gluing words together), the
- * soft hyphen, the Arabic letter mark, zero-width and bidi marks
- * (`U+200B–U+200F`), bidi embeddings/overrides (`U+202A–U+202E`), invisibles
- * and bidi isolates (`U+2060–U+2069`), and the BOM. Without this a name such as
- * `"عبد"` + `U+202E` renders reversed or invisible and can impersonate another
- * user; `\s` does not match any of them.
+ * Name of the passkey a new account is created with, and therefore the
+ * account's name until its owner renames that passkey — they are the same
+ * string (docs/AUTH.md § Accounts). It is also what the OS prompt shows while
+ * the passkey is being created, because the browser never tells us what it
+ * called the credential.
  */
-const FORBIDDEN_NAME_CHARS =
-  /[\u0000-\u0008\u000E-\u001F\u007F-\u009F\u00AD\u061C\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/g;
-
-/**
- * Normalises a display name: NFC, strips control/format characters, then
- * trims and collapses whitespace. Null when it is empty or over the length
- * bound. Used both when minting and when verifying a sign-up context token.
- */
-export function normalizeDisplayName(raw: string): string | null {
-  const name = raw
-    .normalize("NFC")
-    .replace(FORBIDDEN_NAME_CHARS, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (name.length === 0 || name.length > MAX_DISPLAY_NAME_LENGTH) return null;
-  return name;
-}
+export const DEFAULT_PASSKEY_NAME = "مفتاح المرور";
 
 /**
  * Internal login-less address for the created account. Better Auth requires a
@@ -130,12 +108,10 @@ function signaturesMatch(a: string, b: string): boolean {
 
 /** Mints the signed token handed to `authClient.passkey.addPasskey`. */
 export async function createSignUpContextToken(
-  name: string,
   secret: string,
   now: number,
 ): Promise<{ token: string; expiresAt: number }> {
   const payload: SignUpContextPayload = {
-    name,
     expiresAt: now + CONTEXT_TOKEN_TTL_MS,
     nonce: randomHex(16),
   };
@@ -179,38 +155,28 @@ export async function verifySignUpContextToken(
   }
   if (typeof parsed !== "object" || parsed === null) return null;
   const record = parsed as Record<string, unknown>;
-  const name = typeof record.name === "string" ? normalizeDisplayName(record.name) : null;
   const expiresAt = typeof record.expiresAt === "number" ? record.expiresAt : null;
   const nonce =
     typeof record.nonce === "string" && record.nonce.length >= 8 ? record.nonce : null;
-  if (!name || expiresAt === null || !nonce) return null;
+  if (expiresAt === null || !nonce) return null;
   if (expiresAt < Date.now()) return null;
-  return { name, expiresAt, nonce };
+  return { expiresAt, nonce };
 }
 
 /**
- * Public entry point for `/signup`: mints a context token for the pending
- * display name. Anonymous on purpose — the whole flow is session-less.
+ * Public entry point for account creation: mints a context token that lets a
+ * session-less client start one passkey registration. Anonymous on purpose —
+ * the whole flow is session-less.
  */
 export const createSignUpContext = action({
-  args: { name: v.string() },
+  args: {},
   returns: v.object({ context: v.string(), expiresAt: v.number() }),
-  handler: async (_ctx, args) => {
-    const name = normalizeDisplayName(args.name);
-    if (!name) {
-      throw new ConvexError(
-        `اكتب اسمًا من 1 إلى ${MAX_DISPLAY_NAME_LENGTH} حرفًا`,
-      );
-    }
+  handler: async () => {
     const secret = process.env.BETTER_AUTH_SECRET;
     if (!secret) {
       throw new ConvexError("خدمة إنشاء الحساب غير مهيأة حاليًا");
     }
-    const { token, expiresAt } = await createSignUpContextToken(
-      name,
-      secret,
-      Date.now(),
-    );
+    const { token, expiresAt } = await createSignUpContextToken(secret, Date.now());
     return { context: token, expiresAt };
   },
 });

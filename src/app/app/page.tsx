@@ -1,25 +1,16 @@
 "use client";
 
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { useConvexAuth } from "convex/react";
 import { SiteHeader } from "@/components/site-header";
 import { ProjectsView } from "@/components/dashboard/projects-view";
 import { DashboardSkeleton } from "@/components/dashboard/skeletons";
+import { useRequireAuth } from "@/components/auth/require-auth";
 
 /** `/app` — the boards dashboard. `/` rewrites here for a signed-in visitor
  * (see `src/proxy.ts`), so this is also "the home page" once you are in. The
  * client guard below only covers a session that expired while the page was
- * open. */
+ * open (it clears the stale cookie and returns to the sign-in dialog). */
 export default function DashboardPage() {
-  const router = useRouter();
-  const { isLoading, isAuthenticated } = useConvexAuth();
-
-  useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
-      router.replace("/signin");
-    }
-  }, [isLoading, isAuthenticated, router]);
+  const { isAuthenticated } = useRequireAuth();
 
   return (
     <div className="flex min-h-dvh flex-col bg-background">
