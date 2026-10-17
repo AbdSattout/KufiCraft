@@ -4,19 +4,19 @@
 
 | route | access | screen |
 | --- | --- | --- |
-| `/` | public | landing (Arabic marketing page) — **rewritten to `/app` for a session**, so a signed-in visitor lands on the boards; **`/?signin=1`** opens the sign-in dialog |
+| `/` | public | the **boards** for a visitor with a session; the landing for everyone else (served from `/welcome` by a rewrite, so `/` stays the landing's address) |
+| `/welcome` | public | the landing's own route — what `/` is rewritten to |
+| `/<projectId>` | auth | a board: the editor, one segment under the boards |
 | `/account` | auth | “الحساب والأمان”: the account name (the passkey's) and sign out |
-| `/app` | auth | boards dashboard (“لوحاتي”) — what `/` rewrites to |
-| `/app/[projectId]` | auth | editor |
 
 There is **no sign-in route**: the passkey ceremony is a dialog owned by the
-landing (`src/components/auth/sign-in-dialog.tsx`), opened by every CTA. `/signin`
-and `/signup` survive only as redirects to `/?signin=1`, so old links and
-bookmarks still land in it.
+landing (`src/components/auth/sign-in-dialog.tsx`), opened by every CTA and by
+`/?signin=1`. `/signin`, `/signup`, `/app` and `/app/<id>` are redirects to
+their replacements now, so old links and bookmarks still land somewhere real.
 
-Route groups: `src/app/(marketing)/` (landing) and `src/app/(auth)/` (`/account`).
-The authenticated screens live in a plain
-`src/app/app/` folder — no route group, so the folder name and the URL agree.
+Route groups: `src/app/(marketing)/` (the landing, at `/welcome`) and
+`src/app/(auth)/` (`/account`). The boards (`src/app/page.tsx`) and a board
+(`src/app/[projectId]/page.tsx`) sit at the root, one segment apart.
 All copy is **Arabic**, `dir="rtl"` comes from the root layout. Latin route
 slugs, Arabic UI text.
 
@@ -25,21 +25,27 @@ renamed middleware; it runs on the Node runtime). It only *reads* the Better
 Auth session cookie — no validation round-trip — and the rules live in
 `src/lib/route-guards.ts` with their tests:
 
-* with a session, `/` is **rewritten** to `/app`: the address bar keeps `/`, the
-  landing stays a statically prerendered page for everyone else, and nothing
-  flashes for a signed-in visitor;
-* without one, `/app`, `/app/…` and `/account` are redirected to `/?signin=1` —
-  the landing with the dialog already open — instead of painting a skeleton and
-  fixing it up on the client (the client guards stay as a safety net for a
-  session that expires mid-visit);
-* `/signin` and `/signup` are redirects to `/?signin=1` for everyone, cookie or
-  not, because the routes are gone.
+* `/` with a session is the boards; without one it is **rewritten** to the
+  landing, so the address bar keeps `/` (the landing's canonical URL) and both
+  pages stay statically prerendered;
+* `/?signin=1` is the landing **whatever the cookie says**: it is the fallback
+  the client guard navigates to, and a fallback that can bounce back to the
+  boards is an endless loop;
+* `/account` and a board (`/<id>`) without a session are redirected to
+  `/?signin=1` — the landing with the dialog already open — instead of painting
+  a skeleton and fixing it up on the client (the client guards stay as a safety
+  net for a session that expires mid-visit);
+* `/app`, `/app/<id>`, `/signin` and `/signup` are redirects for old links.
 
-The one wrinkle worth remembering: `/` **is** bounced on the cookie while
-`/?signin=1` is the same URL, so a *stale* cookie (expired session, changed
-users) would loop `/` → `/app` → `/`. The dashboard's client guard breaks it by
-signing out — which clears that cookie — before going home
-(`useRequireAuth`, `src/components/auth/require-auth.tsx`).
+The wrinkle worth remembering: `/` is bounced on the cookie while the client
+guard's own target is `/?signin=1`. A *stale* cookie — one the proxy still
+believes in but the server no longer does — is exactly where those two can
+disagree, which is why the flag wins over the cookie. For the same reason the
+guard reads the **session** (`authClient.useSession`), not Convex's auth state:
+a failed `/api/auth/convex/token` makes Convex report an anonymous client while
+the cookie is perfectly valid, and a guard on that report throws a signed-in
+visitor out of their editor. When the session request itself fails there is no
+answer, so the screens show a retry (`SessionUnavailable`) instead of guessing.
 
 ## Design language
 
@@ -87,14 +93,14 @@ dialog the URL asked for strips the flag.
 account name (the passkey's) and a pencil that renames that same passkey, then
 sign out. No add, no delete, no metadata — a second passkey would be a second
 account's key and deleting the only one would lose the account. A visitor with a
-live session never sees the dialog: it lives on the landing, which rewrites them
-to `/app`.
+live session never sees the dialog: it lives on the landing, and the boards are
+where a signed-in visitor lands.
 
-## Dashboard (`/app`)
+## Dashboard (`/`)
 
-Reached at `/` too: that is where a signed-in visitor lands (the proxy rewrites
-it), which is why the header carries no board link — it would point at the page
-you are already on.
+The home route, and the second half of it: the landing for a visitor without a
+session (a rewrite), the boards for one with. That is why the header carries no
+board link — it would point at the page you are already on.
 
 * Grid of project cards (responsive: 1/2/3/4 columns). Each card shows the
   stored SVG thumbnail (render `project.thumbnail` with `dangerouslySetInnerHTML`
@@ -116,7 +122,7 @@ you are already on.
 * Loading: skeletons in the card grid shape. All queries via Convex hooks
   (`useQuery(api.projects.list)`), so additions/renames/removals appear live.
 
-## Editor (`/app/[projectId]`)
+## Editor (`/<projectId>`)
 
 Layout (RTL): top bar (project name inline-edit, save state “محفوظ تلقائيًا”,
 undo/redo, export menu, back to dashboard) + right toolbar (RTL: the
@@ -215,14 +221,16 @@ line, `E` eraser, `A` arc, `H` hand. The tool keys come from the tool classes
 and the shape digits from the shape registry (`SHAPE_ORDER`), so the map cannot
 drift from the UI.
 
-## Landing (`/`)
+## Landing (`/welcome`, served at `/`)
 
 Marketing page for a craft tool: hero with **live kufi artwork rendered by the
 canvas engine** (static SVG string, no interaction), one-line value prop,
 “كيف يعمل” 3 steps, feature grid (شبكة مربعة ودائرية، نسب قابلة للتخصيص، حفظ
 تلقائي ومزامنة فورية، تصدير SVG/PNG), gallery strip, footer with the GitHub
 link and a CTA that opens the sign-in dialog (there is no separate sign-in or
-sign-up route). It is only ever shown to a visitor **without** a session. Follow the
+sign-up route). A visitor **without** a session gets it at `/`; this route also
+answers directly, and never redirects on the cookie, so nothing can bounce.
+Follow the
 `design-taste-frontend` skill: researched
 composition, no generic template look, real typography scale, Arabic-first
 layout (numbers/Latin inline as needed).

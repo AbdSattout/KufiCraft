@@ -75,7 +75,7 @@ export function ProjectCard({ project }: { project: ProjectSummary }) {
   const [isDuplicating, setIsDuplicating] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
 
-  const projectHref = `/app/${project._id}`;
+  const projectHref = `/${project._id}`;
 
   function openRename() {
     setDraftName(project.name);

@@ -1,8 +1,8 @@
 "use client";
 
-import { authClient } from "@/lib/auth-client";
 import { AccountSecurity } from "@/components/auth/account-security";
 import { useRequireAuth } from "@/components/auth/require-auth";
+import { SessionUnavailable } from "@/components/auth/session-unavailable";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -13,14 +13,10 @@ import { Skeleton } from "@/components/ui/skeleton";
  * that expired while the page was open.
  */
 export function AccountScreen() {
-  const { isAuthenticated } = useRequireAuth();
-  // The passkey list comes from the better-auth session, which the provider
-  // above loads from the same cookie; wait for it before asking for the key.
-  const { data: session, isPending } = authClient.useSession();
+  const { isAuthenticated, unavailable, retry } = useRequireAuth();
 
-  if (!isAuthenticated || isPending || !session?.user) {
-    return <AccountSkeleton />;
-  }
+  if (unavailable) return <SessionUnavailable onRetry={retry} />;
+  if (!isAuthenticated) return <AccountSkeleton />;
 
   return <AccountSecurity />;
 }

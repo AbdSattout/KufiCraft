@@ -87,7 +87,7 @@ export function useImportProjectFile(): (file: File) => Promise<void> {
             ops: [{ type: "add", items: parsed.items }],
           });
         }
-        router.push(`/app/${projectId}`);
+        router.push(`/${projectId}`);
       } catch (error) {
         toast.error(fileErrorMessage(error, IMPORT_ERROR));
       }

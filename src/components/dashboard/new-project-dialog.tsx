@@ -89,7 +89,7 @@ export function NewProjectDialog({
         config: { ...defaults, gridType, ratio },
       });
       onOpenChange(false);
-      router.push(`/app/${projectId}`);
+      router.push(`/${projectId}`);
     } catch (error) {
       toast.error(mutationErrorMessage(error, "تعذّر إنشاء اللوحة"));
     } finally {

@@ -1,6 +1,5 @@
-import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import { SignInButton } from "@/components/auth/sign-in-dialog";
+import { SignInButton, SignInLink } from "@/components/auth/sign-in-dialog";
 import { RatioInstrument } from "./kufi/instrument";
 import { Reveal } from "./reveal";
 
@@ -28,13 +27,13 @@ export function Hero() {
             <SignInButton className="h-11 px-5 text-base">
               ابدأ الرسم
             </SignInButton>
-            <Link href="/app" className="mk-link mk-body">
+            <SignInLink className="mk-link mk-body">
               افتح المحرر
               <ArrowLeft
                 aria-hidden
                 className="size-4 transition-transform group-hover:-translate-x-1"
               />
-            </Link>
+            </SignInLink>
           </Reveal>
         </div>
 

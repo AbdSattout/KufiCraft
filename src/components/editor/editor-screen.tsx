@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * KufiCraft — editor screen (`/app/[projectId]`).
+ * KufiCraft — editor screen (`/<projectId>`).
  *
  * Owns the whole page: the signed-out redirect, the invalid / loading /
  * missing states, and the editor layout itself — top bar, tool rail (RTL:
@@ -20,6 +20,7 @@ import { useMemo, useState } from "react";
 import { ArrowRight, FileQuestion } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useRequireAuth } from "@/components/auth/require-auth";
+import { SessionUnavailable } from "@/components/auth/session-unavailable";
 import { Separator } from "@/components/ui/separator";
 import {
   Empty,
@@ -177,7 +178,12 @@ function StateScreen({
 
 export function EditorScreen() {
   const params = useParams<{ projectId?: string | string[] }>();
-  const { isAuthenticated, isLoading: authLoading } = useRequireAuth();
+  const {
+    isAuthenticated,
+    isLoading: authLoading,
+    unavailable,
+    retry,
+  } = useRequireAuth();
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const routeParam = params.projectId;
@@ -201,6 +207,13 @@ export function EditorScreen() {
     [itemByKey, editor.previewKeys],
   );
 
+  if (unavailable) {
+    return (
+      <div className="grid h-dvh place-items-center bg-background p-6">
+        <SessionUnavailable onRetry={retry} />
+      </div>
+    );
+  }
   if (!authLoading && !isAuthenticated) return <Redirecting />;
 
   if (editor.status === "invalid") {

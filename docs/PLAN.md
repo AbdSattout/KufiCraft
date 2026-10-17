@@ -174,11 +174,24 @@ backend) · Better Auth (passkeys, local-install component) · Bun · vitest.
   `/app` or `/account` to that same flag, which the dialog reads with
   `useSyncExternalStore` (server snapshot: closed) — so `/` stays statically
   prerendered, hydration stays clean, and dismissing the dialog strips the flag.
-  Making the landing the anonymous fallback did add one real hazard: `/` is
-  rewritten on the cookie while `/?signin=1` is the same URL, so a *stale*
-  session would loop `/` → `/app` → `/`. `useRequireAuth`, now shared by the
-  dashboard, the editor and `/account`, breaks it by signing that cookie out
-  before navigating home.
+  Making the landing the anonymous fallback added one real hazard: `/` is
+  rewritten on the cookie while the client guard's own fallback is a plain `/`
+  URL, so the two can disagree about who is signed in — see the next bullet.
+* **Follow-up (live testing): the infinite redirect, and the routes.** Two
+  screens claimed `/`, and the guards decided between them from the session
+  cookie alone. The loop: the boards' guard read *Convex*'s auth state, which
+  reports an anonymous client whenever `/api/auth/convex/token` fails, while the
+  sign-in screen read the *session* — valid — and sent the visitor back. With a
+  flaky network to the deployment that ping-ponged `/` ↔ `/signin` for as long
+  as the tab stayed open, hammering the auth endpoints. The guard now reads the
+  session too (`authClient.useSession`), and when the session request itself
+  fails it does not guess: the screens show a retry. The other half is the
+  routing: `/` is the boards (the landing moved to `/welcome`, still served at
+  `/` by a rewrite), a board is `/<id>` — no more `/app` prefix — and
+  `/?signin=1`, the fallback the guard navigates to, is the landing **whatever
+  the cookie says**, because a stale cookie is exactly when the proxy and the
+  client disagree. `/app`, `/app/<id>`, `/signin` and `/signup` redirect for old
+  links.
 
 | wave | work | who |
 | --- | --- | --- |

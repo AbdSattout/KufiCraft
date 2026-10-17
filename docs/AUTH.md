@@ -44,8 +44,9 @@ everything about the live deployment that a unit test cannot reach is marked
 | `convex/http.ts` | `authComponent.registerRoutes(http, createAuth)` → mounts `/api/auth/*` |
 | `src/lib/auth-client.ts` | `createAuthClient({ plugins: [convexClient(), passkeyClient()] })` |
 | `src/app/(auth)/{layout,account}` | Arabic RTL shell: `/account` is “الحساب والأمان” (there is no sign-in route — the dialog lives on the landing) |
-| `src/components/auth/**` | the sign-in dialog (one button, silent auto-attempt) and its CTA triggers, account screen + account & security card (account name = passkey name, sign-out), passkey error mapping, `require-auth` guard (clears a stale cookie, then sends the visitor to the dialog) |
-| `src/proxy.ts` + `src/lib/route-guards.ts` | pre-render routing: `/` → `/app` with a session, `/app|/account|/signin|/signup` → `/?signin=1` without one |
+| `src/app/page.tsx`, `src/app/[projectId]/page.tsx` | the boards (home) and a board — one segment apart, no `/app` prefix |
+| `src/components/auth/**` | the sign-in dialog (one button, silent auto-attempt) and its CTA triggers, account screen + account & security card (account name = passkey name, sign-out), passkey error mapping, `require-auth` guard (`useSession`, so a failed Convex token cannot sign anyone out) |
+| `src/proxy.ts` + `src/lib/route-guards.ts` | pre-render routing: `/` is the boards with a session and the landing without one, `/?signin=1` is the landing either way, `/account` and `/<id>` → `/?signin=1` without a session, and `/app`, `/app/<id>`, `/signin`, `/signup` redirect for old links |
 | `src/lib/auth-server.ts` | `convexBetterAuthNextJs(...)` helpers (`getToken`, `preloadAuthQuery`, …) |
 | `src/app/api/auth/[...all]/route.ts` | `export const { GET, POST } = handler` (proxies to Convex) |
 | `src/components/convex-client-provider.tsx` | `ConvexBetterAuthProvider` (client) |
@@ -196,8 +197,8 @@ Sign-in/sign-up must work **without** passwords, email or OAuth:
      `verify-registration` returns 200 but does **not** create a session by
      itself) and returns the passkey's name — `DEFAULT_PASSKEY_NAME`.
    * The client full-page-navigates to `/` after the ceremony — the passkey
-     client never fires `$sessionSignal` on registration. `/` rewrites to the
-     boards (`/app`) for that fresh cookie, so the visitor lands on “لوحاتي”.
+     client never fires `$sessionSignal` on registration. `/` is the boards for
+     that fresh cookie, so the visitor lands on “لوحاتي”.
 2. **Sign in** (the dialog's first button): `authClient.signIn.passkey()`. The
    sheet lists every passkey this site has on the device and one of them signs in;
    both paths end with a full-page navigation, not client routing (the session
@@ -212,10 +213,11 @@ Sign-in/sign-up must work **without** passwords, email or OAuth:
      `autocomplete="username webauthn"` field, and the dialog has no fields.
 3. **Management**: `/account` renders the account & security card for a session —
    the account name with a rename dialog, plus sign-out. The dialog never shows
-   it (a live session only meets the landing through a rewrite to `/app`), and
-   `useRequireAuth` covers a session that expires mid-visit: it signs the stale
-   cookie out before sending the visitor back to the dialog, which is also what
-   keeps the `/` → `/app` rewrite from ping-ponging.
+   it (the landing is what a session-less visitor sees, and a live session sees
+   the boards at `/`), and `useRequireAuth` covers a session that expires
+   mid-visit: it sends the visitor to `/?signin=1`, which the proxy renders as
+   the landing whatever the cookie says — the rule that keeps a cookie it still
+   believes in from ping-ponging them between the two screens.
 4. Behaviour **is verified against the live dev deployment**: HTTP checks for
    every option/verify endpoint plus a real-browser Chromium virtual
    authenticator E2E (sign-up → account → rename → sign-out → sign-in).

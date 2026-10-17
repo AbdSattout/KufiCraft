@@ -1,20 +1,21 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionCookie } from "better-auth/cookies";
-import { guardRoute } from "@/lib/route-guards";
+import { guardRoute, SIGN_IN_QUERY } from "@/lib/route-guards";
 
 /**
  * Routing guards that run before any route renders — see
- * `src/lib/route-guards.ts` for the rules and for why the landing is the
- * redirect target rather than a sign-in page.
+ * `src/lib/route-guards.ts` for the rules, and for why `/?signin=1` is never
+ * rewritten back to the boards.
  *
- * The session cookie is only *read* here (never validated), which keeps the
- * landing statically prerendered and the signed-in home flash-free: `/` is
- * rewritten to the dashboard instead of rendering the landing and swapping it.
+ * The session cookie is only *read* here (never validated), which is what keeps
+ * the landing statically prerendered: `/` is rewritten to `/welcome` for a
+ * visitor without a session instead of rendering both and swapping them.
  */
 export function proxy(request: NextRequest) {
   const decision = guardRoute(
     request.nextUrl.pathname,
     getSessionCookie(request) !== null,
+    request.nextUrl.searchParams.has(SIGN_IN_QUERY),
   );
 
   if (decision.action === "next") return NextResponse.next();
@@ -27,5 +28,14 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/", "/account", "/app", "/app/:path*", "/signin", "/signup"],
+  matcher: [
+    "/",
+    "/welcome",
+    "/account",
+    "/signin",
+    "/signup",
+    "/app",
+    "/app/:path*",
+    "/:projectId",
+  ],
 };

@@ -1,5 +1,5 @@
-import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
+import { SignInLink } from "@/components/auth/sign-in-dialog";
 import { KufiSvg } from "./kufi/kufi-svg";
 import { arcade, nested, ornament, rosette } from "./kufi/compositions";
 import { Reveal } from "./reveal";
@@ -20,13 +20,13 @@ export function Gallery() {
           <h2 className="mk-lead font-medium">من اللوحات</h2>
         </Reveal>
         <Reveal step={1} className="mk-gallery__link-row">
-          <Link href="/app" className="mk-link mk-small group">
+          <SignInLink className="mk-link mk-small group">
             افتح لوحاتك
             <ArrowLeft
               aria-hidden
               className="size-3.5 transition-transform group-hover:-translate-x-1"
             />
-          </Link>
+          </SignInLink>
         </Reveal>
         <Reveal step={2}>
           <p className="mk-small mk-gallery__note">
