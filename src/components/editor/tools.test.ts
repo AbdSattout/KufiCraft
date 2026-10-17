@@ -6,7 +6,7 @@ import { makeArc, makeLine, makeTile } from "@/lib/canvas/items";
 import {
   DEFAULT_ARC_STYLE,
   DEFAULT_STYLE,
-  shiftSelection,
+  moveItems,
 } from "./interaction";
 import type { ToolContext } from "./interaction";
 import {
@@ -391,7 +391,7 @@ describe("SelectTool", () => {
     expect(out.selection).toEqual([tile.key]);
   });
 
-  it("starts a move on an item click and commits shiftSelection", () => {
+  it("moves the clicked item and commits the whole board", () => {
     const tile = makeTile({ column: 0, row: 0, zone: 0 });
     const other = makeTile({ column: 5, row: 5, zone: 0 });
     const items = [tile, other];
@@ -403,13 +403,67 @@ describe("SelectTool", () => {
     const out = endTool("select", ctx, dragged.state);
 
     expect(out.commit?.label).toBe("تحريك");
+    // The commit is the **whole board**, moved fragments on top: the document
+    // diffs it against what it has (`toOps`), so a commit holding only the
+    // fragments would read as "delete everything else".
     expect(out.commit?.items).toEqual(
-      shiftSelection(CONFIG, items, [tile.key], 2, 1),
+      moveItems(CONFIG, items, [tile.key], 2, 1),
     );
+    expect(out.commit?.items).toHaveLength(items.length);
+    expect(out.commit?.items).toContainEqual(other);
     expect(out.commit?.items.map((item) => item.key)).toEqual([
+      other.key,
       tileKey(2, 1, 0),
     ]);
     expect(out.commit?.selection).toEqual([tile.key]);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Commits carry the whole board                                       */
+/* ------------------------------------------------------------------ */
+
+describe("commits carry the whole board", () => {
+  // A `ToolCommit` is diffed against the document (`toOps`), so a tool that
+  // returns only its own fragments deletes every other item — the bug that
+  // made a drag wipe the canvas. Whatever a gesture does, its commit must hold
+  // the items it did not address.
+  const untouched = () => makeTile({ column: 40, row: 40, zone: 0 });
+
+  it("pen: keeps fragments it did not paint", () => {
+    const board = untouched();
+    const ctx = context([board], { tool: "pen" });
+    const drawn = beginTool("pen", ctx, NO_STATE, input(pointOf(1, 1)));
+    const out = endTool("pen", ctx, drawn.state);
+    expect(out.commit?.items).toContainEqual(board);
+  });
+
+  it("line: keeps fragments it did not stroke", () => {
+    const board = untouched();
+    const ctx = context([board], { tool: "line" });
+    const first = beginTool("line", ctx, NO_STATE, input(pointOf(1, 1)));
+    const extended = beginTool("line", ctx, first.state, input(pointOf(3, 1)));
+    // Clicking the last point again ends the run.
+    const done = beginTool("line", ctx, extended.state, input(pointOf(3, 1)));
+    expect(done.commit?.items).toContainEqual(board);
+  });
+
+  it("arc: keeps fragments it did not curve", () => {
+    const board = untouched();
+    const ctx = context([board], { tool: "arc" });
+    const armed = beginTool("arc", ctx, NO_STATE, input(pointOf(1, 1)));
+    const done = beginTool("arc", ctx, armed.state, input(pointOf(1, 3)));
+    expect(done.commit?.items).toContainEqual(board);
+  });
+
+  it("eraser: removes only what it swept", () => {
+    const board = untouched();
+    const target = makeTile({ column: 1, row: 1, zone: 0 });
+    const ctx = context([board, target], { tool: "eraser" });
+    const started = beginTool("eraser", ctx, NO_STATE, input(pointOf(1, 1)));
+    const out = endTool("eraser", ctx, started.state);
+    expect(out.commit?.items).toContainEqual(board);
+    expect(out.commit?.items.map((item) => item.key)).not.toContain(target.key);
   });
 });
 

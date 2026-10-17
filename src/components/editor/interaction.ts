@@ -341,7 +341,13 @@ function shiftedItem(
   return config.gridType === "circular" ? wrapRows(moved) : moved;
 }
 
-/** The listed items moved by `(dColumn, dRow)`, in their original order. */
+/**
+ * The listed items moved by `(dColumn, dRow)`, in their original order — the
+ * moved **fragments only**, which is what a live preview paints over the board.
+ * A commit needs the whole board, so use `moveItems` for one: a `ToolCommit`
+ * is diffed against the document (`toOps`), and a list of fragments alone reads
+ * as “delete everything else”.
+ */
 export function shiftSelection(
   config: ProjectConfig,
   items: readonly CanvasItem[],

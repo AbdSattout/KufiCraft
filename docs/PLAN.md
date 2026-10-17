@@ -123,6 +123,12 @@ backend) · Better Auth (passkeys, local-install component) · Bun · vitest.
   `hint`, replacing the `tool === "line"` special case. Open: zoom keeps the
   inline-start edge anchored, so zooming in from a centred board jumps to a
   corner — anchoring at the view centre instead is a possible follow-up.
+* **Follow-up (live testing):** dragging a selection **wiped the board**. The
+  select tool's move handed the document only the moved fragments
+  (`shiftSelection`, the helper the live preview needs) where a commit must be
+  the whole board — `toOps` diffs it against the document, so every other item
+  read as “deleted”. It now commits `moveItems` (clamped to the grid, moved
+  items on top), and `shiftSelection` says out loud that it is preview-only.
 
 | wave | work | who |
 | --- | --- | --- |

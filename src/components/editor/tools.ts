@@ -31,6 +31,7 @@ import {
   inkAnchorAt,
   linePreview,
   marqueeSelection,
+  moveItems,
   rectFromPoints,
   shiftSelection,
   type ArcStyle,
@@ -259,7 +260,10 @@ class SelectTool extends KufiTool {
       return {
         state: NO_STATE,
         commit: commit(
-          shiftSelection(
+          // The **whole board** with the moved items on top: a commit's items
+          // are diffed against the document (`toOps`), so handing it only the
+          // fragments would read as "delete everything else".
+          moveItems(
             ctx.config,
             ctx.items,
             [...state.keys],
