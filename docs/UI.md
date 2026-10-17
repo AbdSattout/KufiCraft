@@ -227,8 +227,8 @@ line it draws between the **user** and the **board**:
   the editor mounts and applied to the toolbar so the app “opens the way you
   left it”, and written as each change happens (never per project): the shape
   and rotation a designer set on one board are what the next board opens with.
-  Zoom runs **0.1×–4×**, so a board far larger than the pane is viewable whole
-  and a dense one is workable up close.
+  Zoom runs **0.1×–32×**, so a board far larger than the pane is viewable whole
+  and a dense one (a `base` = 4 cell is ~3 px at 1×) is workable up close.
 * `kuficraft.last-config.v1` — the last committed project config, used as the
   default in the dashboard’s «لوحة جديدة» dialog and for new projects. The
   artwork settings — ink ratio, cell size, grid type, ink and paper colour, the
