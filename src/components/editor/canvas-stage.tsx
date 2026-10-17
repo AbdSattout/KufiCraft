@@ -27,11 +27,13 @@ import { Button } from "@/components/ui/button";
 import { CanvasPreview } from "@/components/canvas/canvas-preview";
 import type { Anchor, CanvasItem, ProjectConfig } from "@/lib/canvas/model";
 import type { Rect } from "@/lib/canvas/geometry";
+import { MAX_ZOOM, MIN_ZOOM } from "@/lib/editor-prefs";
 import { cn } from "@/lib/utils";
 import { MESSAGES } from "./messages";
 import { formatCount } from "./editor-palette";
 import { CanvasOverlay } from "./canvas-overlay";
 import { toolOf } from "./tools";
+import { nextZoom, zoomPercent } from "./interaction";
 import type { ToolId } from "./interaction";
 
 export interface CanvasStageProps {
@@ -158,8 +160,8 @@ export function CanvasStage({
             variant="ghost"
             size="icon-xs"
             aria-label={MESSAGES.zoomOut}
-            disabled={zoom <= 0.5}
-            onClick={() => setZoom(zoom - 0.25)}
+            disabled={zoom <= MIN_ZOOM}
+            onClick={() => setZoom(nextZoom(zoom, -1, MIN_ZOOM, MAX_ZOOM))}
           >
             <Minus />
           </Button>
@@ -170,14 +172,14 @@ export function CanvasStage({
             onClick={() => setZoom(1)}
             className="min-w-10 rounded text-center tabular-nums text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           >
-            {Math.round(zoom * 100)}%
+            {zoomPercent(zoom)}%
           </button>
           <Button
             variant="ghost"
             size="icon-xs"
             aria-label={MESSAGES.zoomIn}
-            disabled={zoom >= 2}
-            onClick={() => setZoom(zoom + 0.25)}
+            disabled={zoom >= MAX_ZOOM}
+            onClick={() => setZoom(nextZoom(zoom, 1, MIN_ZOOM, MAX_ZOOM))}
           >
             <Plus />
           </Button>

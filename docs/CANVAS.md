@@ -238,6 +238,34 @@ name. Adding a tool = one class + one registry line.
   visible until it commits. The overlay paints it as a filled highlight with no
   border.
 
+### Viewport: pan, zoom range and centre anchoring
+
+The hand tool is the only thing that moves the viewport; the maths is pure,
+lives in `interaction.ts` and is covered by `interaction.test.ts`:
+
+* **Pan** (`panScrollOffset`) — the board follows the hand: a rightward drag
+  subtracts the pointer's X delta from `scrollLeft`, and `scrollTop` never
+  flips. The app is `dir="rtl"`, and that scroller counts `scrollLeft` from the
+  inline-start (right) edge towards **negative** values, so a rightward drag
+  moves the offset deeper into its negative range rather than back towards
+  zero. That is not a flip: a browser always moves the content opposite to
+  `scrollLeft`, in RTL exactly as in LTR, so the helper deliberately takes no
+  direction argument (only the dead “reverse” offset model would invert it,
+  and it cannot be probed apart from the positive-descending one).
+* **Zoom range** — `MIN_ZOOM` = 0.1, `MAX_ZOOM` = 4
+  (`src/lib/editor-prefs.ts`; stored zooms are re-clamped on read). The ±
+  buttons walk the `ZOOM_STOPS` ladder through `nextZoom`, stop and disable at
+  the bounds, and the readout is `zoomPercent` — a whole percentage. The
+  surface is `min(100%, 100svh - 14rem) × zoom`, so at 10 % a whole 1000-unit
+  board is 100 px and nothing else clamps its size.
+* **Centre anchoring** (`zoomScrollOffset`) — the ± buttons are not on the
+  canvas, so there is no pointer to anchor: a zoom keeps the board point under
+  the **middle of the pane** under that middle. The board fraction is captured
+  before the surface resizes, and the scroll is corrected in a layout effect
+  after it from the live rects, so a browser clamp while the range changes
+  cannot skew the result. Zooming in from a centred board no longer jumps to
+  the inline-start corner.
+
 ## 7. Resolved decisions (engine)
 
 * `pentagon` is the old `semi-hexagone` (a typo *and* a misnomer: the glyph is a

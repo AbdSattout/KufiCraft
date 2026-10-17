@@ -21,7 +21,6 @@ import {
   configsEqual,
   deleteItems,
   horizontalScrollSign,
-  panScrollOffset,
   duplicateItems,
   hitTest,
   hitsItem,
@@ -33,11 +32,15 @@ import {
   linePreview,
   marqueeSelection,
   moveItems,
+  nextZoom,
+  panScrollOffset,
   recolourItems,
   rectFromPoints,
   rectsIntersect,
   reshapeItems,
   shiftSelection,
+  zoomPercent,
+  zoomScrollOffset,
 } from "./interaction";
 import type { ScrollLike, ToolContext } from "./interaction";
 
@@ -523,7 +526,7 @@ describe("comparison helpers", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/* Viewport scrolling (the hand tool)                                  */
+/* Viewport panning and zooming (the hand tool)                        */
 /* ------------------------------------------------------------------ */
 
 /**
@@ -592,16 +595,19 @@ describe("viewport scrolling", () => {
     expect(view.scrollLeft).toBe(40);
   });
 
-  it("keeps the content under the pointer in either convention", () => {
-    // Dragging right moves the canvas right: the offset shrinks when offsets
-    // count up, and grows back towards zero when they count down. Dragging down
-    // always reduces `scrollTop`.
+  it("moves the board with the hand, RTL negative scrollLeft included", () => {
+    // dir="rtl": the scroller counts scrollLeft from the inline-start (right)
+    // edge — 0 at the start, NEGATIVE towards the left — so its reachable
+    // range runs down to -(scrollWidth - clientWidth). Dragging right must
+    // still move the board right, which decreases the offset in both
+    // conventions: in RTL it goes deeper into the negative range rather than
+    // back towards zero (the reversed behaviour this test pins against).
     expect(
-      panScrollOffset({ left: 100, top: 50 }, 1, { x: 10, y: 10 }, { x: 30, y: 40 }),
+      panScrollOffset({ left: -100, top: 50 }, { x: 10, y: 10 }, { x: 30, y: 40 }),
+    ).toEqual({ left: -120, top: 20 });
+    expect(
+      panScrollOffset({ left: 100, top: 50 }, { x: 10, y: 10 }, { x: 30, y: 40 }),
     ).toEqual({ left: 80, top: 20 });
-    expect(
-      panScrollOffset({ left: -100, top: 50 }, -1, { x: 10, y: 10 }, { x: 30, y: 40 }),
-    ).toEqual({ left: -80, top: 20 });
   });
 
   it("centres the content in either convention", () => {
@@ -629,5 +635,68 @@ describe("viewport scrolling", () => {
       expect(view.scrollLeft === 0).toBe(true);
       expect(view.scrollTop).toBe(0);
     }
+  });
+});
+
+describe("zoom controls", () => {
+  it("steps through the stop ladder", () => {
+    // The prefs' range is passed in (`MIN_ZOOM`…`MAX_ZOOM`, 0.1…4), so the
+    // ladder works for any configured range.
+    expect(nextZoom(1, 1, 0.1, 4)).toBe(1.5);
+    expect(nextZoom(1.5, 1, 0.1, 4)).toBe(2);
+    expect(nextZoom(3, 1, 0.1, 4)).toBe(4);
+    expect(nextZoom(1, -1, 0.1, 4)).toBe(0.75);
+    expect(nextZoom(0.5, -1, 0.1, 4)).toBe(0.25);
+    expect(nextZoom(0.25, -1, 0.1, 4)).toBe(0.1);
+  });
+
+  it("stops at the bounds and snaps a stale value to the range", () => {
+    expect(nextZoom(4, 1, 0.1, 4)).toBe(4);
+    expect(nextZoom(0.1, -1, 0.1, 4)).toBe(0.1);
+    // A zoom stored while the range was 0.5…2 must not escape the narrower
+    // ladder, and vice versa.
+    expect(nextZoom(1, 1, 0.5, 2)).toBe(1.5);
+    expect(nextZoom(2, 1, 0.5, 2)).toBe(2);
+    expect(nextZoom(0.4, -1, 0.5, 2)).toBe(0.5);
+    // Between stops: the next one up, the previous one down.
+    expect(nextZoom(0.3, 1, 0.1, 4)).toBe(0.5);
+    expect(nextZoom(0.3, -1, 0.1, 4)).toBe(0.25);
+  });
+
+  it("labels the zoom as a whole percentage", () => {
+    expect(zoomPercent(0.1)).toBe(10);
+    expect(zoomPercent(0.75)).toBe(75);
+    expect(zoomPercent(1)).toBe(100);
+    expect(zoomPercent(1.5)).toBe(150);
+    expect(zoomPercent(4)).toBe(400);
+  });
+
+  it("keeps the anchored board point under the middle of the pane", () => {
+    const pane = { left: 0, top: 0, width: 1000, height: 1000 };
+    // RTL scroller, offset still 0 after the surface grew to 1.5× the pane:
+    // 0 is the inline-start (right) edge, so the surface's right edge stays on
+    // the pane's right edge and its left edge lands at -500. The pane centre
+    // (500, 500) sat 0.4 into the board and must stay there: the surface
+    // travels right/down onto the target edges, i.e. the offset deepens into
+    // its negative range.
+    expect(
+      zoomScrollOffset(
+        { left: 0, top: 0 },
+        { left: -500, top: 0, width: 1500, height: 1500 },
+        pane,
+        { x: 0.4, y: 0.4 },
+      ),
+    ).toEqual({ left: -400, top: 100 });
+
+    // LTR: the same helper moves the surface by the distance it must travel
+    // on screen, so the horizontal convention never enters the maths.
+    expect(
+      zoomScrollOffset(
+        { left: 0, top: 0 },
+        { left: 0, top: 0, width: 1500, height: 1500 },
+        pane,
+        { x: 0.4, y: 0.4 },
+      ),
+    ).toEqual({ left: 100, top: 100 });
   });
 });

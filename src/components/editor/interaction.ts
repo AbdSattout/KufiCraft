@@ -504,7 +504,7 @@ export function linePreview(
 export { anchorKey };
 
 /* ------------------------------------------------------------------ */
-/* Viewport scrolling (the hand tool)                                  */
+/* Viewport: pan and zoom (the hand tool)                              */
 /* ------------------------------------------------------------------ */
 
 /**
@@ -544,19 +544,90 @@ export function horizontalScrollSign(view: ScrollLike): 1 | -1 {
 }
 
 /**
- * The scroll offset that keeps the content under the pointer: dragging right
- * moves the canvas right, in either horizontal convention (`sign` comes from
- * `horizontalScrollSign`). The vertical axis never flips.
+ * The scroll offset that keeps the board under the hand: the board follows the
+ * pointer, so a rightward drag subtracts the pointer's X delta from
+ * `scrollLeft` — exactly as it does in LTR.
+ *
+ * `dir="rtl"` must not flip this. The scroller there counts `scrollLeft` from
+ * the inline-start (right) edge towards negative values, but a browser always
+ * moves the content opposite to `scrollLeft`: dragging right decreases the
+ * offset, which in RTL means going deeper into its negative range rather than
+ * towards zero. A direction argument would only be needed for the historical
+ * "reverse" offset model (offsets counted up towards the inline-end), which no
+ * live browser reports and `horizontalScrollSign` cannot tell apart from the
+ * positive-descending one — so the arithmetic is deliberately convention-free
+ * and stays correct everywhere. The vertical axis never flips.
  */
 export function panScrollOffset(
   start: ScrollOffset,
-  sign: 1 | -1,
   from: Point,
   to: Point,
 ): ScrollOffset {
   return {
-    left: start.left - sign * (to.x - from.x),
+    left: start.left - (to.x - from.x),
     top: start.top - (to.y - from.y),
+  };
+}
+
+/** Nice zoom stops, covering the whole range the prefs allow (0.1 … 4). */
+export const ZOOM_STOPS: readonly number[] = [
+  0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4,
+];
+
+/**
+ * The next zoom stop in `direction` (`1` zooms in, `-1` zooms out), limited to
+ * `[min, max]` and clamped at both ends, so a stale stored zoom cannot walk
+ * outside the range: a value between stops snaps to the neighbouring stop and
+ * a value outside the range snaps to the nearest bound.
+ */
+export function nextZoom(
+  current: number,
+  direction: 1 | -1,
+  min: number,
+  max: number,
+): number {
+  const stops = ZOOM_STOPS.filter((stop) => stop >= min && stop <= max);
+  if (direction > 0) {
+    return stops.find((stop) => stop > current) ?? max;
+  }
+  for (let index = stops.length - 1; index >= 0; index--) {
+    if (stops[index] < current) return stops[index];
+  }
+  return min;
+}
+
+/** The zoom readout as a whole percentage (`0.1` → `10`, `1.5` → `150`). */
+export function zoomPercent(zoom: number): number {
+  return Math.round(zoom * 100);
+}
+
+/**
+ * The scroll offset that keeps `anchor` — a board fraction (0…1 of the
+ * viewBox) that sat under the middle of the pane before a zoom — under that
+ * same middle after the surface has its new size.
+ *
+ * The inputs are the *measured* live rects (taken after the new size is laid
+ * out but before the scroll is moved) plus the current offset, so the maths
+ * also survives the browser clamping the old offset while the range shrank,
+ * and it needs no knowledge of padding, the `m-auto` centring, or the
+ * horizontal convention: a scroll container always moves its content opposite
+ * to `scrollLeft`, in `dir="rtl"` exactly as in LTR. Zooming is driven by the
+ * status-bar buttons — there is no pointer on the board to anchor — so the
+ * pane centre is the invariant (docs/CANVAS.md §6).
+ */
+export function zoomScrollOffset(
+  start: ScrollOffset,
+  surface: ClientRect,
+  pane: ClientRect,
+  anchor: Point,
+): ScrollOffset {
+  const centreX = pane.left + pane.width / 2;
+  const centreY = pane.top + pane.height / 2;
+  const targetLeft = centreX - anchor.x * surface.width;
+  const targetTop = centreY - anchor.y * surface.height;
+  return {
+    left: start.left + (surface.left - targetLeft),
+    top: start.top + (surface.top - targetTop),
   };
 }
 

@@ -14,7 +14,14 @@
  * history entry; undo/redo replay a snapshot as a `replace` op.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { toast } from "sonner";
 import { MAX_ITEMS } from "@/lib/canvas/model";
@@ -43,13 +50,13 @@ import {
   clampToCanvas,
   deleteItems,
   duplicateItems,
-  horizontalScrollSign,
   isProjectId,
   itemsEqual,
   nextRotation,
   panScrollOffset,
   recolourItems,
   reshapeItems,
+  zoomScrollOffset,
 } from "./interaction";
 import type {
   ArcStyle,
@@ -194,15 +201,21 @@ export function useEditor(
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   /**
-   * The live pan gesture: where the pointer started, the scroll offset it
-   * started from, and which way this browser counts horizontal offsets. Kept in
-   * a ref — a pan must not re-render on every pointer move.
+   * The live pan gesture: where the pointer started and the scroll offset it
+   * started from. Kept in a ref — a pan must not re-render on every pointer
+   * move, and in `dir="rtl"` the offset simply runs negative (the scroller
+   * counts from the inline-start edge, see `panScrollOffset`).
    */
   const panRef = useRef<{
     from: Point;
     scroll: ScrollOffset;
-    sign: 1 | -1;
   } | null>(null);
+  /**
+   * The board point (0…1 of the viewBox) that sat under the middle of the pane
+   * when a zoom was requested; the scroll is adjusted to keep it there once
+   * the surface has its new size (`zoomScrollOffset`).
+   */
+  const zoomAnchorRef = useRef<Point | null>(null);
 
   const setToolStateAndReset = useCallback((next: ToolId) => {
     setToolState(next);
@@ -298,7 +311,6 @@ export function useEditor(
         panRef.current = {
           from: { x: event.clientX, y: event.clientY },
           scroll: { left: view.scrollLeft, top: view.scrollTop },
-          sign: horizontalScrollSign(view),
         };
         surfaceRef.current?.focus({ preventScroll: true });
         return;
@@ -325,7 +337,7 @@ export function useEditor(
       if (pan) {
         const view = viewportRef.current;
         if (view) {
-          const next = panScrollOffset(pan.scroll, pan.sign, pan.from, {
+          const next = panScrollOffset(pan.scroll, pan.from, {
             x: event.clientX,
             y: event.clientY,
           });
@@ -571,9 +583,52 @@ export function useEditor(
     downloadProjectFile({ name: document.name, config, items });
   }, [config, document.name, items]);
 
-  const setZoom = useCallback((next: number) => {
-    setZoomState(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, next)));
-  }, []);
+  const setZoom = useCallback(
+    (next: number) => {
+      const value = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, next));
+      if (value === zoom) return;
+      const surface = surfaceRef.current;
+      const view = viewportRef.current;
+      if (surface && view) {
+        // Remember the board point under the middle of the pane before the
+        // surface takes its new size; the layout effect below puts it back.
+        const surfaceRect = surface.getBoundingClientRect();
+        const paneRect = view.getBoundingClientRect();
+        if (surfaceRect.width > 0 && surfaceRect.height > 0) {
+          zoomAnchorRef.current = {
+            x:
+              (paneRect.left + paneRect.width / 2 - surfaceRect.left) /
+              surfaceRect.width,
+            y:
+              (paneRect.top + paneRect.height / 2 - surfaceRect.top) /
+              surfaceRect.height,
+          };
+        }
+      }
+      setZoomState(value);
+    },
+    [zoom],
+  );
+
+  // Zooming anchors the centre of the pane, not the inline-start corner: the
+  // board point that was under the middle of the pane is measured before the
+  // resize and the scroll is corrected here, in the same frame as the new
+  // layout, so nothing jumps.
+  useLayoutEffect(() => {
+    const anchor = zoomAnchorRef.current;
+    zoomAnchorRef.current = null;
+    const surface = surfaceRef.current;
+    const view = viewportRef.current;
+    if (!anchor || !surface || !view) return;
+    const next = zoomScrollOffset(
+      { left: view.scrollLeft, top: view.scrollTop },
+      surface.getBoundingClientRect(),
+      view.getBoundingClientRect(),
+      anchor,
+    );
+    view.scrollLeft = next.left;
+    view.scrollTop = next.top;
+  }, [zoom]);
 
   /* ---------------------------------------------------------------- */
   /* Preferences (localStorage, best-effort)                           */
