@@ -105,6 +105,22 @@ which owns the geometry for that item and nothing else:
 `makeTile` / `makeLine` / `makeStroke` / `makeArc` are the factories the tools
 use, and `styleItem` / `colorItem` / `moveItem` are the pure edit helpers.
 
+### Stacking (z-order)
+
+`items` **is** the render order: the last item in the array paints on top, and
+hit-testing walks the array back to front, so the topmost item wins a click.
+Nothing sorts or re-keys the list on save/load — `projects.applyOps` keeps a
+`Map`'s insertion order, and `toOps` re-emits a reordered tail as
+`remove` + `add` — so an arrange survives every round trip.
+
+`arrangeItems(items, keys, action)` in `ops.ts` implements the four editor
+commands (`front | forward | backward | back`). *front* / *back* are stable
+partitions of the list around the selection, so unselected items and the
+selection both keep their relative order; *forward* / *backward* step each
+selected item past its nearest unselected neighbour, so a contiguous block moves
+as one block. An action that changes nothing returns its input list — no commit,
+no undo entry, disabled menu item.
+
 ## 4. Engine module layout (`src/lib/canvas/`)
 
 Pure TypeScript, **no React, no DOM** (except `render.ts`, which returns strings).

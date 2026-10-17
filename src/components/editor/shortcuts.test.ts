@@ -46,6 +46,31 @@ describe("editor keyboard map", () => {
     expect(shortcutFor({ key: "z" })).toBeNull();
   });
 
+  it("maps the arrange keys, Shift for the extremes", () => {
+    expect(shortcutFor({ key: "]", ctrlKey: true })).toEqual({
+      kind: "arrange",
+      action: "forward",
+    });
+    expect(shortcutFor({ key: "]", ctrlKey: true, shiftKey: true })).toEqual({
+      kind: "arrange",
+      action: "front",
+    });
+    expect(shortcutFor({ key: "[", ctrlKey: true })).toEqual({
+      kind: "arrange",
+      action: "backward",
+    });
+    expect(shortcutFor({ key: "[", metaKey: true, shiftKey: true })).toEqual({
+      kind: "arrange",
+      action: "back",
+    });
+    // A bracket without a primary modifier is not a shortcut…
+    expect(shortcutFor({ key: "]" })).toBeNull();
+    // …and nothing fires while the user is typing.
+    expect(
+      shortcutFor({ key: "]", ctrlKey: true, target: { tagName: "INPUT" } }),
+    ).toBeNull();
+  });
+
   it("ignores keystrokes while typing", () => {
     expect(shortcutFor({ key: "p", target: { tagName: "INPUT" } })).toBeNull();
     expect(shortcutFor({ key: "Delete", target: { tagName: "textarea" } })).toBeNull();

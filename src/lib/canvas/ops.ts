@@ -141,6 +141,88 @@ export function toOps(
 }
 
 /* ------------------------------------------------------------------ */
+/* Arrange (z-order)                                                   */
+/* ------------------------------------------------------------------ */
+
+/** The four arrange commands, in the order Illustrator/Figma list them. */
+export type ArrangeAction = "front" | "forward" | "backward" | "back";
+
+/** Array form, for menu rendering and disabled-state scans. */
+export const ARRANGE_ACTIONS: readonly ArrangeAction[] = [
+  "front",
+  "forward",
+  "backward",
+  "back",
+];
+
+/** Whether two lists hold the same keys in the same order. */
+function sameKeys(a: readonly CanvasItem[], b: readonly CanvasItem[]): boolean {
+  for (let index = 0; index < a.length; index++) {
+    if (a[index].key !== b[index].key) return false;
+  }
+  return true;
+}
+
+/**
+ * Moves the listed items in the **render order** — the array order is the
+ * z-order, so the end of the list paints on top (docs/CANVAS.md §3).
+ *
+ * `front` / `back` are stable partitions of the list around the selection:
+ * unselected items keep their relative order, and so does the selection
+ * itself. `forward` / `backward` step each selected item past its nearest
+ * unselected neighbour **above** / **below**, iterating from that end, so a
+ * contiguous block moves as one block and relative order never changes.
+ *
+ * An action that cannot change anything returns `items` unchanged — the editor
+ * turns that into "no commit, no undo entry" and the menu into a disabled item.
+ */
+export function arrangeItems(
+  items: readonly CanvasItem[],
+  keys: readonly string[],
+  action: ArrangeAction,
+): readonly CanvasItem[] {
+  if (items.length < 2 || keys.length === 0) return items;
+  const selected = new Set(keys);
+
+  switch (action) {
+    case "front":
+    case "back": {
+      const rest: CanvasItem[] = [];
+      const picked: CanvasItem[] = [];
+      for (const item of items) {
+        (selected.has(item.key) ? picked : rest).push(item);
+      }
+      const next = action === "front" ? [...rest, ...picked] : [...picked, ...rest];
+      return sameKeys(next, items) ? items : next;
+    }
+    case "forward": {
+      const next = [...items];
+      let moved = false;
+      // From the top, so a block's lower items cannot block its upper ones.
+      for (let index = next.length - 2; index >= 0; index--) {
+        if (selected.has(next[index].key) && !selected.has(next[index + 1].key)) {
+          [next[index], next[index + 1]] = [next[index + 1], next[index]];
+          moved = true;
+        }
+      }
+      return moved ? next : items;
+    }
+    case "backward": {
+      const next = [...items];
+      let moved = false;
+      // Mirror of `forward`: from the bottom this time.
+      for (let index = 1; index < next.length; index++) {
+        if (selected.has(next[index].key) && !selected.has(next[index - 1].key)) {
+          [next[index - 1], next[index]] = [next[index], next[index - 1]];
+          moved = true;
+        }
+      }
+      return moved ? next : items;
+    }
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* Gesture → items                                                     */
 /* ------------------------------------------------------------------ */
 

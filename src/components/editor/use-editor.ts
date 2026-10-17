@@ -43,6 +43,8 @@ import {
   saveLastConfig,
 } from "@/lib/editor-prefs";
 import { downloadProjectFile } from "@/lib/kuficraft-file";
+import { arrangeItems } from "@/lib/canvas/ops";
+import type { ArrangeAction } from "@/lib/canvas/ops";
 import {
   centreScroll,
   clientToViewBox,
@@ -131,6 +133,10 @@ export interface EditorController {
   recolourSelection: (color: string) => void;
   deleteSelection: () => void;
   duplicateSelection: () => void;
+  /** Moves the selection in the render order — one undo step per action. */
+  arrange: (action: ArrangeAction) => void;
+  /** Whether `arrange` would change anything (menu disabled state). */
+  canArrange: (action: ArrangeAction) => boolean;
 
   canUndo: boolean;
   canRedo: boolean;
@@ -482,6 +488,21 @@ export function useEditor(
     applyCommit(next, "تكرار", keys);
   }, [applyCommit, config, items, selection]);
 
+  /** The selection's z-order, one commit (and one undo entry) per command. */
+  const arrange = useCallback(
+    (action: ArrangeAction) => {
+      if (selection.length === 0) return;
+      applyCommit(arrangeItems(items, selection, action), "ترتيب", selection);
+    },
+    [applyCommit, items, selection],
+  );
+
+  /** No-op detection: `arrangeItems` returns its input when nothing moves. */
+  const canArrange = useCallback(
+    (action: ArrangeAction) => arrangeItems(items, selection, action) !== items,
+    [items, selection],
+  );
+
   const clearAll = useCallback(() => {
     applyCommit([], "مسح الكل", []);
   }, [applyCommit]);
@@ -549,6 +570,9 @@ export function useEditor(
         case "duplicate":
           duplicateSelection();
           break;
+        case "arrange":
+          arrange(shortcut.action);
+          break;
         case "undo":
           undo();
           break;
@@ -564,6 +588,7 @@ export function useEditor(
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
+    arrange,
     deleteSelection,
     duplicateSelection,
     enabled,
@@ -720,6 +745,8 @@ export function useEditor(
     recolourSelection,
     deleteSelection,
     duplicateSelection,
+    arrange,
+    canArrange,
     canUndo: canUndo(history),
     canRedo: canRedo(history),
     undo,

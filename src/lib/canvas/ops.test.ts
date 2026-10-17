@@ -14,9 +14,11 @@ import type {
   TileItem,
   Zone,
 } from "@/lib/canvas/model";
-import type { CanvasState } from "@/lib/canvas/ops";
+import type { CanvasOp, CanvasState } from "@/lib/canvas/ops";
 import {
+  ARRANGE_ACTIONS,
   addItems,
+  arrangeItems,
   lineItems,
   paintItems,
   penItems,
@@ -820,5 +822,150 @@ describe("ratio 1 (the space-less cell)", () => {
       tileKey(4, 0, 0),
     ]);
     expect(items.every((item) => item.color === config.ink)).toBe(true);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* arrangeItems                                                        */
+/* ------------------------------------------------------------------ */
+
+describe("arrangeItems", () => {
+  /** A five-item stack: the array order is the z-order, last on top. */
+  const stack: readonly CanvasItem[] = [
+    tile(0, 0, 0),
+    tile(1, 0, 0),
+    tile(2, 0, 0),
+    tile(3, 0, 0),
+    tile(4, 0, 0),
+  ];
+  const [a, b, c, d, e] = stack;
+  const ids = (items: readonly CanvasItem[]) => items.map((item) => item.key);
+  const select = (...items: CanvasItem[]) => items.map((item) => item.key);
+
+  it("moves a single selected item to the front or the back", () => {
+    expect(ids(arrangeItems(stack, select(c), "front"))).toEqual(
+      ids([a, b, d, e, c]),
+    );
+    expect(ids(arrangeItems(stack, select(c), "back"))).toEqual(
+      ids([c, a, b, d, e]),
+    );
+  });
+
+  it("steps a single selected item one slot forward or backward", () => {
+    expect(ids(arrangeItems(stack, select(c), "forward"))).toEqual(
+      ids([a, b, d, c, e]),
+    );
+    expect(ids(arrangeItems(stack, select(c), "backward"))).toEqual(
+      ids([a, c, b, d, e]),
+    );
+  });
+
+  it("moves a contiguous block as one block", () => {
+    // The block [c, d] crosses `b` forward…
+    expect(ids(arrangeItems([a, c, d, b, e], select(c, d), "forward"))).toEqual(
+      ids([a, b, c, d, e]),
+    );
+    // …and crosses `a` backward.
+    expect(ids(arrangeItems([a, c, d, b, e], select(c, d), "backward"))).toEqual(
+      ids([c, d, a, b, e]),
+    );
+    // To the extremes the block stays whole, in order.
+    expect(ids(arrangeItems([c, d, a, b, e], select(c, d), "front"))).toEqual(
+      ids([a, b, e, c, d]),
+    );
+    expect(ids(arrangeItems([a, b, e, c, d], select(c, d), "back"))).toEqual(
+      ids([c, d, a, b, e]),
+    );
+  });
+
+  it("steps non-contiguous selected items independently, keeping their order", () => {
+    expect(ids(arrangeItems(stack, select(b, d), "front"))).toEqual(
+      ids([a, c, e, b, d]),
+    );
+    expect(ids(arrangeItems(stack, select(b, d), "back"))).toEqual(
+      ids([b, d, a, c, e]),
+    );
+    expect(ids(arrangeItems(stack, select(b, d), "forward"))).toEqual(
+      ids([a, c, b, e, d]),
+    );
+    expect(ids(arrangeItems(stack, select(b, d), "backward"))).toEqual(
+      ids([b, a, d, c, e]),
+    );
+  });
+
+  it("returns the same list when nothing can move", () => {
+    expect(arrangeItems(stack, select(a, b), "back")).toBe(stack);
+    expect(arrangeItems(stack, select(d, e), "front")).toBe(stack);
+    expect(arrangeItems(stack, select(e), "forward")).toBe(stack);
+    expect(arrangeItems(stack, select(a), "backward")).toBe(stack);
+    for (const action of ARRANGE_ACTIONS) {
+      expect(arrangeItems(stack, select(a, b, c, d, e), action)).toBe(stack);
+    }
+  });
+
+  it("is idempotent at the extreme and keeps stepping while there is room", () => {
+    const toFront = arrangeItems(stack, select(b, c), "front");
+    expect(arrangeItems(toFront, select(b, c), "front")).toBe(toFront);
+    const toBack = arrangeItems(stack, select(b, c), "back");
+    expect(arrangeItems(toBack, select(b, c), "back")).toBe(toBack);
+    // A single step keeps stepping until the item is on top, then stops.
+    const once = arrangeItems(stack, select(c), "forward");
+    const twice = arrangeItems(once, select(c), "forward");
+    expect(ids(once)).toEqual(ids([a, b, d, c, e]));
+    expect(ids(twice)).toEqual(ids([a, b, d, e, c]));
+    expect(arrangeItems(twice, select(c), "forward")).toBe(twice);
+  });
+
+  it("ignores an empty list, an empty selection and unknown keys", () => {
+    const empty: readonly CanvasItem[] = [];
+    expect(arrangeItems(empty, [a.key], "front")).toBe(empty);
+    expect(arrangeItems(stack, [], "front")).toBe(stack);
+    expect(arrangeItems(stack, ["ghost"], "forward")).toBe(stack);
+    expect(ids(arrangeItems(stack, [b.key, "ghost"], "front"))).toEqual(
+      ids([a, c, d, e, b]),
+    );
+  });
+
+  it("never mutates its inputs and keeps the item objects", () => {
+    const before = [...stack];
+    const next = arrangeItems(stack, select(b), "front");
+    // The input list is untouched (same objects, same order)…
+    expect(stack).toEqual(before);
+    // …and the result reuses the item objects, so React memos can skip them.
+    for (const item of next) {
+      expect(stack.includes(item)).toBe(true);
+    }
+  });
+
+  it("round-trips through the backend's applyOps semantics", () => {
+    // Mirrors `projects.applyOps`: a `Map`'s insertion order is the stored
+    // order, `remove` deletes and `add` appends, so if the diff `toOps` emits
+    // for an arrange reproduces the arranged list here, it does on the server
+    // too.
+    const applyOpsLocally = (items: readonly CanvasItem[], ops: CanvasOp[]) => {
+      const map = new Map<string, CanvasItem>();
+      for (const item of items) map.set(item.key, item);
+      for (const op of ops) {
+        if (op.type === "remove") {
+          for (const key of op.keys) map.delete(key);
+        } else if (op.type === "add") {
+          for (const item of op.items) {
+            if (!map.has(item.key)) map.set(item.key, item);
+          }
+        } else {
+          map.clear();
+          for (const item of op.items) {
+            if (!map.has(item.key)) map.set(item.key, item);
+          }
+        }
+      }
+      return [...map.values()];
+    };
+
+    for (const action of ARRANGE_ACTIONS) {
+      const next = arrangeItems(stack, select(b, d), action);
+      expect(toOps(stack, next)).not.toEqual([]);
+      expect(ids(applyOpsLocally(stack, toOps(stack, next)))).toEqual(ids(next));
+    }
   });
 });

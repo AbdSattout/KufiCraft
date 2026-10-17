@@ -913,6 +913,36 @@ describe("applyOps", () => {
     expect(doc.items.map((item) => item.key)).toEqual([d.key, e.key, f.key]);
   });
 
+  it("re-appends removed keys in the batch's order (the arrange contract)", async () => {
+    const t = newTest();
+    const asA = t.withIdentity(USER_A);
+    const projectId = await createProject(t, USER_A);
+    const a = tile(0, 0, 0);
+    const b = tile(1, 0, 0);
+    const c = tile(2, 0, 0);
+    await asA.mutation(api.projects.applyOps, {
+      projectId,
+      ops: [{ type: "add", items: [a, b, c] }],
+    });
+
+    // `toOps` diffs a reorder into a `remove` + `add` of the tail; the document
+    // must come out exactly in the order the add lists, because that is what
+    // the arrange commands (docs/CANVAS.md §3) rely on.
+    await asA.mutation(api.projects.applyOps, {
+      projectId,
+      ops: [
+        { type: "remove", keys: [a.key, b.key, c.key] },
+        { type: "add", items: [c, b, a] },
+      ],
+    });
+
+    const doc = required(
+      await asA.query(api.projects.get, { projectId }),
+      "project should exist",
+    );
+    expect(doc.items.map((item) => item.key)).toEqual([c.key, b.key, a.key]);
+  });
+
   it("returns itemCount/updatedAt and persists them", async () => {
     const t = newTest();
     const asA = t.withIdentity(USER_A);

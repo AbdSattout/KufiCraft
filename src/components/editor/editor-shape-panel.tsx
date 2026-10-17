@@ -12,11 +12,29 @@
  * selected there is no “التحديد” block and no disabled buttons.
  */
 
-import { Copy, PaintBucket, RotateCw, Trash2 } from "lucide-react";
+import {
+  BringToFront,
+  ChevronDown,
+  ChevronUp,
+  Copy,
+  Layers,
+  PaintBucket,
+  RotateCw,
+  SendToBack,
+  Trash2,
+} from "lucide-react";
 import { useMemo } from "react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuShortcut,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { tileIconPath } from "@/lib/canvas/items";
 import type { Rotation, ShapeId } from "@/lib/canvas/model";
+import type { ArrangeAction } from "@/lib/canvas/ops";
 import { MESSAGES } from "./messages";
 import { formatCount } from "./editor-palette";
 import { PanelSection } from "./editor-controls";
@@ -53,7 +71,39 @@ export interface ShapePanelProps {
   recolourSelection: (color: string) => void;
   duplicateSelection: () => void;
   deleteSelection: () => void;
+  /** Moves the selection in the render order. */
+  arrange: (action: ArrangeAction) => void;
+  /** Per-action no-op detection (disabled menu items). */
+  canArrange: (action: ArrangeAction) => boolean;
 }
+
+/** The arrange commands in Illustrator/Figma order, with their key hints. */
+const ARRANGE_ITEMS = [
+  {
+    action: "front",
+    label: MESSAGES.bringToFront,
+    hint: "Ctrl+Shift+]",
+    Icon: BringToFront,
+  },
+  {
+    action: "forward",
+    label: MESSAGES.bringForward,
+    hint: "Ctrl+]",
+    Icon: ChevronUp,
+  },
+  {
+    action: "backward",
+    label: MESSAGES.sendBackward,
+    hint: "Ctrl+[",
+    Icon: ChevronDown,
+  },
+  {
+    action: "back",
+    label: MESSAGES.sendToBack,
+    hint: "Ctrl+Shift+[",
+    Icon: SendToBack,
+  },
+] as const;
 
 export function ShapePanel({
   style,
@@ -64,6 +114,8 @@ export function ShapePanel({
   recolourSelection,
   duplicateSelection,
   deleteSelection,
+  arrange,
+  canArrange,
 }: ShapePanelProps) {
   return (
     <PanelSection title={MESSAGES.shapes}>
@@ -115,6 +167,33 @@ export function ShapePanel({
               <Copy />
               {MESSAGES.duplicateSelection}
             </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                disabled={
+                  selectionCount === 0 ||
+                  ARRANGE_ITEMS.every(({ action }) => !canArrange(action))
+                }
+                render={
+                  <Button variant="outline" size="sm">
+                    <Layers />
+                    {MESSAGES.arrange}
+                  </Button>
+                }
+              />
+              <DropdownMenuContent align="start">
+                {ARRANGE_ITEMS.map(({ action, label, hint, Icon }) => (
+                  <DropdownMenuItem
+                    key={action}
+                    disabled={!canArrange(action)}
+                    onClick={() => arrange(action)}
+                  >
+                    <Icon />
+                    {label}
+                    <DropdownMenuShortcut dir="ltr">{hint}</DropdownMenuShortcut>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button variant="outline" size="sm" onClick={deleteSelection}>
               <Trash2 />
               {MESSAGES.deleteSelection}

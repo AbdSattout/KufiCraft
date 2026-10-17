@@ -80,6 +80,8 @@ function Panels({ editor }: { editor: EditorController }) {
         recolourSelection={editor.recolourSelection}
         duplicateSelection={editor.duplicateSelection}
         deleteSelection={editor.deleteSelection}
+        arrange={editor.arrange}
+        canArrange={editor.canArrange}
       />
       <Separator />
       <SettingsPanel
