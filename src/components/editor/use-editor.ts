@@ -37,6 +37,7 @@ import {
 } from "@/lib/editor-prefs";
 import { downloadProjectFile } from "@/lib/kuficraft-file";
 import {
+  DEFAULT_STYLE,
   clientToViewBox,
   clampToCanvas,
   deleteItems,
@@ -107,8 +108,10 @@ export interface EditorController {
   inkSwatches: readonly string[];
   selectShape: (shape: ShapeId) => void;
   rotateShape: () => void;
-  setDrawColor: (color: string) => void;
-  resetDrawColor: () => void;
+  /** Back to the plain square, upright (the palette's escape hatch). */
+  resetShape: () => void;
+  /** The ink colour is the pen's colour *and* the project's ink. */
+  setInkColor: (color: string) => void;
 
   selection: readonly string[];
   setSelection: (keys: readonly string[]) => void;
@@ -158,7 +161,7 @@ export function useEditor(
   );
 
   const document = useEditorDocument(projectId, enabled);
-  const { config, items, commitItems } = document;
+  const { config, items, commitItems, patchConfig } = document;
 
   // Prefs are read synchronously on mount so the editor opens the way the
   // designer left it; the project `config` stays authoritative for rendering.
@@ -167,7 +170,6 @@ export function useEditor(
   const [style, setStyle] = useState<DrawStyle>({
     shape: initialPrefs.shape,
     rotation: initialPrefs.rotation,
-    color: undefined,
   });
   const [arc, setArc] = useState<ArcStyle>(initialPrefs.arc);
   const [inkSwatches, setInkSwatches] = useState<readonly string[]>(
@@ -344,14 +346,26 @@ export function useEditor(
     }
   }, [applyCommit, items, selection, style.rotation]);
 
-  const setDrawColor = useCallback((color: string) => {
-    setStyle((previous) => ({ ...previous, color }));
-    setInkSwatches((previous) => rememberInkSwatch(previous, color));
-  }, []);
+  const resetShape = useCallback(() => {
+    const patch = { shape: DEFAULT_STYLE.shape, rotation: DEFAULT_STYLE.rotation };
+    setStyle((previous) => ({ ...previous, ...patch }));
+    if (selection.length > 0) {
+      applyCommit(reshapeItems(items, selection, patch), "شكل", selection);
+    }
+  }, [applyCommit, items, selection]);
 
-  const resetDrawColor = useCallback(() => {
-    setStyle((previous) => ({ ...previous, color: undefined }));
-  }, []);
+  /**
+   * The ink colour is a project field, so the panel writes it through the
+   * document; the swatch history rides along because it is a UI preference.
+   * Items keep the colour they were drawn with (docs/CANVAS.md §Editing).
+   */
+  const setInkColor = useCallback(
+    (color: string) => {
+      setInkSwatches((previous) => rememberInkSwatch(previous, color));
+      patchConfig({ ink: color });
+    },
+    [patchConfig],
+  );
 
   const setArcDirection = useCallback((direction: ArcDirection) => {
     setArc((previous) => ({ ...previous, direction }));
@@ -555,7 +569,7 @@ export function useEditor(
     name: document.name,
     rename: document.rename,
     config,
-    patchConfig: document.patchConfig,
+    patchConfig,
     previewConfig: document.previewConfig,
     items,
     saving: document.saving,
@@ -568,8 +582,8 @@ export function useEditor(
     inkSwatches,
     selectShape,
     rotateShape,
-    setDrawColor,
-    resetDrawColor,
+    resetShape,
+    setInkColor,
     selection,
     setSelection,
     clearSelection,

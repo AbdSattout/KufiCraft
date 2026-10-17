@@ -20,6 +20,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useConvexAuth } from "convex/react";
 import { ArrowRight, FileQuestion } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
 import {
   Empty,
   EmptyContent,
@@ -68,22 +69,24 @@ function resolveItems(
 function Panels({ editor }: { editor: EditorController }) {
   return (
     <>
+      {/* What you draw with, then the board it is drawn on. */}
       <ShapePanel
         style={editor.style}
         inkColor={editor.config.ink}
-        recentSwatches={editor.inkSwatches}
         selectionCount={editor.selection.length}
         selectShape={editor.selectShape}
         rotateShape={editor.rotateShape}
-        setDrawColor={editor.setDrawColor}
-        resetDrawColor={editor.resetDrawColor}
+        resetShape={editor.resetShape}
         recolourSelection={editor.recolourSelection}
         duplicateSelection={editor.duplicateSelection}
         deleteSelection={editor.deleteSelection}
       />
+      <Separator />
       <SettingsPanel
         config={editor.config}
+        inkSwatches={editor.inkSwatches}
         itemsCount={editor.items.length}
+        setInkColor={editor.setInkColor}
         patchConfig={editor.patchConfig}
         previewConfig={editor.previewConfig}
         clearAll={editor.clearAll}

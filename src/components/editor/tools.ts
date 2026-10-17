@@ -408,7 +408,6 @@ class PenTool extends KufiTool {
     return penItems(ctx.config, anchors, {
       shape: ctx.style.shape,
       rotation: ctx.style.rotation,
-      color: ctx.style.color,
       mergeLines: ctx.config.mergeLines,
     });
   }
@@ -480,7 +479,7 @@ class LineTool extends KufiTool {
     points: readonly Cell[],
     closed: boolean,
   ): ToolOutcome {
-    const items = lineItems(ctx.config, points, closed, ctx.style.color);
+    const items = lineItems(ctx.config, points, closed);
     if (items.length === 0) return { state: NO_STATE };
     const next = addItems({ items: ctx.items }, items).items;
     if (next === ctx.items) return { state: NO_STATE };
@@ -511,13 +510,7 @@ class LineTool extends KufiTool {
     if (state.kind !== "line" || state.points.length === 0) return EMPTY_PREVIEW;
     const first = state.points[0];
     return {
-      items: linePreview(
-        ctx.config,
-        state.points,
-        state.hover,
-        false,
-        ctx.style.color,
-      ),
+      items: linePreview(ctx.config, state.points, state.hover, false),
       mode: "ghost",
       keys: [],
       marquee: null,

@@ -83,21 +83,31 @@ Shape palette (applies to the next drawn tiles and to the current selection):
 square, circle, triangle, quarter circle, semicircle, pentagon, curve, hamza1,
 hamza2, comb — ten glyphs, each drawn by the same `KufiShape` that paints the
 canvas fragment, so the palette icon **respects the current rotation**
-(`tileIconPath`) (+ rotation button cycling quarter turns, + “شكل” reset to
-square).
+(`tileIconPath`) (+ rotation button cycling quarter turns, + “إعادة الشكل”,
+which appears only once shape/rotation differ from the plain square).
+With something selected the same section reveals the selection actions
+(«التحديد»: recolour with the ink colour, duplicate, delete) — with nothing
+selected they are absent, not disabled.
 
-Settings panel: نسبة الحبر as the five presets `1:1`…`1:5` (live re-render; the
+Sidebar, top to bottom: الأشكال (palette + selection), لون الحبر, لون الورقة,
+then the board — نسبة الحبر as the five presets `1:1`…`1:5` (live re-render; the
 `1:1` hint explains that the ink fills the whole cell and the grid shows no inner
-edges), حجم الخلية
-(`base`), لون الحبر (color input + swatch row), لون الورقة (background),
-إظهار الشبكة (toggle — two families: cell borders plus the stronger inner ink
-edges), دمج الخطوط (toggle), نوع الشبكة (square/circular —
-switching warns that existing items may look odd), مسح الكل (confirm).
+edges), حجم الخلية (`base`), نوع الشبكة (square/circular — switching warns that
+existing items may look odd; the hint explains what each type is), خيارات اللوحة
+(إظهار الشبكة — two families: cell borders plus the stronger inner ink edges —
+and دمج الخطوط) — and مسح الكل at the end (confirm).
+
+There is exactly **one** colour control for drawing: لون الحبر is the project's
+ink *and* the pen's colour. لون الورقة next to it is the board's background.
+A second “لون الرسم” picker was removed on purpose: the pen paints with the
+project ink, and a per-item colour change happens through «تلوين بلون الحبر» on
+a selection.
 
 Editing ops on selection: move (drag, items keep relative offsets; anchors snap
-to grid), recolour (choose colour → set the item’s own `color`), reshape
-(shape + rotation), delete, duplicate (`Ctrl+D`). A fragment keeps the colour it
-was drawn with: changing لون الحبر never repaints existing items.
+to grid), recolour (the selection takes the current ink colour → set the item’s
+own `color`), reshape (shape + rotation), delete, duplicate (`Ctrl+D`). A
+fragment keeps the colour it was drawn with: changing لون الحبر never repaints
+existing items.
 
 Persistence: every completed gesture → one `api.projects.applyOps` call with a
 `clientMutationId`-free batch; cursor local state only; project fetched with

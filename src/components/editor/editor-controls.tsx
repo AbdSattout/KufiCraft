@@ -123,8 +123,11 @@ export interface ColourFieldProps {
   colors: readonly string[];
   onPick: (color: string) => void;
   labelFor: (color: string) => string;
-  /** Extra action rendered next to the input. */
-  action?: ReactNode;
+  /**
+   * Hides the inline label (kept for screen readers) when the surrounding
+   * section heading already names the control.
+   */
+  hideLabel?: boolean;
 }
 
 export function ColourField({
@@ -133,7 +136,7 @@ export function ColourField({
   colors,
   onPick,
   labelFor,
-  action,
+  hideLabel = false,
 }: ColourFieldProps) {
   /** `null` until the picker moves — then the row follows the picker live. */
   const [draft, setDraft] = useState<string | null>(null);
@@ -158,7 +161,9 @@ export function ColourField({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2">
-        <span className="text-sm text-muted-foreground">{label}</span>
+        <span className={cn("text-sm text-muted-foreground", hideLabel && "sr-only")}>
+          {label}
+        </span>
         <Input
           type="color"
           value={shown}
@@ -169,7 +174,6 @@ export function ColourField({
         <span className="truncate text-xs text-muted-foreground/80" dir="ltr">
           {shown.toUpperCase()}
         </span>
-        {action ? <span className="ms-auto">{action}</span> : null}
       </div>
       <SwatchRow
         colors={colors}

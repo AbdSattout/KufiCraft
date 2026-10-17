@@ -84,6 +84,13 @@ backend) · Better Auth (passkeys, local-install component) · Bun · vitest.
   `kufi.js` and now exposes direction + size controls with butt/mitre heads.
 * Colour is **per fragment** (`resolvedColor`), so changing the document ink
   never repaints what is already drawn; the toolbar shape icons respect rotation.
+* The sidebar was reorganised: **one** colour control (`لون الحبر` is the pen's
+  colour *and* the project ink; the separate “لون الرسم” picker and its inline
+  “لون الحبر” reset button are gone), the shapes section title no longer collides
+  with the grid-type word (the always-on “مربعة” reset became a contextual
+  “إعادة الشكل”), the selection actions appear only with a selection instead of
+  a disabled block, and the panels read top-to-bottom as drawing → colours →
+  board → wipe (`docs/UI.md`).
 * The ink ratio now reads `1:1 … 1:5` where **`1:1` is the space-less mono cell**
   (ink fills the whole cell); `MIN_RATIO`/`MAX_RATIO` are the numeric extremes.
   The construction grid is two families: whole-cell borders (0.28) plus the

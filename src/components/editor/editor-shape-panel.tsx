@@ -1,21 +1,25 @@
 "use client";
 
 /**
- * KufiCraft — shape / colour / selection panel.
+ * KufiCraft — shape palette (and the selection it acts on).
  *
- * The shape palette feeds the next drawn tiles *and* reshapes the current
- * selection (docs/UI.md §Editor); rotation cycles `r` in quarter turns and
- * the draw colour becomes the items' colour override.
+ * One section, two jobs: the palette feeds the next drawn tiles *and* reshapes
+ * the current selection (docs/UI.md §Editor) — rotation cycles `r` in quarter
+ * turns, and “إعادة الشكل” only appears once the style differs from the plain
+ * square so the panel never carries a button nobody can explain.
+ *
+ * The selection actions are revealed by the selection itself: with nothing
+ * selected there is no “التحديد” block and no disabled buttons.
  */
 
-import { Copy, RotateCw, Trash2 } from "lucide-react";
+import { Copy, PaintBucket, RotateCcw, RotateCw, Trash2 } from "lucide-react";
 import { useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { tileIconPath } from "@/lib/canvas/items";
 import type { Rotation, ShapeId } from "@/lib/canvas/model";
 import { MESSAGES } from "./messages";
-import { INK_SWATCHES, formatCount, swatchLabel } from "./editor-palette";
-import { ColourField, PanelSection } from "./editor-controls";
+import { formatCount } from "./editor-palette";
+import { PanelSection } from "./editor-controls";
 import { SHAPE_LABELS, SHAPE_ORDER } from "./interaction";
 import type { DrawStyle } from "./interaction";
 
@@ -41,14 +45,12 @@ function ShapeGlyph({
 
 export interface ShapePanelProps {
   style: DrawStyle;
+  /** The ink colour, used by “تلوين التحديد”. */
   inkColor: string;
-  /** Recent ink colours (most-recent-first) shown ahead of the defaults. */
-  recentSwatches: readonly string[];
   selectionCount: number;
   selectShape: (shape: ShapeId) => void;
   rotateShape: () => void;
-  setDrawColor: (color: string) => void;
-  resetDrawColor: () => void;
+  resetShape: () => void;
   recolourSelection: (color: string) => void;
   duplicateSelection: () => void;
   deleteSelection: () => void;
@@ -57,140 +59,90 @@ export interface ShapePanelProps {
 export function ShapePanel({
   style,
   inkColor,
-  recentSwatches,
   selectionCount,
   selectShape,
   rotateShape,
-  setDrawColor,
-  resetDrawColor,
+  resetShape,
   recolourSelection,
   duplicateSelection,
   deleteSelection,
 }: ShapePanelProps) {
-  const drawColor = style.color ?? inkColor;
-  const swatches = useMemo(() => {
-    const seen = new Set<string>();
-    const merged: string[] = [];
-    for (const color of [...recentSwatches, ...INK_SWATCHES]) {
-      const key = color.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      merged.push(color);
-    }
-    return merged;
-  }, [recentSwatches]);
+  const customised = style.shape !== "square" || style.rotation !== 0;
 
   return (
-    <>
-      <PanelSection title={MESSAGES.shapes}>
-        <div className="grid grid-cols-5 gap-1">
-          {SHAPE_ORDER.map((shape, index) => (
-            <Button
-              key={shape}
-              variant={style.shape === shape ? "secondary" : "outline"}
-              size="icon"
-              aria-pressed={style.shape === shape}
-              aria-label={`${SHAPE_LABELS[shape]} (${index + 1})`}
-              title={`${SHAPE_LABELS[shape]} (${index + 1})`}
-              onClick={() => selectShape(shape)}
-            >
-              <ShapeGlyph shape={shape} rotation={style.rotation} />
-            </Button>
-          ))}
-        </div>
-        <div className="flex items-center gap-1.5">
+    <PanelSection title={MESSAGES.shapes}>
+      <div className="grid grid-cols-5 gap-1">
+        {SHAPE_ORDER.map((shape, index) => (
           <Button
-            variant="outline"
-            size="sm"
-            className="flex-1"
-            aria-label={`${MESSAGES.rotate} ${style.rotation * 90}°`}
-            onClick={rotateShape}
+            key={shape}
+            variant={style.shape === shape ? "secondary" : "outline"}
+            size="icon"
+            aria-pressed={style.shape === shape}
+            aria-label={`${SHAPE_LABELS[shape]} (${index + 1})`}
+            title={`${SHAPE_LABELS[shape]} (${index + 1})`}
+            onClick={() => selectShape(shape)}
           >
-            <RotateCw />
-            {MESSAGES.rotate}
-            <span className="tabular-nums text-muted-foreground">
-              {style.rotation * 90}°
-            </span>
+            <ShapeGlyph shape={shape} rotation={style.rotation} />
           </Button>
+        ))}
+      </div>
+
+      <div className="flex items-center gap-1.5">
+        <Button
+          variant="outline"
+          size="sm"
+          className="flex-1"
+          aria-label={`${MESSAGES.rotate} ${style.rotation * 90}°`}
+          onClick={rotateShape}
+        >
+          <RotateCw />
+          {MESSAGES.rotate}
+          <span className="tabular-nums text-muted-foreground">
+            {style.rotation * 90}°
+          </span>
+        </Button>
+        {customised ? (
           <Button
             variant="ghost"
             size="sm"
             aria-label={MESSAGES.resetShape}
-            title={MESSAGES.resetShape}
-            onClick={() => selectShape("square")}
+            title={MESSAGES.resetShapeHint}
+            onClick={resetShape}
           >
-            {MESSAGES.gridSquare}
-          </Button>
-        </div>
-      </PanelSection>
-
-      <PanelSection title={MESSAGES.drawColor}>
-        <p className="text-xs text-muted-foreground/80">
-          {MESSAGES.drawColorHint}
-        </p>
-        <ColourField
-          label={MESSAGES.drawColor}
-          value={drawColor}
-          colors={swatches}
-          onPick={setDrawColor}
-          labelFor={(color) => swatchLabel(MESSAGES.drawColor, color)}
-          action={
-            <Button
-              variant="ghost"
-              size="xs"
-              aria-label={MESSAGES.inkColor}
-              onClick={resetDrawColor}
-            >
-              {MESSAGES.inkColor}
-            </Button>
-          }
-        />
-        {selectionCount > 0 ? (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => recolourSelection(drawColor)}
-          >
-            {MESSAGES.applyToSelection}
-            <span className="tabular-nums text-muted-foreground">
-              {formatCount(selectionCount)}
-            </span>
+            <RotateCcw />
+            {MESSAGES.resetShape}
           </Button>
         ) : null}
-      </PanelSection>
+      </div>
 
-      <PanelSection title={MESSAGES.selection}>
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-muted-foreground">
-            {selectionCount > 0
-              ? `${MESSAGES.selectedCount} ${formatCount(selectionCount)}`
-              : "—"}
-          </span>
+      {selectionCount > 0 ? (
+        <div className="flex flex-col gap-2 border-t border-border/60 pt-2">
+          <p className="text-xs text-muted-foreground">
+            {`${MESSAGES.selection} · ${MESSAGES.selectedCount} ${formatCount(selectionCount)}`}
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => recolourSelection(inkColor)}
+            >
+              <PaintBucket />
+              {MESSAGES.recolourSelection}
+            </Button>
+            <Button variant="outline" size="sm" onClick={duplicateSelection}>
+              <Copy />
+              {MESSAGES.duplicateSelection}
+            </Button>
+            <Button variant="outline" size="sm" onClick={deleteSelection}>
+              <Trash2 />
+              {MESSAGES.deleteSelection}
+              <kbd className="ms-1 rounded border border-border/70 px-1 text-[0.65rem] text-muted-foreground">
+                Del
+              </kbd>
+            </Button>
+          </div>
         </div>
-        <div className="flex flex-wrap gap-1.5">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={selectionCount === 0}
-            onClick={duplicateSelection}
-          >
-            <Copy />
-            {MESSAGES.duplicateSelection}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={selectionCount === 0}
-            onClick={deleteSelection}
-          >
-            <Trash2 />
-            {MESSAGES.deleteSelection}
-            <kbd className="ms-1 rounded border border-border/70 px-1 text-[0.65rem] text-muted-foreground">
-              Del
-            </kbd>
-          </Button>
-        </div>
-      </PanelSection>
-    </>
+      ) : null}
+    </PanelSection>
   );
 }

@@ -77,18 +77,22 @@ export function nextRotation(rotation: Rotation): Rotation {
   return ((((rotation + 1) % 4) + 4) % 4) as Rotation;
 }
 
-/** Style of the items drawn next (also applied to a selection on demand). */
+/**
+ * Style of the tiles drawn next (also applied to a selection on demand).
+ *
+ * There is no colour here: the pen paints with the project's ink colour
+ * (`config.ink`), and every fragment stores the colour it was drawn with, so
+ * picking a new ink never repaints what is already on the canvas
+ * (docs/CANVAS.md §Items + §Editing).
+ */
 export interface DrawStyle {
   shape: ShapeId;
   rotation: Rotation;
-  /** `undefined` → the project ink colour. */
-  color: string | undefined;
 }
 
 export const DEFAULT_STYLE: DrawStyle = {
   shape: "square",
   rotation: 0,
-  color: undefined,
 };
 
 /** Style of the next arc (the old app's direction radios + the size option). */
@@ -498,22 +502,26 @@ export function arcBetween(
     to,
     direction: ctx.arc.direction,
     size: ctx.arc.size,
-    color: ctx.style.color ?? ctx.config.ink,
+    color: ctx.config.ink,
   });
 }
 
-/** Line-tool items for a polyline plus the cell under the cursor. */
+/**
+ * Line-tool items for a polyline plus the cell under the cursor.
+ *
+ * The run paints with the project ink colour; the fragments keep their own
+ * copy of it, so later ink changes leave the committed run alone.
+ */
 export function linePreview(
   config: ProjectConfig,
   points: readonly Cell[],
   hover: Cell | null,
   closed: boolean,
-  color: string | undefined,
 ): CanvasItem[] {
   if (points.length === 0) return [];
   const path = hover === null ? [...points] : [...points, hover];
   if (path.length < 2) return [];
-  return lineItems(config, path, closed, color);
+  return lineItems(config, path, closed);
 }
 
 /* Anchor identity helpers used by the pen's de-duplication. */

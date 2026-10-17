@@ -432,7 +432,7 @@ describe("selection operations", () => {
 });
 
 describe("arcBetween + linePreview", () => {
-  it("takes direction / size from the context and the ink when no colour is set", () => {
+  it("takes direction / size from the arc style and the colour from the ink", () => {
     const ctx = context({
       arc: { direction: "counterclockwise", size: "threeQuarter" },
     });
@@ -455,8 +455,8 @@ describe("arcBetween + linePreview", () => {
     );
   });
 
-  it("resolves the tool colour when one is set", () => {
-    const ctx = context({ style: { ...DEFAULT_STYLE, color: "#ff0000" } });
+  it("paints with the project ink colour", () => {
+    const ctx = context({ config: { ...square, ink: "#ff0000" } });
     const arc = arcBetween(ctx, { column: 0, row: 0 }, { column: 0, row: 4 });
     expect(arc).toMatchObject({ color: "#ff0000" });
   });
@@ -473,9 +473,9 @@ describe("arcBetween + linePreview", () => {
   });
 
   it("is empty below two points", () => {
-    expect(linePreview(square, [], null, false, undefined)).toEqual([]);
+    expect(linePreview(square, [], null, false)).toEqual([]);
     expect(
-      linePreview(square, [{ column: 1, row: 1 }], null, false, undefined),
+      linePreview(square, [{ column: 1, row: 1 }], null, false),
     ).toEqual([]);
   });
 
@@ -485,7 +485,6 @@ describe("arcBetween + linePreview", () => {
       [{ column: 1, row: 1 }],
       { column: 3, row: 1 },
       false,
-      undefined,
     );
     expect(preview).toHaveLength(1);
     expect(preview[0]).toMatchObject({
@@ -501,10 +500,10 @@ describe("arcBetween + linePreview", () => {
       { column: 0, row: 0 },
       { column: 3, row: 3 },
     ];
-    const open = linePreview(square, points, null, false, undefined);
+    const open = linePreview(square, points, null, false);
     expect(open[0]).toMatchObject({ type: "stroke", color: square.ink });
     expect((open[0] as StrokeItem).closed).toBeFalsy();
-    const closed = linePreview(square, points, null, true, undefined);
+    const closed = linePreview(square, points, null, true);
     expect((closed[0] as StrokeItem).closed).toBe(true);
   });
 });

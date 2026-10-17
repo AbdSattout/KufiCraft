@@ -3,12 +3,15 @@
 /**
  * KufiCraft — project settings panel.
  *
- * Ink ratio as the five presets `1:1`…`1:5` (live re-render), cell size, ink /
- * paper colours, grid + merge toggles, the grid-type switch (warned, because
- * existing items are re-interpreted) and “مسح الكل” behind a confirm dialog.
+ * Ordered the way the sidebar reads: the two colours first (لون الحبر is the
+ * pen's colour, so it sits right under the shape palette; لون الورقة is the
+ * board's background), then the ink ratio as the five presets `1:1`…`1:5`
+ * (live re-render), the cell size, the grid-type switch (warned, because
+ * existing items are re-interpreted), the board toggles, and finally “مسح الكل”
+ * behind a confirm dialog.
  */
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -36,11 +39,31 @@ const MAX_BASE = 100;
 
 export interface SettingsPanelProps {
   config: ProjectConfig;
+  /** Recent ink colours, most-recent-first (shown ahead of the defaults). */
+  inkSwatches: readonly string[];
   itemsCount: number;
+  /** Sets the project ink (the colour the pen paints with). */
+  setInkColor: (color: string) => void;
   patchConfig: (patch: Partial<ProjectConfig>) => void;
   /** Live, mutation-free update while a slider is dragged. */
   previewConfig: (patch: Partial<ProjectConfig>) => void;
   clearAll: () => void;
+}
+
+/** The recent colours first, then the defaults, without duplicates. */
+function mergedSwatches(
+  recent: readonly string[],
+  defaults: readonly string[],
+): string[] {
+  const seen = new Set<string>();
+  const merged: string[] = [];
+  for (const color of [...recent, ...defaults]) {
+    const key = color.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(color);
+  }
+  return merged;
 }
 
 function ToggleRow({
@@ -71,13 +94,20 @@ function ToggleRow({
 
 export function SettingsPanel({
   config,
+  inkSwatches,
   itemsCount,
+  setInkColor,
   patchConfig,
   previewConfig,
   clearAll,
 }: SettingsPanelProps) {
   const [pendingGridType, setPendingGridType] = useState<GridType | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
+
+  const swatches = useMemo(
+    () => mergedSwatches(inkSwatches, INK_SWATCHES),
+    [inkSwatches],
+  );
 
   const requestGridType = (next: GridType) => {
     if (next === config.gridType) return;
@@ -92,6 +122,33 @@ export function SettingsPanel({
 
   return (
     <>
+      <PanelSection title={MESSAGES.inkColor}>
+        <p className="text-xs text-muted-foreground/80">
+          {MESSAGES.inkColorHint}
+        </p>
+        <ColourField
+          label={MESSAGES.inkColor}
+          value={config.ink}
+          colors={swatches}
+          onPick={setInkColor}
+          labelFor={(color) => swatchLabel(MESSAGES.inkColor, color)}
+          hideLabel
+        />
+      </PanelSection>
+
+      <PanelSection title={MESSAGES.paperColor}>
+        <ColourField
+          label={MESSAGES.paperColor}
+          value={config.background}
+          colors={PAPER_SWATCHES}
+          onPick={(color) => patchConfig({ background: color })}
+          labelFor={(color) => swatchLabel(MESSAGES.paperColor, color)}
+          hideLabel
+        />
+      </PanelSection>
+
+      <Separator />
+
       <PanelSection title={MESSAGES.inkRatio}>
         <ToggleGroup
           aria-label={MESSAGES.inkRatio}
@@ -134,43 +191,6 @@ export function SettingsPanel({
         </p>
       </PanelSection>
 
-      <PanelSection title={MESSAGES.inkColor}>
-        <ColourField
-          label={MESSAGES.inkColor}
-          value={config.ink}
-          colors={INK_SWATCHES}
-          onPick={(color) => patchConfig({ ink: color })}
-          labelFor={(color) => swatchLabel(MESSAGES.inkColor, color)}
-        />
-      </PanelSection>
-
-      <PanelSection title={MESSAGES.paperColor}>
-        <ColourField
-          label={MESSAGES.paperColor}
-          value={config.background}
-          colors={PAPER_SWATCHES}
-          onPick={(color) => patchConfig({ background: color })}
-          labelFor={(color) => swatchLabel(MESSAGES.paperColor, color)}
-        />
-      </PanelSection>
-
-      <Separator />
-
-      <PanelSection title={MESSAGES.settings}>
-        <ToggleRow
-          id="editor-show-grid"
-          label={MESSAGES.showGrid}
-          checked={config.showGrid}
-          onCheckedChange={(checked) => patchConfig({ showGrid: checked })}
-        />
-        <ToggleRow
-          id="editor-merge-lines"
-          label={MESSAGES.mergeLines}
-          checked={config.mergeLines}
-          onCheckedChange={(checked) => patchConfig({ mergeLines: checked })}
-        />
-      </PanelSection>
-
       <PanelSection title={MESSAGES.gridType}>
         <div className="flex gap-1.5">
           <Button
@@ -192,6 +212,24 @@ export function SettingsPanel({
             {MESSAGES.gridCircular}
           </Button>
         </div>
+        <p className="text-xs text-muted-foreground/80">
+          {MESSAGES.gridTypeHint}
+        </p>
+      </PanelSection>
+
+      <PanelSection title={MESSAGES.boardOptions}>
+        <ToggleRow
+          id="editor-show-grid"
+          label={MESSAGES.showGrid}
+          checked={config.showGrid}
+          onCheckedChange={(checked) => patchConfig({ showGrid: checked })}
+        />
+        <ToggleRow
+          id="editor-merge-lines"
+          label={MESSAGES.mergeLines}
+          checked={config.mergeLines}
+          onCheckedChange={(checked) => patchConfig({ mergeLines: checked })}
+        />
       </PanelSection>
 
       <Separator />
