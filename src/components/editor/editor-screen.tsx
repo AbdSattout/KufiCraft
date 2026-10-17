@@ -164,7 +164,7 @@ function StateScreen({
           <Button
             variant="outline"
             nativeButton={false}
-            render={<Link href="/app" />}
+            render={<Link href="/" />}
           >
             <ArrowRight />
             {MESSAGES.backToDashboard}

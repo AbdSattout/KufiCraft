@@ -1,12 +1,9 @@
-import type { Metadata } from "next";
-import { SignUpForm } from "@/components/auth/sign-up-form";
+import { redirect } from "next/navigation";
 
-export const metadata: Metadata = {
-  title: "إنشاء حساب",
-  description: "أنشئ حساب KufiCraft خلال ثوانٍ — باسم ومفتاح مرور فقط.",
-};
-
-/** `/signup`: name → passkey. No email, no password. */
+/**
+ * `/signup` kept as a redirect only: account creation lives on the same screen
+ * as sign-in (`/signin`), and old links or bookmarks should not 404.
+ */
 export default function SignUpPage() {
-  return <SignUpForm />;
+  redirect("/signin");
 }

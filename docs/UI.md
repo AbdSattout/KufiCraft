@@ -4,17 +4,32 @@
 
 | route | access | screen |
 | --- | --- | --- |
-| `/` | public | landing (Arabic marketing page) |
-| `/signin` | public | passkey sign-in (conditional UI) |
-| `/signup` | public | passkey sign-up (name → passkey → in) |
-| `/app` | auth | dashboard: “لوحاتي” |
+| `/` | public | landing (Arabic marketing page) — **rewritten to `/app` for a session**, so a signed-in visitor lands on the boards |
+| `/signin` | public | the one account screen: passkey sign-in **and** account creation |
+| `/signup` | public | redirect to `/signin` (old links only) |
+| `/account` | auth | “الحساب والأمان”: passkey management and sign out |
+| `/app` | auth | boards dashboard (“لوحاتي”) — what `/` rewrites to |
 | `/app/[projectId]` | auth | editor |
 
 Route groups: `src/app/(marketing)/` (landing) and `src/app/(auth)/`
-(`/signin`, `/signup`). The authenticated screens live in a plain
+(`/signin`, `/signup`, `/account`). The authenticated screens live in a plain
 `src/app/app/` folder — no route group, so the folder name and the URL agree.
 All copy is **Arabic**, `dir="rtl"` comes from the root layout. Latin route
 slugs, Arabic UI text.
+
+Who sees what is decided **before rendering**, in `src/proxy.ts` (Next 16's
+renamed middleware; it runs on the Node runtime). It only *reads* the Better
+Auth session cookie — no validation round-trip — and the rules live in
+`src/lib/route-guards.ts` with their tests:
+
+* with a session, `/` is **rewritten** to `/app`: the address bar keeps `/`, the
+  landing stays a statically prerendered page for everyone else, and nothing
+  flashes for a signed-in visitor;
+* without one, `/app`, `/app/…` and `/account` are redirected to `/signin`
+  instead of painting a skeleton and fixing it up on the client (the client
+  guards stay as a safety net for a session that expires mid-visit);
+* `/signin` is never bounced on the cookie — a stale session would loop
+  `/` → `/signin` → `/`. The screen itself sends a live session home.
 
 ## Design language
 
@@ -29,11 +44,27 @@ slugs, Arabic UI text.
 * Icons: `lucide-react`. Buttons/inputs/dialogs come from `src/components/ui/*`
   (shadcn, RTL-enabled) — do not invent parallel primitives.
 * **These primitives are Base UI based (`@base-ui/react`), not Radix.** Compose
-  with the `render` prop — `<Button render={<Link href="/app" />}>لوحاتي</Button>` —
-  menu items take `onClick`, and `asChild` does **not** exist.
+  with the `render` prop — `<Button render={<Link href="/signin" />}>تسجيل الدخول</Button>` —
+  menu items take `onClick`, and `asChild` does **not** exist. Menu group parts
+  belong inside a group: `DropdownMenuLabel` is a `Menu.GroupLabel` and throws
+  `MenuGroupContext is missing` outside `DropdownMenuGroup`/`DropdownMenuRadioGroup`.
 * Motion: 150–200 ms ease-out, `tw-animate-css` utilities; nothing bouncy.
 
+## Account screens (`/signin`, `/account`)
+
+`/signin` is a **single card**: “لديّ حساب” (the `username webauthn` field for
+conditional UI plus the passkey button) and, under an «أو» rule, “حساب جديد”
+(display name → passkey). There is no sign-in/sign-up split to travel between,
+and the card carries no session-management content — that is `/account`, which
+the header's account menu links to. A visitor with a live session never sees
+either card: `/signin` sends them to `/`, and `/account` renders the
+“الحساب والأمان” card (passkey list, add/rename/delete, sign out).
+
 ## Dashboard (`/app`)
+
+Reached at `/` too: that is where a signed-in visitor lands (the proxy rewrites
+it), which is why the header carries no board link — it would point at the page
+you are already on.
 
 * Grid of project cards (responsive: 1/2/3/4 columns). Each card shows the
   stored SVG thumbnail (render `project.thumbnail` with `dangerouslySetInnerHTML`
@@ -159,15 +190,18 @@ drift from the UI.
 Marketing page for a craft tool: hero with **live kufi artwork rendered by the
 canvas engine** (static SVG string, no interaction), one-line value prop,
 “كيف يعمل” 3 steps, feature grid (شبكة مربعة ودائرية، نسب قابلة للتخصيص، حفظ
-تلقائي ومزامنة فورية، تصدير SVG/PNG), gallery strip, footer with GitHub link and
-a CTA to `/signup` + `/app`. Follow the `design-taste-frontend` skill: researched
+تلقائي ومزامنة فورية، تصدير SVG/PNG), gallery strip, footer with the GitHub
+link and a CTA to `/signin` (the one account screen — no separate sign-up
+route). It is only ever shown to a visitor **without** a session. Follow the
+`design-taste-frontend` skill: researched
 composition, no generic template look, real typography scale, Arabic-first
 layout (numbers/Latin inline as needed).
 
 ## Shared pieces
 
-* `src/components/site-header.tsx` — logo/wordmark, links, user menu
-  (name, sign-out) when signed in, or “تسجيل الدخول”/“إنشاء حساب” when not.
+* `src/components/site-header.tsx` — wordmark (the boards are the home route, so
+  there is no separate board link), links, user menu (name, account & security,
+  sign-out) when signed in, or a single “تسجيل الدخول” when not.
 * `src/components/canvas/canvas-preview.tsx` — read-only SVG renderer:
   `<CanvasPreview config items />` (used by editor, cards’ previews and the
   create dialog); it must call the engine, never hand-render paths itself.

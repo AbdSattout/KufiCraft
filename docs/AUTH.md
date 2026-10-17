@@ -14,7 +14,7 @@ Verified live on `https://adamant-dragon-860.convex.site` (dev deployment):
 | `GET http://localhost:3000/api/auth/ok` | proxied through Next.js ✅ |
 | Action `authFlows:createSignUpContext` | mints the sign-up context token; `ConvexError` Arabic for names outside 1–60 chars |
 | `GET /api/auth/passkey/generate-register-options?context=…` | 200 challenge/rp/user for a valid minted context; **400** Arabic messages for missing/invalid/expired/tampered tokens |
-| `POST /api/auth/passkey/verify-registration` | 200 in a real browser (Chromium virtual authenticator E2E): session cookie set, redirect to `/app`, passkey listed, rename/delete/sign-out/sign-in all pass |
+| `POST /api/auth/passkey/verify-registration` | 200 in a real browser (Chromium virtual authenticator E2E): session cookie set, redirect to `/`, passkey listed, rename/delete/sign-out/sign-in all pass |
 
 Behaviour beyond the endpoints above is covered by `convex/**` unit tests;
 everything about the live deployment that a unit test cannot reach is marked
@@ -43,8 +43,9 @@ everything about the live deployment that a unit test cannot reach is marked
 | `convex/betterAuth/adapter.ts` | adapter functions (`create`/`findOne`/… ) from the local schema |
 | `convex/http.ts` | `authComponent.registerRoutes(http, createAuth)` → mounts `/api/auth/*` |
 | `src/lib/auth-client.ts` | `createAuthClient({ plugins: [convexClient(), passkeyClient()] })` |
-| `src/app/(auth)/{layout,signin,signup}` | Arabic RTL sign-up (`name → passkey`) and sign-in/account routes |
-| `src/components/auth/**` | sign-up form, sign-in panel (conditional UI), account & security card, passkey error mapping, `require-auth` guard |
+| `src/app/(auth)/{layout,signin,signup,account}` | Arabic RTL account screens: `/signin` is **one** card (sign-in + “حساب جديد”), `/signup` redirects to it, `/account` is “الحساب والأمان” |
+| `src/components/auth/**` | sign-in screen (both ways in, conditional UI), account screen + account & security card, passkey error mapping, `require-auth` guard |
+| `src/proxy.ts` + `src/lib/route-guards.ts` | pre-render routing: `/` → `/app` with a session, `/app|/account` → `/signin` without one |
 | `src/lib/auth-server.ts` | `convexBetterAuthNextJs(...)` helpers (`getToken`, `preloadAuthQuery`, …) |
 | `src/app/api/auth/[...all]/route.ts` | `export const { GET, POST } = handler` (proxies to Convex) |
 | `src/components/convex-client-provider.tsx` | `ConvexBetterAuthProvider` (client) |
@@ -147,7 +148,12 @@ omits it breaks every auth request with “table not found”. The current
 Sign-in/sign-up must work **without** passwords, email or OAuth:
 “choose a name → create a passkey → you are in”. Implemented shape:
 
-1. **Sign-up** (`/signup`, name only — no session, no email):
+**One screen, two ways in.** `/signin` holds both flows — “لديّ حساب” (passkey
+sign-in) and, under an «أو» rule, “حساب جديد” (name → passkey) — so nothing is
+separated by a route; `/signup` is a redirect for old links. `/account` is the
+only session-management screen.
+
+1. **Sign-up** (“حساب جديد” on `/signin`, name only — no session, no email):
    * The form calls the Convex action `authFlows:createSignUpContext({ name })`.
      The action mints a context token: base64url JSON `{name, expiresAt,
      nonce}` signed with HMAC-SHA256 over `BETTER_AUTH_SECRET` (TTL 5 min,
@@ -163,17 +169,20 @@ Sign-in/sign-up must work **without** passwords, email or OAuth:
      `setSessionCookie` from `better-auth/cookies`, because
      `verify-registration` returns 200 but does **not** create a session by
      itself.
-   * The client full-page-navigates to `/app` after the ceremony — the passkey
-     client never fires `$sessionSignal` on registration.
+   * The client full-page-navigates to `/` after the ceremony — the passkey
+     client never fires `$sessionSignal` on registration. `/` rewrites to the
+     boards (`/app`) for that fresh cookie, so the visitor lands on “لوحاتي”.
 2. **Sign-in** (`/signin`): `authClient.signIn.passkey({ autoFill: true })`
    with conditional UI (`autocomplete="username webauthn"` on the name field)
    — the chosen passkey signs in straight from the browser dropdown — plus an
    explicit button flow with real error reporting. Both paths end with a
    full-page navigation, not client routing: the session atom update can
    unmount the card before the promise continuation runs.
-3. **Management**: `/signin` renders the account & security card when a session
-   exists — list / rename / delete passkeys and sign-out
-   (`authClient.passkey.*`); `require-auth` guards protected routes.
+3. **Management**: `/account` renders the account & security card for a session
+   — list / rename / delete passkeys and sign-out (`authClient.passkey.*`);
+   `/signin` never shows it (a live session is sent home), and `require-auth`
+   plus the client guards in `/app` and the editor cover a session that expires
+   mid-visit.
 4. Behaviour **is verified against the live dev deployment**: HTTP checks for
    every option/verify endpoint plus a real-browser Chromium virtual
    authenticator E2E (sign-up → account → rename → sign-out → conditional-UI
@@ -227,14 +236,14 @@ redesign, so it is left open rather than half-done:
 3. **The sign-up context token travels in a query string.** The plugin's
    `generate-register-options` is a `GET`, so the token rides in
    `?context=…` and therefore appears in access logs and in any `Referer` the
-   page would send (`/signup` links nowhere cross-origin). Accepted as-is: the
+   page would send (`/signin` links nowhere cross-origin). Accepted as-is: the
    token is 5-minute, single-purpose, and not a session credential. Moving it to
    a header would need a custom endpoint or a plugin patch.
 4. **No abuse control on the public sign-up path.** With the limiter off (see
    § Rate limiting) nothing meters `passkey/generate-register-options`, so an
    unauthenticated caller can mint `user` rows bounded only by their own effort.
    The two honest fixes, in order of preference:
-   * **Bot verification on `/signup`** — Cloudflare Turnstile in front of the
+   * **Bot verification on `/signin`** — Cloudflare Turnstile in front of the
      form, verified server-side before the context token is minted. Stops
      scripted abuse without penalising real visitors (and Convex cannot see the
      client IP, so a challenge is the only reliable signal).

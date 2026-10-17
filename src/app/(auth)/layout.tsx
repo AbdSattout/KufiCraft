@@ -1,7 +1,7 @@
 import { SiteHeader } from "@/components/site-header";
 
 /**
- * Shell for the account screens (`/signin`, `/signup`): the shared site header
+ * Shell for the account screens (`/signin`, `/account`): the shared site header
  * plus a narrow centered column so the passkey cards stay around the fold.
  */
 export default function AuthLayout({ children }: LayoutProps<"/">) {

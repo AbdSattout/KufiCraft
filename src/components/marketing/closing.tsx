@@ -26,7 +26,7 @@ export function Closing() {
               className="h-11 px-5 text-base"
               variant="secondary"
               nativeButton={false}
-              render={<Link href="/signup" />}
+              render={<Link href="/signin" />}
             >
               ابدأ الرسم
             </Button>

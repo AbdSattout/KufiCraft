@@ -28,7 +28,7 @@ export function Hero() {
             <Button
               className="h-11 px-5 text-base"
               nativeButton={false}
-              render={<Link href="/signup" />}
+              render={<Link href="/signin" />}
             >
               ابدأ الرسم
             </Button>

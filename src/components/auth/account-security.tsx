@@ -72,8 +72,7 @@ function passkeyMeta(passkey: Passkey): string {
 
 /**
  * "الحساب والأمان": passkey management (list / add / rename / delete) plus
- * sign-out for signed-in visitors. Rendered by `/signin`, which the header
- * account menu links to.
+ * sign-out. Rendered by `/account`, which the header account menu links to.
  */
 export function AccountSecurity({ userName }: { userName: string }) {
   const {

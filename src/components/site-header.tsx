@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -16,11 +17,14 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 /**
- * Shared shell header: wordmark, primary navigation and the account menu.
- * Signed-out visitors see sign-in / sign-up calls to action instead.
+ * Shared shell header: the wordmark and the account menu. There is no board
+ * link: the boards are the home route (`/`), so the wordmark already goes
+ * there. Signed-out visitors get a single `تسجيل الدخول` button — sign-in and
+ * sign-up live on the same screen (`/signin`).
  *
  * Note: UI primitives are Base UI based — compose with `render={<Link … />}`
- * rather than Radix's `asChild`.
+ * rather than Radix's `asChild`. `DropdownMenuLabel` is a Base UI
+ * `Menu.GroupLabel`, so it must stay inside a `DropdownMenuGroup`.
  */
 export function SiteHeader() {
   const { isAuthenticated, isLoading } = useConvexAuth();
@@ -39,17 +43,6 @@ export function SiteHeader() {
           <span className="font-heading text-lg tracking-tight">KufiCraft</span>
         </Link>
 
-        <nav className="flex items-center gap-1 text-sm">
-          <Button
-            variant="ghost"
-            size="sm"
-            nativeButton={false}
-            render={<Link href="/app" />}
-          >
-            لوحاتي
-          </Button>
-        </nav>
-
         <div className="ms-auto flex items-center gap-2">
           {isLoading ? (
             <span className="h-8 w-24 animate-pulse rounded-md bg-muted" />
@@ -66,38 +59,35 @@ export function SiteHeader() {
                 }
               />
               <DropdownMenuContent align="start" className="w-52">
-                <DropdownMenuLabel className="truncate">
-                  {user?.name ?? "حسابي"}
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem render={<Link href="/signin" />}>
-                  <KeyRound className="size-4" />
-                  الحساب والأمان
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => {
-                    void authClient.signOut();
-                  }}
-                >
-                  <LogOut className="size-4" />
-                  تسجيل الخروج
-                </DropdownMenuItem>
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel className="truncate">
+                    {user?.name ?? "حسابي"}
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem render={<Link href="/account" />}>
+                    <KeyRound className="size-4" />
+                    الحساب والأمان
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      void authClient.signOut();
+                    }}
+                  >
+                    <LogOut className="size-4" />
+                    تسجيل الخروج
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (
-            <>
-              <Button
-                variant="ghost"
-                size="sm"
-                nativeButton={false}
-                render={<Link href="/signin" />}
-              >
-                تسجيل الدخول
-              </Button>
-              <Button size="sm" nativeButton={false} render={<Link href="/signup" />}>
-                إنشاء حساب
-              </Button>
-            </>
+            <Button
+              variant="outline"
+              size="sm"
+              nativeButton={false}
+              render={<Link href="/signin" />}
+            >
+              تسجيل الدخول
+            </Button>
           )}
         </div>
       </div>

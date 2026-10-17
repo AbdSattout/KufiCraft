@@ -129,6 +129,23 @@ backend) · Better Auth (passkeys, local-install component) · Bun · vitest.
   the whole board — `toOps` diffs it against the document, so every other item
   read as “deleted”. It now commits `moveItems` (clamped to the grid, moved
   items on top), and `shiftSelection` says out loud that it is preview-only.
+* **Follow-up (live testing):** the account screens and the home route. Sign-in
+  and sign-up were two routes behind two header buttons, and `/signin` doubled
+  as the passkey/sessions screen — so the page you land on while signed *out*
+  talked about a session you did not have. `/signin` is now **one card** with
+  both ways in (an existing passkey, or a name plus a new passkey); passkey
+  management moved to `/account` (“الحساب والأمان”) and `/signup` is a redirect
+  for old links. The boards became the **home route**: `src/proxy.ts` (the
+  renamed middleware, Node runtime) rewrites `/` to `/app` when a session cookie
+  is present — `src/lib/route-guards.ts` holds the rules and their tests — so the
+  landing stays statically prerendered for everyone else and a signed-in visitor
+  never sees it flash by. Anonymous `/app`, `/app/…` and `/account` are
+  redirected to `/signin` there too; `/signin` is deliberately never bounced on
+  the cookie (a stale one would loop) — the screen itself sends a live session
+  home. The header lost its «لوحاتي» button (the boards *are* the home route) and
+  its two anonymous buttons, and its account menu now sits inside a
+  `DropdownMenuGroup`: Base UI's `Menu.GroupLabel` needs the group context, and
+  the old markup threw `MenuGroupContext is missing`.
 
 | wave | work | who |
 | --- | --- | --- |

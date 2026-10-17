@@ -15,11 +15,8 @@ export function SiteFooter() {
           <a href={REPO} target="_blank" rel="noreferrer" className="mk-link">
             GitHub
           </a>
-          <Link href="/app" className="mk-link">
-            المحرر
-          </Link>
-          <Link href="/signup" className="mk-link">
-            إنشاء حساب
+          <Link href="/signin" className="mk-link">
+            الدخول إلى المحرر
           </Link>
         </nav>
         <p className="mk-small mk-footer__meta">
