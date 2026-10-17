@@ -4,6 +4,7 @@ import "./globals.css";
 import { cn } from "@/lib/utils";
 import { ConvexClientProvider } from "@/components/convex-client-provider";
 import { SignInDialogProvider } from "@/components/auth/sign-in-dialog";
+import { DirectionProvider } from "@/components/ui/direction";
 import { Toaster } from "@/components/ui/sonner";
 
 const kufi = Noto_Kufi_Arabic({
@@ -48,12 +49,17 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={cn("font-sans antialiased", kufi.variable, plex.variable)}
     >
       <body>
-        <ConvexClientProvider>
-          {/* Every page can open the passkey dialog: the landing's CTAs, the
-              header, and the guards that send a visitor home. */}
-          <SignInDialogProvider>{children}</SignInDialogProvider>
-          <Toaster position="top-center" dir="rtl" richColors />
-        </ConvexClientProvider>
+        {/* Base UI takes its direction from this provider, not from the `dir`
+            attribute: without it the editor's sliders and arrow-key groups move
+            the opposite way to the order the reader sees. */}
+        <DirectionProvider direction="rtl">
+          <ConvexClientProvider>
+            {/* Every page can open the passkey dialog: the landing's CTAs, the
+                header, and the guards that send a visitor home. */}
+            <SignInDialogProvider>{children}</SignInDialogProvider>
+            <Toaster position="top-center" dir="rtl" richColors />
+          </ConvexClientProvider>
+        </DirectionProvider>
       </body>
     </html>
   );

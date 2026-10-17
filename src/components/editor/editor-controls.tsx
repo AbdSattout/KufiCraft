@@ -68,19 +68,22 @@ export function SliderField({
         </span>
       </div>
       <Slider
-        value={shown}
+        // The vendor's one-value form (a bare number) draws a thumb per entry of
+        // the `[min, max]` fallback, i.e. two: the second is an invisible
+        // duplicate with its own range input. One entry, one thumb.
+        value={[shown]}
         min={min}
         max={max}
         step={step}
         aria-label={label}
         onValueChange={(next) => {
-          const numeric = Number(next);
+          const numeric = Number(Array.isArray(next) ? next[0] : next);
           setDraft(numeric);
           onPreview(numeric);
         }}
         onValueCommitted={(next) => {
           setDraft(null);
-          onCommit(Number(next));
+          onCommit(Number(Array.isArray(next) ? next[0] : next));
         }}
       />
     </div>
