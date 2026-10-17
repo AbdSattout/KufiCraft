@@ -167,8 +167,11 @@ Shape palette (applies to the next drawn tiles and to the current selection):
 square, circle, triangle, quarter circle, semicircle, pentagon, curve, hamza1,
 hamza2, comb — ten glyphs, each drawn by the same `KufiShape` that paints the
 canvas fragment, so the palette icon **respects the current rotation**
-(`tileIconPath`) (+ rotation button cycling quarter turns, + “إعادة الشكل”,
-which appears only once shape/rotation differ from the plain square).
+(`tileIconPath`), with a single rotation button that cycles quarter turns
+(0° → 90° → 180° → 270° → 0°, `R` from the keyboard too). There is deliberately
+**no “إعادة الشكل” button**: the cycle comes back around, and the palette
+re-selects a shape, so a reset only ever saved a click. The style itself is the
+user's, not the board's — see *Settings persistence*.
 With something selected the same section reveals the selection actions
 («التحديد»: recolour with the ink colour, duplicate, delete) — with nothing
 selected they are absent, not disabled.
@@ -178,13 +181,19 @@ then the board — نسبة الحبر as the five presets `1:1`…`1:5` (live r
 `1:1` hint explains that the ink fills the whole cell and the grid shows no inner
 edges), حجم الخلية (`base`), نوع الشبكة (square/circular — switching warns that
 existing items may look odd; the hint explains what each type is), خيارات اللوحة
-(إظهار الشبكة — two families: cell borders plus the stronger inner ink edges —
-and الخط المستقيم مربّعات) — and مسح الكل at the end (confirm).
+(إظهار الشبكة and الخط المستقيم مربّعات) — and مسح الكل at the end (confirm).
 
-خيارات اللوحة is the line tool's shape: **الخط المستقيم مربّعات** (default on)
-draws a run with no diagonal segment as one square per cell — the reference
-app's straight line; off, that run is a single solid `line` bar. It never
-affects what is already drawn.
+إظهار الشبكة is a **view guide, not artwork**: the construction grid's two
+families (cell borders plus the stronger inner ink edges) are what you draw
+*against*, so the switch is the user's preference — one setting, the same in
+every board, remembered in `kuficraft.editor-prefs.v1`. It is never part of an
+export, and the document's own `config.showGrid` is tolerated but no longer
+rendered (docs/FORMAT.md).
+
+In that same خيارات اللوحة section, **الخط المستقيم مربّعات** is the line
+tool's shape: on (the default) it draws a run with no diagonal segment as one
+square per cell — the reference app's straight line; off, that run is a single
+solid `line` bar. It never affects what is already drawn.
 
 There is exactly **one** colour control for drawing: لون الحبر is the project's
 ink *and* the pen's colour. لون الورقة next to it is the board's background.
@@ -209,18 +218,27 @@ Exports (from the top bar menu `تصدير`): SVG (string from `renderSvg`), PNG
 `src/lib/kuficraft-file.ts` (`docs/FORMAT.md`), and share via `updateThumbnail`
 after each committed gesture (throttled to ≥ 2 s).
 
-Settings persistence (localStorage, per browser, no server round-trip):
+Settings persistence (localStorage, per browser, no server round-trip) — and the
+line it draws between the **user** and the **board**:
 
-* `kuficraft.editor-prefs.v1` — tool, active shape, rotation, arc direction and
-  size, zoom, colour swatches history (last ≤ 8 ink colours).
-  Loaded synchronously when the editor mounts and applied to the toolbar so the
-  app “opens the way you left it”. Project `config` stays authoritative for
-  rendering; UI prefs only decide the toolbar defaults and tool behaviour.
+* `kuficraft.editor-prefs.v1` — the user's editor: tool, active shape, rotation,
+  arc direction and size, zoom, the grid guide (إظهار الشبكة, default on) and
+  the colour swatches history (last ≤ 8 ink colours). Loaded synchronously when
+  the editor mounts and applied to the toolbar so the app “opens the way you
+  left it”, and written as each change happens (never per project): the shape
+  and rotation a designer set on one board are what the next board opens with.
+  Zoom runs **0.1×–4×**, so a board far larger than the pane is viewable whole
+  and a dense one is workable up close.
 * `kuficraft.last-config.v1` — the last committed project config, used as the
   default in the dashboard’s «لوحة جديدة» dialog and for new projects. The
-  document settings — grid, the straight-lines-as-squares flag and the ink ratio
-  — are remembered here rather than in the prefs, because they belong to the
-  project.
+  artwork settings — ink ratio, cell size, grid type, ink and paper colour, the
+  straight-lines-as-squares flag — are remembered here rather than in the prefs,
+  because they belong to the project and stay the open project's while it is
+  open (`config` is authoritative for rendering).
+* The grid guide is the one **view** setting in the prefs: the editor draws the
+  canvas from the preference even when a document carries its own
+  `config.showGrid`. That document field is still written, exported and
+  tolerated (docs/FORMAT.md) — nothing renders from it.
 * Both keys are versioned and validated on read (corrupt/stale values fall back
   to model defaults, never throw).
 

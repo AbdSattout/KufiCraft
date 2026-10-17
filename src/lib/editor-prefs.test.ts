@@ -54,10 +54,25 @@ describe("editor preferences", () => {
         size: "threeQuarter" as const,
       },
       zoom: 1.25,
+      showGrid: false,
       inkSwatches: ["#111827", "#7c2d12"],
     };
     saveEditorPrefs(prefs, storage);
     expect(loadEditorPrefs(storage)).toEqual(prefs);
+  });
+
+  it("keeps the draw style across boards — it is the user's, not the project's", () => {
+    // The editor reads the prefs when it mounts, so the shape + rotation set on
+    // one board are what the next board opens with; a document never carries
+    // them (docs/UI.md §Editor).
+    const storage = new MemoryStorage();
+    saveEditorPrefs(
+      { ...DEFAULT_EDITOR_PREFS, shape: "curve", rotation: 3 },
+      storage,
+    );
+    const reopened = loadEditorPrefs(storage);
+    expect(reopened.shape).toBe("curve");
+    expect(reopened.rotation).toBe(3);
   });
 
   it("remembers the hand tool — it is a rail tool like any other", () => {
@@ -108,12 +123,34 @@ describe("editor preferences", () => {
         [EDITOR_PREFS_KEY]: JSON.stringify({ zoom: 99 }),
       }),
     );
-    expect(prefs.zoom).toBe(2);
+    expect(prefs.zoom).toBe(4);
 
     const low = loadEditorPrefs(
       new MemoryStorage({ [EDITOR_PREFS_KEY]: JSON.stringify({ zoom: 0.01 }) }),
     );
-    expect(low.zoom).toBe(0.5);
+    expect(low.zoom).toBe(0.1);
+  });
+
+  it("defaults the grid guide on and accepts only a boolean", () => {
+    expect(DEFAULT_EDITOR_PREFS.showGrid).toBe(true);
+    const missing = loadEditorPrefs(
+      new MemoryStorage({ [EDITOR_PREFS_KEY]: JSON.stringify({ tool: "pen" }) }),
+    );
+    expect(missing.showGrid).toBe(true);
+
+    const wrongType = loadEditorPrefs(
+      new MemoryStorage({
+        [EDITOR_PREFS_KEY]: JSON.stringify({ showGrid: "yes" }),
+      }),
+    );
+    expect(wrongType.showGrid).toBe(true);
+
+    const off = loadEditorPrefs(
+      new MemoryStorage({
+        [EDITOR_PREFS_KEY]: JSON.stringify({ showGrid: false }),
+      }),
+    );
+    expect(off.showGrid).toBe(false);
   });
 
   it("keeps at most 8 swatches, most-recent-first, deduped case-insensitively", () => {

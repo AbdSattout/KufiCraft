@@ -7,8 +7,12 @@
  * pen's colour, so it sits right under the shape palette; لون الورقة is the
  * board's background), then the ink ratio as the five presets `1:1`…`1:5`
  * (live re-render), the cell size, the grid-type switch (warned, because
- * existing items are re-interpreted), the board toggles, and finally “مسح الكل”
+ * existing items are re-interpreted), the board options, and finally “مسح الكل”
  * behind a confirm dialog.
+ *
+ * إظهار الشبكة is the one view guide in here: the construction grid follows
+ * the *user* (it is a preference, drawn the same on every board), while every
+ * other setting on this panel is the document's own.
  */
 
 import { useMemo, useState } from "react";
@@ -44,6 +48,8 @@ export interface SettingsPanelProps {
   itemsCount: number;
   /** Sets the project ink (the colour the pen paints with). */
   setInkColor: (color: string) => void;
+  /** Writes the grid guide to the user's preference (it is not document config). */
+  setShowGrid: (show: boolean) => void;
   patchConfig: (patch: Partial<ProjectConfig>) => void;
   /** Live, mutation-free update while a slider is dragged. */
   previewConfig: (patch: Partial<ProjectConfig>) => void;
@@ -97,6 +103,7 @@ export function SettingsPanel({
   inkSwatches,
   itemsCount,
   setInkColor,
+  setShowGrid,
   patchConfig,
   previewConfig,
   clearAll,
@@ -218,11 +225,13 @@ export function SettingsPanel({
       </PanelSection>
 
       <PanelSection title={MESSAGES.boardOptions}>
+        {/* The grid is the user's, so the toggle writes the pref (the controller
+            feeds that value to the canvas); the document keeps its own field. */}
         <ToggleRow
           id="editor-show-grid"
           label={MESSAGES.showGrid}
           checked={config.showGrid}
-          onCheckedChange={(checked) => patchConfig({ showGrid: checked })}
+          onCheckedChange={setShowGrid}
         />
         <ToggleRow
           id="editor-straight-lines"

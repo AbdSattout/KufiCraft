@@ -77,7 +77,6 @@ function Panels({ editor }: { editor: EditorController }) {
         selectionCount={editor.selection.length}
         selectShape={editor.selectShape}
         rotateShape={editor.rotateShape}
-        resetShape={editor.resetShape}
         recolourSelection={editor.recolourSelection}
         duplicateSelection={editor.duplicateSelection}
         deleteSelection={editor.deleteSelection}
@@ -88,6 +87,7 @@ function Panels({ editor }: { editor: EditorController }) {
         inkSwatches={editor.inkSwatches}
         itemsCount={editor.items.length}
         setInkColor={editor.setInkColor}
+        setShowGrid={editor.setShowGrid}
         patchConfig={editor.patchConfig}
         previewConfig={editor.previewConfig}
         clearAll={editor.clearAll}

@@ -44,7 +44,6 @@ import {
 } from "@/lib/editor-prefs";
 import { downloadProjectFile } from "@/lib/kuficraft-file";
 import {
-  DEFAULT_STYLE,
   centreScroll,
   clientToViewBox,
   clampToCanvas,
@@ -102,6 +101,10 @@ export interface EditorController {
   projectId: Id<"projects"> | null;
   name: string;
   rename: (name: string) => void;
+  /**
+   * What the canvas renders: the document's config with the user's `showGrid`
+   * guide applied (that one field is a preference, not artwork).
+   */
   config: ProjectConfig;
   patchConfig: (patch: Partial<ProjectConfig>) => void;
   /** Live, mutation-free config preview (slider dragging). */
@@ -119,8 +122,6 @@ export interface EditorController {
   inkSwatches: readonly string[];
   selectShape: (shape: ShapeId) => void;
   rotateShape: () => void;
-  /** Back to the plain square, upright (the palette's escape hatch). */
-  resetShape: () => void;
   /** The ink colour is the pen's colour *and* the project's ink. */
   setInkColor: (color: string) => void;
 
@@ -139,6 +140,10 @@ export interface EditorController {
 
   zoom: number;
   setZoom: (zoom: number) => void;
+
+  /** The construction grid guide — a user preference, saved in the prefs. */
+  showGrid: boolean;
+  setShowGrid: (show: boolean) => void;
 
   surfaceRef: React.RefObject<HTMLDivElement | null>;
   /** The scrollable canvas viewport (what the hand tool pans). */
@@ -176,10 +181,10 @@ export function useEditor(
   );
 
   const document = useEditorDocument(projectId, enabled);
-  const { config, items, commitItems, patchConfig } = document;
+  const { config: documentConfig, items, commitItems, patchConfig } = document;
 
   // Prefs are read synchronously on mount so the editor opens the way the
-  // designer left it; the project `config` stays authoritative for rendering.
+  // designer left it; the rest of the project `config` stays authoritative.
   const [initialPrefs] = useState(() => loadEditorPrefs());
   const [tool, setToolState] = useState<ToolId>(initialPrefs.tool);
   const [style, setStyle] = useState<DrawStyle>({
@@ -194,9 +199,25 @@ export function useEditor(
   const [state, setState] = useState<ToolState>(NO_STATE);
   const [history, setHistory] = useState<HistoryState>(EMPTY_HISTORY);
   const [zoom, setZoomState] = useState(initialPrefs.zoom);
+  const [showGrid, setShowGridState] = useState(initialPrefs.showGrid);
   const labelRef = useRef("رسم");
   /** The line tool's run survives re-renders without a pointer being down. */
   const stateRef = useRef<ToolState>(NO_STATE);
+
+  /**
+   * What the canvas renders. The construction grid is a *view* guide — the same
+   * for the user on every board — while the rest of the config belongs to the
+   * document, so only `showGrid` is taken from the prefs here. Keeping the
+   * document's own object when the two agree leaves the memoised canvas layers
+   * untouched.
+   */
+  const config = useMemo(
+    () =>
+      documentConfig.showGrid === showGrid
+        ? documentConfig
+        : { ...documentConfig, showGrid },
+    [documentConfig, showGrid],
+  );
 
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -415,14 +436,6 @@ export function useEditor(
     }
   }, [applyCommit, items, selection, style.rotation]);
 
-  const resetShape = useCallback(() => {
-    const patch = { shape: DEFAULT_STYLE.shape, rotation: DEFAULT_STYLE.rotation };
-    setStyle((previous) => ({ ...previous, ...patch }));
-    if (selection.length > 0) {
-      applyCommit(reshapeItems(items, selection, patch), "شكل", selection);
-    }
-  }, [applyCommit, items, selection]);
-
   /**
    * The ink colour is a project field, so the panel writes it through the
    * document; the swatch history rides along because it is a UI preference.
@@ -442,6 +455,11 @@ export function useEditor(
 
   const setArcSize = useCallback((size: ArcSize) => {
     setArc((previous) => ({ ...previous, size }));
+  }, []);
+
+  /** The grid guide lives in the prefs, not in the document (docs/UI.md §Editor). */
+  const setShowGrid = useCallback((show: boolean) => {
+    setShowGridState(show);
   }, []);
 
   const recolourSelection = useCallback(
@@ -634,24 +652,25 @@ export function useEditor(
   /* Preferences (localStorage, best-effort)                           */
   /* ---------------------------------------------------------------- */
 
-  // One write per discrete change — never from a pointer-move handler. Gated
-  // on a loaded document so a loading / missing project cannot clobber the
-  // remembered config fields with model defaults.
+  // One write per discrete change — never from a pointer-move handler. Nothing
+  // here comes from the document, so a change is stored the moment it happens,
+  // even while a board is still loading: only the config write below has to
+  // wait for the document to be ready (a loading project would otherwise
+  // clobber the remembered config with model defaults).
   useEffect(() => {
-    if (!enabled || document.status !== "ready") return;
     saveEditorPrefs({
       tool,
       shape: style.shape,
       rotation: style.rotation,
       arc,
       zoom,
+      showGrid,
       inkSwatches: [...inkSwatches],
     });
   }, [
     arc,
-    document.status,
-    enabled,
     inkSwatches,
+    showGrid,
     style.rotation,
     style.shape,
     tool,
@@ -694,7 +713,6 @@ export function useEditor(
     inkSwatches,
     selectShape,
     rotateShape,
-    resetShape,
     setInkColor,
     selection,
     setSelection,
@@ -709,6 +727,8 @@ export function useEditor(
     clearAll,
     zoom,
     setZoom,
+    showGrid,
+    setShowGrid,
     surfaceRef,
     viewportRef,
     centreView,

@@ -5,14 +5,14 @@
  *
  * One section, two jobs: the palette feeds the next drawn tiles *and* reshapes
  * the current selection (docs/UI.md §Editor) — rotation cycles `r` in quarter
- * turns, and “إعادة الشكل” only appears once the style differs from the plain
- * square so the panel never carries a button nobody can explain.
+ * turns (`R` on the keyboard too), and picking a shape is the way back to the
+ * plain square, so the panel carries no separate reset button.
  *
  * The selection actions are revealed by the selection itself: with nothing
  * selected there is no “التحديد” block and no disabled buttons.
  */
 
-import { Copy, PaintBucket, RotateCcw, RotateCw, Trash2 } from "lucide-react";
+import { Copy, PaintBucket, RotateCw, Trash2 } from "lucide-react";
 import { useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { tileIconPath } from "@/lib/canvas/items";
@@ -50,7 +50,6 @@ export interface ShapePanelProps {
   selectionCount: number;
   selectShape: (shape: ShapeId) => void;
   rotateShape: () => void;
-  resetShape: () => void;
   recolourSelection: (color: string) => void;
   duplicateSelection: () => void;
   deleteSelection: () => void;
@@ -62,13 +61,10 @@ export function ShapePanel({
   selectionCount,
   selectShape,
   rotateShape,
-  resetShape,
   recolourSelection,
   duplicateSelection,
   deleteSelection,
 }: ShapePanelProps) {
-  const customised = style.shape !== "square" || style.rotation !== 0;
-
   return (
     <PanelSection title={MESSAGES.shapes}>
       <div className="grid grid-cols-5 gap-1">
@@ -87,33 +83,19 @@ export function ShapePanel({
         ))}
       </div>
 
-      <div className="flex items-center gap-1.5">
-        <Button
-          variant="outline"
-          size="sm"
-          className="flex-1"
-          aria-label={`${MESSAGES.rotate} ${style.rotation * 90}°`}
-          onClick={rotateShape}
-        >
-          <RotateCw />
-          {MESSAGES.rotate}
-          <span className="tabular-nums text-muted-foreground">
-            {style.rotation * 90}°
-          </span>
-        </Button>
-        {customised ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-label={MESSAGES.resetShape}
-            title={MESSAGES.resetShapeHint}
-            onClick={resetShape}
-          >
-            <RotateCcw />
-            {MESSAGES.resetShape}
-          </Button>
-        ) : null}
-      </div>
+      <Button
+        variant="outline"
+        size="sm"
+        className="w-full"
+        aria-label={`${MESSAGES.rotate} ${style.rotation * 90}°`}
+        onClick={rotateShape}
+      >
+        <RotateCw />
+        {MESSAGES.rotate}
+        <span className="tabular-nums text-muted-foreground">
+          {style.rotation * 90}°
+        </span>
+      </Button>
 
       {selectionCount > 0 ? (
         <div className="flex flex-col gap-2 border-t border-border/60 pt-2">

@@ -62,8 +62,6 @@ export const MESSAGES = {
   confirm: "تأكيد",
   cancel: "إلغاء",
   rotate: "تدوير",
-  resetShape: "إعادة الشكل",
-  resetShapeHint: "إرجاع الشكل والتدوير إلى المربع.",
   recolourSelection: "تلوين بلون الحبر",
   deleteSelection: "حذف التحديد",
   duplicateSelection: "تكرار التحديد",

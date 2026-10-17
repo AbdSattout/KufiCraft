@@ -4,12 +4,17 @@
  * Two keys, both private to the browser and never sent to the server:
  *
  *   • `kuficraft.editor-prefs.v1` — how the editor opens: tool, shape and
- *     rotation, the arc style (direction + size), zoom and the last few ink
- *     colours.
+ *     rotation, the arc style (direction + size), zoom, the construction grid
+ *     and the last few ink colours.
  *   • `kuficraft.last-config.v1` — the last committed project config, used as
- *     the default in the dashboard's «لوحة جديدة» dialog. The grid, merge and
- *     ratio settings live here, not in the prefs: they belong to the document,
- *     and the project itself is authoritative while one is open.
+ *     the default in the dashboard's «لوحة جديدة» dialog. The ratio, cell size,
+ *     grid type, colours and line shape live here, not in the prefs: they are
+ *     the artwork, and the project itself is authoritative while one is open.
+ *
+ * `showGrid` is the exception: the construction grid is a **view guide**, not
+ * artwork — it belongs to the person looking at the board, so it follows the
+ * user from project to project. `config.showGrid` stays in the document (and
+ * the `.kuficraft` format) as a tolerated field that nothing renders from.
  *
  * Reads are total (corrupt / stale / unknown-version values fall back to the
  * model defaults, never throw) and writes are failure-tolerant (private mode
@@ -29,8 +34,12 @@ export const LAST_CONFIG_KEY = "kuficraft.last-config.v1";
 /** How many recent ink colours the editor remembers. */
 export const MAX_INK_SWATCHES = 8;
 export const DEFAULT_ZOOM = 1;
-export const MIN_ZOOM = 0.5;
-export const MAX_ZOOM = 2;
+/**
+ * Zoom bounds: a board far bigger than the pane must still be viewable whole
+ * (0.1) and a dense one workable up close (4).
+ */
+export const MIN_ZOOM = 0.1;
+export const MAX_ZOOM = 4;
 
 export interface EditorPrefs {
   tool: ToolId;
@@ -38,6 +47,8 @@ export interface EditorPrefs {
   rotation: Rotation;
   arc: ArcStyle;
   zoom: number;
+  /** The construction grid — a view guide, the same for the user everywhere. */
+  showGrid: boolean;
   /** Recent ink colours, most-recent-first, deduped case-insensitively. */
   inkSwatches: string[];
 }
@@ -48,6 +59,7 @@ export const DEFAULT_EDITOR_PREFS: EditorPrefs = {
   rotation: 0,
   arc: { direction: "clockwise", size: "half" },
   zoom: DEFAULT_ZOOM,
+  showGrid: true,
   inkSwatches: [],
 };
 
@@ -167,6 +179,11 @@ export function loadEditorPrefs(
       : DEFAULT_EDITOR_PREFS.rotation,
     arc: arcStyle(record.arc),
     zoom: clampZoom(record.zoom),
+    // Booleans are validated like the file format's own fields do it.
+    showGrid:
+      typeof record.showGrid === "boolean"
+        ? record.showGrid
+        : DEFAULT_EDITOR_PREFS.showGrid,
     inkSwatches: normalizeSwatches(record.inkSwatches),
   };
 }
