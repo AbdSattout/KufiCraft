@@ -264,10 +264,10 @@ sweep does not skip the items it passed between two events.
   visible until it commits. The overlay paints it as a filled highlight with no
   border.
 
-### Viewport: pan, zoom range and centre anchoring
+### Viewport: pan, zoom range and anchoring
 
-The hand tool is the only thing that moves the viewport; the maths is pure,
-lives in `interaction.ts` and is covered by `interaction.test.ts`:
+The hand tool pans, the wheel zooms. The maths is pure, lives in
+`interaction.ts` and is covered by `interaction.test.ts`:
 
 * **Pan** (`panScrollOffset`) — the board follows the hand: a rightward drag
   subtracts the pointer's X delta from `scrollLeft`, and `scrollTop` never
@@ -278,19 +278,30 @@ lives in `interaction.ts` and is covered by `interaction.test.ts`:
   `scrollLeft`, in RTL exactly as in LTR, so the helper deliberately takes no
   direction argument (only the dead “reverse” offset model would invert it,
   and it cannot be probed apart from the positive-descending one).
-* **Zoom range** — `MIN_ZOOM` = 0.1, `MAX_ZOOM` = 4
+* **Zoom range** — `MIN_ZOOM` = 0.1, `MAX_ZOOM` = 32
   (`src/lib/editor-prefs.ts`; stored zooms are re-clamped on read). The ±
   buttons walk the `ZOOM_STOPS` ladder through `nextZoom`, stop and disable at
   the bounds, and the readout is `zoomPercent` — a whole percentage. The
   surface is `min(100%, 100svh - 14rem) × zoom`, so at 10 % a whole 1000-unit
-  board is 100 px and nothing else clamps its size.
-* **Centre anchoring** (`zoomScrollOffset`) — the ± buttons are not on the
-  canvas, so there is no pointer to anchor: a zoom keeps the board point under
-  the **middle of the pane** under that middle. The board fraction is captured
-  before the surface resizes, and the scroll is corrected in a layout effect
-  after it from the live rects, so a browser clamp while the range changes
-  cannot skew the result. Zooming in from a centred board no longer jumps to
-  the inline-start corner.
+  board is 100 px, and at 32× a `base` = 4 cell is ~87 px on a 900-px-tall
+  window — drawing size, which the old 4× ceiling was not.
+* **Wheel zoom** — the plain wheel (no modifier) over the canvas **zooms**:
+  one notch walks one stop through `nextZoom`, and the board fraction under
+  the **pointer** stays under it. Trackpads stream tiny deltas, so
+  `wheelSteps` banks them in ~60 px notches (`deltaMode` lines ×16, pages
+  ×100) and drops the bank when the direction flips; the listener is attached
+  by hand on the viewport because React's `onWheel` is passive and could not
+  `preventDefault()` the pane's own scroll. A notch during a pointer gesture
+  is swallowed — a mid-drag zoom would remap the gesture's coordinates. The
+  consequence is intended: the viewport no longer wheel-scrolls; the hand tool
+  and the scrollbars still pan.
+* **Anchoring** (`zoomScrollOffset`) — a zoom keeps one board point fixed on
+  screen: the **pointer** for a wheel notch, the **middle of the pane** for
+  the ± buttons (which are not on the canvas, so there is no pointer to
+  anchor). The board fraction is captured before the surface resizes, and the
+  scroll is corrected in a layout effect after it from the live rects, so a
+  browser clamp while the range changes cannot skew the result. Zooming in
+  from a centred board no longer jumps to the inline-start corner.
 
 ## 7. Resolved decisions (engine)
 

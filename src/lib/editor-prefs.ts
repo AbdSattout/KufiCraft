@@ -36,10 +36,11 @@ export const MAX_INK_SWATCHES = 8;
 export const DEFAULT_ZOOM = 1;
 /**
  * Zoom bounds: a board far bigger than the pane must still be viewable whole
- * (0.1) and a dense one workable up close (4).
+ * (0.1), and a dense one needs more than the old 4× ceiling up close — a cell
+ * of `base` 4 is ~3 px at zoom 1 on a desktop surface, so the ladder goes to 32.
  */
 export const MIN_ZOOM = 0.1;
-export const MAX_ZOOM = 4;
+export const MAX_ZOOM = 32;
 
 export interface EditorPrefs {
   tool: ToolId;

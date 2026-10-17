@@ -686,9 +686,9 @@ export function panScrollOffset(
   };
 }
 
-/** Nice zoom stops, covering the whole range the prefs allow (0.1 … 4). */
+/** Nice zoom stops, covering the whole range the prefs allow (0.1 … 32). */
 export const ZOOM_STOPS: readonly number[] = [
-  0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4,
+  0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4, 6, 8, 12, 16, 24, 32,
 ];
 
 /**
@@ -718,30 +718,79 @@ export function zoomPercent(zoom: number): number {
   return Math.round(zoom * 100);
 }
 
+/* Wheel delta normalisation (plain-wheel zoom). */
+
+/** Pixels of wheel travel that count as one notch on the zoom ladder. */
+const WHEEL_NOTCH_PX = 60;
+/** A `deltaMode 1` (lines) delta, in pixels — Firefox sends ~3 per notch. */
+const WHEEL_LINE_PX = 16;
+/** A `deltaMode 2` (pages) delta, in pixels. */
+const WHEEL_PAGE_PX = 100;
+
+/** One wheel event, normalised: whole notches plus what is banked. */
+export interface WheelStep {
+  /** Pixels banked towards the next notch (same sign as the last delta). */
+  pending: number;
+  /** Whole notches this event carried, signed like `deltaY`. */
+  steps: number;
+}
+
+/**
+ * Turns one wheel event into whole notches, banking the remainder.
+ *
+ * One notch is ~60 px of travel. A notched mouse emits one 100 px event, but a
+ * trackpad or a free-spinning wheel emits a stream of small deltas that would
+ * otherwise walk the whole ladder in one flick; `pending` carries the pixels
+ * banked between events. When the direction flips the bank is dropped, so the
+ * leftover of one direction can never cancel the first notch of the other.
+ *
+ * The raw delta is in the event's `deltaMode` units: lines (`1`) and pages
+ * (`2`) have to be converted before the pixel threshold means anything. Signs
+ * follow `deltaY` (positive = scrolled down); the caller maps that to a zoom
+ * direction.
+ */
+export function wheelSteps(
+  pending: number,
+  deltaY: number,
+  deltaMode: number,
+): WheelStep {
+  const pixels =
+    deltaY *
+    (deltaMode === 1 ? WHEEL_LINE_PX : deltaMode === 2 ? WHEEL_PAGE_PX : 1);
+  if (!Number.isFinite(pixels) || pixels === 0) return { pending, steps: 0 };
+  const banked = Math.sign(pending) === Math.sign(pixels) ? pending : 0;
+  const total = banked + pixels;
+  // `|| 0` folds `Math.trunc`'s -0 into 0: a zero-count step has no direction.
+  const steps = Math.trunc(total / WHEEL_NOTCH_PX) || 0;
+  return { pending: total - steps * WHEEL_NOTCH_PX, steps };
+}
+
 /**
  * The scroll offset that keeps `anchor` — a board fraction (0…1 of the
- * viewBox) that sat under the middle of the pane before a zoom — under that
- * same middle after the surface has its new size.
+ * viewBox) that sat under `focus` before a zoom — under that same point after
+ * the surface has the new size.
  *
- * The inputs are the *measured* live rects (taken after the new size is laid
- * out but before the scroll is moved) plus the current offset, so the maths
- * also survives the browser clamping the old offset while the range shrank,
- * and it needs no knowledge of padding, the `m-auto` centring, or the
- * horizontal convention: a scroll container always moves its content opposite
- * to `scrollLeft`, in `dir="rtl"` exactly as in LTR. Zooming is driven by the
- * status-bar buttons — there is no pointer on the board to anchor — so the
- * pane centre is the invariant (docs/CANVAS.md §6).
+ * `focus` is a client-space point: a wheel notch passes the **pointer** it
+ * landed on, while the ± buttons omit it so the **middle of the pane** stays
+ * put (they are not on the canvas, so there is no pointer to anchor). The
+ * inputs are the *measured* live rects (taken after the new size is laid out
+ * but before the scroll is moved) plus the current offset, so the maths also
+ * survives the browser clamping the old offset while the range changed, and it
+ * needs no knowledge of padding, the `m-auto` centring, or the horizontal
+ * convention: a scroll container always moves its content opposite to
+ * `scrollLeft`, in `dir="rtl"` exactly as in LTR (docs/CANVAS.md §6).
  */
 export function zoomScrollOffset(
   start: ScrollOffset,
   surface: ClientRect,
   pane: ClientRect,
   anchor: Point,
+  focus?: Point,
 ): ScrollOffset {
-  const centreX = pane.left + pane.width / 2;
-  const centreY = pane.top + pane.height / 2;
-  const targetLeft = centreX - anchor.x * surface.width;
-  const targetTop = centreY - anchor.y * surface.height;
+  const focusX = focus?.x ?? pane.left + pane.width / 2;
+  const focusY = focus?.y ?? pane.top + pane.height / 2;
+  const targetLeft = focusX - anchor.x * surface.width;
+  const targetTop = focusY - anchor.y * surface.height;
   return {
     left: start.left + (surface.left - targetLeft),
     top: start.top + (surface.top - targetTop),

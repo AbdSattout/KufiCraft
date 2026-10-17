@@ -54,9 +54,11 @@ import {
   isProjectId,
   itemsEqual,
   nextRotation,
+  nextZoom,
   panScrollOffset,
   recolourItems,
   reshapeItems,
+  wheelSteps,
   zoomScrollOffset,
 } from "./interaction";
 import type {
@@ -91,7 +93,6 @@ import { MESSAGES, errorMessage } from "./messages";
 import type { Point, Rect } from "@/lib/canvas/geometry";
 
 export { MAX_ZOOM, MIN_ZOOM } from "@/lib/editor-prefs";
-export const ZOOM_STEP = 0.25;
 
 /** Quiet period before the last committed config is remembered for new boards. */
 export const LAST_CONFIG_DELAY_MS = 400;
@@ -145,7 +146,12 @@ export interface EditorController {
   clearAll: () => void;
 
   zoom: number;
-  setZoom: (zoom: number) => void;
+  /**
+   * Zoom to `next`, clamped to the prefs' range. `focus` is a client-space
+   * point the board keeps fixed: the wheel passes the pointer, the ± buttons
+   * omit it so the middle of the pane stays put.
+   */
+  setZoom: (zoom: number, focus?: Point) => void;
 
   /** The construction grid guide — a user preference, saved in the prefs. */
   showGrid: boolean;
@@ -205,6 +211,12 @@ export function useEditor(
   const [state, setState] = useState<ToolState>(NO_STATE);
   const [history, setHistory] = useState<HistoryState>(EMPTY_HISTORY);
   const [zoom, setZoomState] = useState(initialPrefs.zoom);
+  /**
+   * The live zoom, for the hand-attached wheel listener: React's `onWheel` is
+   * passive, so the listener cannot live in JSX, and it must walk the ladder
+   * from the latest value rather than a render-time closure.
+   */
+  const zoomRef = useRef(initialPrefs.zoom);
   const [showGrid, setShowGridState] = useState(initialPrefs.showGrid);
   const labelRef = useRef("رسم");
   /** The line tool's run survives re-renders without a pointer being down. */
@@ -238,11 +250,21 @@ export function useEditor(
     scroll: ScrollOffset;
   } | null>(null);
   /**
-   * The board point (0…1 of the viewBox) that sat under the middle of the pane
-   * when a zoom was requested; the scroll is adjusted to keep it there once
+   * Whether a primary pointer is down on the canvas. A wheel notch mid-drag
+   * must not zoom: the zoom remaps client → viewBox, so the next interpolated
+   * pen position would jump and paint a spurious run. `stateRef` alone cannot
+   * answer this — it also holds click sequences that survive pointer-up.
+   */
+  const pointerDownRef = useRef(false);
+  /**
+   * The board point (0…1 of the viewBox) that sat under the zoom's focus
+   * point — the pane centre for the ± buttons, the pointer for a wheel notch —
+   * when the zoom was requested; the scroll is adjusted to keep it there once
    * the surface has its new size (`zoomScrollOffset`).
    */
-  const zoomAnchorRef = useRef<Point | null>(null);
+  const zoomAnchorRef = useRef<{ point: Point; focus: Point | null } | null>(
+    null,
+  );
 
   const setToolStateAndReset = useCallback((next: ToolId) => {
     setToolState(next);
@@ -329,6 +351,7 @@ export function useEditor(
   const onPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
       if (event.button !== 0) return;
+      pointerDownRef.current = true;
       const active = toolOf(tool);
       const view = viewportRef.current;
       if (active.pans && view) {
@@ -392,6 +415,7 @@ export function useEditor(
 
   const onPointerUp = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
+      pointerDownRef.current = false;
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId);
       }
@@ -410,6 +434,7 @@ export function useEditor(
   );
 
   const onPointerCancel = useCallback(() => {
+    pointerDownRef.current = false;
     panRef.current = null;
     stateRef.current = NO_STATE;
     setState(NO_STATE);
@@ -627,35 +652,40 @@ export function useEditor(
   }, [config, document.name, items]);
 
   const setZoom = useCallback(
-    (next: number) => {
+    (next: number, focus?: Point) => {
       const value = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, next));
-      if (value === zoom) return;
+      if (value === zoomRef.current) return;
       const surface = surfaceRef.current;
       const view = viewportRef.current;
       if (surface && view) {
-        // Remember the board point under the middle of the pane before the
-        // surface takes its new size; the layout effect below puts it back.
+        // Remember the board point under `focus` (the wheel's pointer) or the
+        // middle of the pane before the surface takes its new size; the layout
+        // effect below puts it back.
         const surfaceRect = surface.getBoundingClientRect();
         const paneRect = view.getBoundingClientRect();
         if (surfaceRect.width > 0 && surfaceRect.height > 0) {
+          const target = focus ?? {
+            x: paneRect.left + paneRect.width / 2,
+            y: paneRect.top + paneRect.height / 2,
+          };
           zoomAnchorRef.current = {
-            x:
-              (paneRect.left + paneRect.width / 2 - surfaceRect.left) /
-              surfaceRect.width,
-            y:
-              (paneRect.top + paneRect.height / 2 - surfaceRect.top) /
-              surfaceRect.height,
+            point: {
+              x: (target.x - surfaceRect.left) / surfaceRect.width,
+              y: (target.y - surfaceRect.top) / surfaceRect.height,
+            },
+            focus: focus ?? null,
           };
         }
       }
+      zoomRef.current = value;
       setZoomState(value);
     },
-    [zoom],
+    [],
   );
 
-  // Zooming anchors the centre of the pane, not the inline-start corner: the
-  // board point that was under the middle of the pane is measured before the
-  // resize and the scroll is corrected here, in the same frame as the new
+  // A zoom keeps its focus point fixed — the pane centre for the ± buttons,
+  // the pointer for a wheel notch: the board point under it is measured before
+  // the resize and the scroll is corrected here, in the same frame as the new
   // layout, so nothing jumps.
   useLayoutEffect(() => {
     const anchor = zoomAnchorRef.current;
@@ -667,11 +697,53 @@ export function useEditor(
       { left: view.scrollLeft, top: view.scrollTop },
       surface.getBoundingClientRect(),
       view.getBoundingClientRect(),
-      anchor,
+      anchor.point,
+      anchor.focus ?? undefined,
     );
     view.scrollLeft = next.left;
     view.scrollTop = next.top;
   }, [zoom]);
+
+  // Plain-wheel zoom over the canvas, anchored at the pointer. React attaches
+  // `wheel` passively, so a `preventDefault()` in `onWheel` would be a no-op
+  // (with a warning); the listener is attached by hand instead. It lives on
+  // the viewport element only, so the sidebar and panels keep their own wheel
+  // behaviour, and the viewport no longer wheel-scrolls — the hand tool and
+  // the scrollbars still pan (docs/CANVAS.md §6).
+  useEffect(() => {
+    if (!enabled || document.status !== "ready") return;
+    const view = viewportRef.current;
+    if (!view) return;
+    // Pixels banked between notches; lives with the listener, so a reset is
+    // harmless — a fresh listener starts a fresh gesture.
+    let banked = 0;
+    const onWheel = (event: WheelEvent) => {
+      if (pointerDownRef.current) {
+        // A live gesture owns the mapping: zooming now would remap the
+        // pointer mid-drag, and the next interpolated position would jump.
+        event.preventDefault();
+        return;
+      }
+      if (event.deltaY === 0) return; // horizontal-only wheel: not ours
+      event.preventDefault();
+      const { pending, steps } = wheelSteps(
+        banked,
+        event.deltaY,
+        event.deltaMode,
+      );
+      banked = pending;
+      if (steps === 0) return;
+      // Scrolling up zooms in, like every map: `steps` is signed by `deltaY`.
+      const direction: 1 | -1 = steps > 0 ? -1 : 1;
+      let next = zoomRef.current;
+      for (let index = 0; index < Math.abs(steps); index++) {
+        next = nextZoom(next, direction, MIN_ZOOM, MAX_ZOOM);
+      }
+      setZoom(next, { x: event.clientX, y: event.clientY });
+    };
+    view.addEventListener("wheel", onWheel, { passive: false });
+    return () => view.removeEventListener("wheel", onWheel);
+  }, [document.status, enabled, setZoom]);
 
   /* ---------------------------------------------------------------- */
   /* Preferences (localStorage, best-effort)                           */

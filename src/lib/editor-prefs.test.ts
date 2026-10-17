@@ -5,6 +5,8 @@ import {
   EDITOR_PREFS_KEY,
   LAST_CONFIG_KEY,
   MAX_INK_SWATCHES,
+  MAX_ZOOM,
+  MIN_ZOOM,
   type StorageLike,
   loadEditorPrefs,
   loadLastConfig,
@@ -118,17 +120,33 @@ describe("editor preferences", () => {
   });
 
   it("clamps zoom into its range", () => {
+    // The ceiling is high enough to draw in: a `base` = 4 cell is ~3 px at
+    // zoom 1, so 400 % was not enough (docs/CANVAS.md §6).
+    expect(MAX_ZOOM).toBe(32);
     const prefs = loadEditorPrefs(
       new MemoryStorage({
         [EDITOR_PREFS_KEY]: JSON.stringify({ zoom: 99 }),
       }),
     );
-    expect(prefs.zoom).toBe(4);
+    expect(prefs.zoom).toBe(MAX_ZOOM);
 
     const low = loadEditorPrefs(
       new MemoryStorage({ [EDITOR_PREFS_KEY]: JSON.stringify({ zoom: 0.01 }) }),
     );
-    expect(low.zoom).toBe(0.1);
+    expect(low.zoom).toBe(MIN_ZOOM);
+  });
+
+  it("accepts a stored zoom above the old 400 % ceiling", () => {
+    // The clamp follows the constants on read — a zoom stored while the top
+    // was 4 must not be rounded down to it now the ladder goes to 32.
+    const prefs = loadEditorPrefs(
+      new MemoryStorage({ [EDITOR_PREFS_KEY]: JSON.stringify({ zoom: 8 }) }),
+    );
+    expect(prefs.zoom).toBe(8);
+    const atTop = loadEditorPrefs(
+      new MemoryStorage({ [EDITOR_PREFS_KEY]: JSON.stringify({ zoom: MAX_ZOOM }) }),
+    );
+    expect(atTop.zoom).toBe(MAX_ZOOM);
   });
 
   it("defaults the grid guide on and accepts only a boolean", () => {

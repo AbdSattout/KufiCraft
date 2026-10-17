@@ -47,8 +47,10 @@ import {
   rectsIntersect,
   reshapeItems,
   shiftSelection,
+  wheelSteps,
   zoomPercent,
   zoomScrollOffset,
+  ZOOM_STOPS,
 } from "./interaction";
 import type { ScrollLike, ToolContext } from "./interaction";
 
@@ -758,27 +760,49 @@ describe("viewport scrolling", () => {
 
 describe("zoom controls", () => {
   it("steps through the stop ladder", () => {
-    // The prefs' range is passed in (`MIN_ZOOM`…`MAX_ZOOM`, 0.1…4), so the
+    // The prefs' range is passed in (`MIN_ZOOM`…`MAX_ZOOM`, 0.1…32), so the
     // ladder works for any configured range.
-    expect(nextZoom(1, 1, 0.1, 4)).toBe(1.5);
-    expect(nextZoom(1.5, 1, 0.1, 4)).toBe(2);
-    expect(nextZoom(3, 1, 0.1, 4)).toBe(4);
-    expect(nextZoom(1, -1, 0.1, 4)).toBe(0.75);
-    expect(nextZoom(0.5, -1, 0.1, 4)).toBe(0.25);
-    expect(nextZoom(0.25, -1, 0.1, 4)).toBe(0.1);
+    expect(nextZoom(1, 1, 0.1, 32)).toBe(1.5);
+    expect(nextZoom(1.5, 1, 0.1, 32)).toBe(2);
+    expect(nextZoom(3, 1, 0.1, 32)).toBe(4);
+    expect(nextZoom(4, 1, 0.1, 32)).toBe(6);
+    expect(nextZoom(8, 1, 0.1, 32)).toBe(12);
+    expect(nextZoom(24, 1, 0.1, 32)).toBe(32);
+    expect(nextZoom(1, -1, 0.1, 32)).toBe(0.75);
+    expect(nextZoom(0.5, -1, 0.1, 32)).toBe(0.25);
+    expect(nextZoom(0.25, -1, 0.1, 32)).toBe(0.1);
+  });
+
+  it("reaches the raised 32× ceiling and stops there", () => {
+    expect(ZOOM_STOPS[0]).toBe(0.1);
+    expect(ZOOM_STOPS[ZOOM_STOPS.length - 1]).toBe(32);
+    // The ± ladder walks every stop above the old 4× ceiling…
+    let zoom = 4;
+    const walked = [zoom];
+    while (zoom < 32) {
+      const next = nextZoom(zoom, 1, 0.1, 32);
+      expect(next).toBeGreaterThan(zoom);
+      zoom = next;
+      walked.push(zoom);
+    }
+    expect(walked).toEqual([4, 6, 8, 12, 16, 24, 32]);
+    // …and clamps at the top instead of running past it.
+    expect(nextZoom(32, 1, 0.1, 32)).toBe(32);
   });
 
   it("stops at the bounds and snaps a stale value to the range", () => {
-    expect(nextZoom(4, 1, 0.1, 4)).toBe(4);
-    expect(nextZoom(0.1, -1, 0.1, 4)).toBe(0.1);
+    expect(nextZoom(32, 1, 0.1, 32)).toBe(32);
+    expect(nextZoom(0.1, -1, 0.1, 32)).toBe(0.1);
     // A zoom stored while the range was 0.5…2 must not escape the narrower
     // ladder, and vice versa.
     expect(nextZoom(1, 1, 0.5, 2)).toBe(1.5);
     expect(nextZoom(2, 1, 0.5, 2)).toBe(2);
     expect(nextZoom(0.4, -1, 0.5, 2)).toBe(0.5);
+    // A zoom stored above the old 4× ceiling walks on instead of being the top.
+    expect(nextZoom(8, 1, 0.1, 32)).toBe(12);
     // Between stops: the next one up, the previous one down.
-    expect(nextZoom(0.3, 1, 0.1, 4)).toBe(0.5);
-    expect(nextZoom(0.3, -1, 0.1, 4)).toBe(0.25);
+    expect(nextZoom(0.3, 1, 0.1, 32)).toBe(0.5);
+    expect(nextZoom(0.3, -1, 0.1, 32)).toBe(0.25);
   });
 
   it("labels the zoom as a whole percentage", () => {
@@ -787,6 +811,7 @@ describe("zoom controls", () => {
     expect(zoomPercent(1)).toBe(100);
     expect(zoomPercent(1.5)).toBe(150);
     expect(zoomPercent(4)).toBe(400);
+    expect(zoomPercent(32)).toBe(3200);
   });
 
   it("keeps the anchored board point under the middle of the pane", () => {
@@ -816,5 +841,69 @@ describe("zoom controls", () => {
         { x: 0.4, y: 0.4 },
       ),
     ).toEqual({ left: 100, top: 100 });
+  });
+
+  it("keeps the anchored board point under the pointer when one is given", () => {
+    const pane = { left: 0, top: 0, width: 1000, height: 1000 };
+    // Same RTL surface and starting offset as above, but the notch landed on
+    // the pointer at (750, 250): the fraction under it (0.75, 0.25 of the
+    // board) must follow the pointer, not the pane centre. The board point
+    // currently sits at 625/375, so the surface travels +125 on x (deeper into
+    // the RTL scroller's negative range) and -125 on y.
+    expect(
+      zoomScrollOffset(
+        { left: 0, top: 0 },
+        { left: -500, top: 0, width: 1500, height: 1500 },
+        pane,
+        { x: 0.75, y: 0.25 },
+        { x: 750, y: 250 },
+      ),
+    ).toEqual({ left: -125, top: 125 });
+  });
+});
+
+describe("wheel zoom normalisation", () => {
+  it("banks pixel deltas into ~60 px notches", () => {
+    // A trackpad streams small deltas: nothing happens until they add up.
+    const first = wheelSteps(0, 20, 0);
+    expect(first).toEqual({ pending: 20, steps: 0 });
+    const second = wheelSteps(first.pending, 20, 0);
+    expect(second).toEqual({ pending: 40, steps: 0 });
+    expect(wheelSteps(second.pending, 20, 0)).toEqual({ pending: 0, steps: 1 });
+  });
+
+  it("counts a notched wheel's 100 px event as one notch", () => {
+    expect(wheelSteps(0, 100, 0)).toEqual({ pending: 40, steps: 1 });
+    // The banked remainder joins the next event.
+    expect(wheelSteps(40, 100, 0)).toEqual({ pending: 20, steps: 2 });
+  });
+
+  it("normalises line and page deltas (deltaMode 1 / 2)", () => {
+    // Firefox reports lines (3 per notch): one line is 16 px, so a 3-line
+    // event is 48 px — under a notch, and it must not be read as pixels.
+    expect(wheelSteps(0, -3, 1)).toEqual({ pending: -48, steps: 0 });
+    expect(wheelSteps(-12, -3, 1)).toEqual({ pending: 0, steps: -1 });
+    // A page is a whole notch with pixels to spare.
+    expect(wheelSteps(0, 1, 2).steps).toBe(1);
+  });
+
+  it("drops the bank when the direction flips", () => {
+    // 55 px banked zooming in, then the wheel reverses: the leftover must not
+    // cancel part of the first notch the other way (that is what stops a
+    // trackpad's small correction flick from closing a whole step).
+    expect(wheelSteps(55, -10, 0)).toEqual({ pending: -10, steps: 0 });
+    expect(wheelSteps(-10, -55, 0)).toEqual({ pending: -5, steps: -1 });
+  });
+
+  it("ignores zero and non-finite deltas", () => {
+    expect(wheelSteps(30, 0, 0)).toEqual({ pending: 30, steps: 0 });
+    expect(wheelSteps(30, Number.NaN, 0)).toEqual({ pending: 30, steps: 0 });
+  });
+
+  it("maps one scroll-up notch to one ladder stop in", () => {
+    const { steps } = wheelSteps(0, -100, 0);
+    expect(steps).toBe(-1);
+    // The handler's rule: `deltaY > 0` (wheel down) zooms out.
+    expect(nextZoom(1, steps > 0 ? -1 : 1, 0.1, 32)).toBe(1.5);
   });
 });
