@@ -7,8 +7,8 @@
  *   • viewport → viewBox mapping (`clientToViewBox`) including CSS scaling
  *     and RTL — the SVG is fitted with `preserveAspectRatio="xMidYMid meet"`,
  *     so the mapping is a uniform scale plus a centred letterbox offset;
- *   • anchoring (`anchorAt`, `inkAnchorAt`) and hit testing (`hitTest`) — the
- *     item classes answer for their own geometry;
+ *   • anchoring (`anchorAt`, `inkAnchorAt`, `anchorsAlongLine`) and hit testing
+ *     (`hitTest`) — the item classes answer for their own geometry;
  *   • selection operations (move, recolour, reshape, duplicate, delete);
  *   • the shared types the tools speak: `ToolId`, `ToolContext`, `DrawStyle`,
  *     `ArcStyle`.
@@ -21,6 +21,7 @@ import {
   CIRCULAR_SECTORS,
   VIEWBOX_SIZE,
   itemSignature as signatureOf,
+  maxGridIndex,
   tileKey,
 } from "@/lib/canvas/model";
 import type {
@@ -35,6 +36,7 @@ import type {
   ShapeId,
 } from "@/lib/canvas/model";
 import { cellCentre, pointToAnchor, pointToCell } from "@/lib/canvas/grid";
+import { shortestSectorDelta } from "@/lib/canvas/geometry";
 import { lineItems, removeItems } from "@/lib/canvas/ops";
 import {
   Arc,
@@ -500,8 +502,123 @@ export function linePreview(
   return lineItems(config, path, closed);
 }
 
+/* ------------------------------------------------------------------ */
+/* The pen's stroke fill                                               */
+/* ------------------------------------------------------------------ */
+
 /* Anchor identity helpers used by the pen's de-duplication. */
 export { anchorKey };
+
+/** Integer cell of an anchor, or `null` when it is not a pair of numbers. */
+function integerCell(anchor: Anchor): Cell | null {
+  if (!Number.isFinite(anchor.column) || !Number.isFinite(anchor.row)) {
+    return null;
+  }
+  return { column: Math.trunc(anchor.column), row: Math.trunc(anchor.row) };
+}
+
+/**
+ * Every cell a straight drag from one anchor to another crosses, in path
+ * order — the fill for the cells a fast pointer flew over between two reported
+ * positions (docs/CANVAS.md §6, «Pen rules»).
+ *
+ * The start anchor is dropped, the target is included, and the cells in
+ * between carry the target's zone. The walk is a **supercover** rasterisation
+ * of the segment between the two cell centres: it advances one cell per
+ * gridline the segment crosses, and a segment that passes exactly through a
+ * cell corner reports *both* cells that share the corner — a diagonal stroke
+ * stays edge-connected instead of only touching at the corners, which is what
+ * would read as dotted at any `ratio < 1`.
+ *
+ * Identical cells yield nothing. On the circular grid the walk takes the
+ * shortest way round the sectors and folds every row back into
+ * `[0, CIRCULAR_SECTORS)`. The walk is capped at the grid's own cell count, so
+ * degenerate input (non-finite coordinates, or cells far outside the board)
+ * terminates without NaN instead of running away.
+ */
+export function anchorsAlongLine(
+  config: ProjectConfig,
+  from: Anchor,
+  to: Anchor,
+): Anchor[] {
+  const start = integerCell(from);
+  const end = integerCell(to);
+  if (start === null || end === null) return [];
+  const deltaColumn = end.column - start.column;
+  const deltaRow =
+    config.gridType === "circular"
+      ? shortestSectorDelta(start.row, end.row)
+      : end.row - start.row;
+  if (deltaColumn === 0 && deltaRow === 0) return [];
+
+  const stepColumn = Math.sign(deltaColumn);
+  const stepRow = Math.sign(deltaRow);
+  const spreadColumn = Math.abs(deltaColumn);
+  const spreadRow = Math.abs(deltaRow);
+  const side = maxGridIndex(config.base) + 1;
+  const cap = side * side;
+  const cells: Cell[] = [];
+  let column = start.column;
+  let row = start.row;
+
+  if (spreadRow === 0) {
+    for (let index = 1; index <= spreadColumn && cells.length < cap; index++) {
+      cells.push({ column: start.column + index * stepColumn, row: start.row });
+    }
+  } else if (spreadColumn === 0) {
+    for (let index = 1; index <= spreadRow && cells.length < cap; index++) {
+      cells.push({ column: start.column, row: start.row + index * stepRow });
+    }
+  } else {
+    // Both axes move, so walk gridline crossing by gridline crossing. Each
+    // axis counts its own crossings (`1, 3, 5, …` half-steps); scaling each
+    // counter by the other axis' span compares the two crossing positions in
+    // exact integer arithmetic, so a corner crossing (`equal`) cannot be lost
+    // to float drift.
+    let nextColumn = 1;
+    let nextRow = 1;
+    while ((column !== end.column || row !== end.row) && cells.length < cap) {
+      const columnAt = nextColumn * spreadRow;
+      const rowAt = nextRow * spreadColumn;
+      if (columnAt < rowAt) {
+        column += stepColumn;
+        nextColumn += 2;
+        cells.push({ column, row });
+      } else if (rowAt < columnAt) {
+        row += stepRow;
+        nextRow += 2;
+        cells.push({ column, row });
+      } else {
+        // Exactly through the corner: report both cells that share it, then
+        // the diagonal cell the segment continues into.
+        cells.push({ column: column + stepColumn, row });
+        cells.push({ column, row: row + stepRow });
+        column += stepColumn;
+        row += stepRow;
+        nextColumn += 2;
+        nextRow += 2;
+        cells.push({ column, row });
+      }
+    }
+  }
+
+  const anchors: Anchor[] = [];
+  const seen = new Set<string>();
+  for (const cell of cells) {
+    const anchor: Anchor = {
+      column: cell.column,
+      row: config.gridType === "circular" ? wrapSector(cell.row) : cell.row,
+      zone: to.zone,
+    };
+    // Identity is the anchor's key: a fragment is never listed twice, and the
+    // wrap on the circular grid can fold two raw cells onto one.
+    const id = anchorKey(anchor);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    anchors.push(anchor);
+  }
+  return anchors;
+}
 
 /* ------------------------------------------------------------------ */
 /* Viewport: pan and zoom (the hand tool)                              */

@@ -145,9 +145,9 @@ see `docs/CANVAS.md` §6 for the contract.
 | tool | key | behaviour |
 | --- | --- | --- |
 | تحديد (select) | `V` | click selects (shift toggles), drag on an item moves the selection, drag on empty space marquee-selects |
-| قلم (pen) | `P` | press/drag colours the cells the pointer is moved over — one fragment per pointer position, nothing drawn in between, nothing merged |
+| قلم (pen) | `P` | press/drag colours the cells the pointer is moved over — one fragment per cell, a fast drag fills the cells it flew over, nothing merged |
 | خط (line) | `L` | click sequence: click A, click B… commits an open run; click the last point again to end it, click the first one to close it; a drag works too |
-| ممحاة (eraser) | `E` | click/drag removes whatever the pointer touches (the swept items ring as a ghost) |
+| ممحاة (eraser) | `E` | click/drag removes whatever the pointer touches — a fast drag sweeps the cells it flew over (the swept items ring as a ghost) |
 | قوس (arc) | `A` | press-drag-release A→B, or click A then click B; the armed start cell stays highlighted until it commits, and clicking A again cancels |
 | يد (hand) | `H` | drags the *view*, not the board: press and drag to move around a board bigger than the pane, and double click (on the canvas or on the rail button) to put the middle of the board back in the middle |
 

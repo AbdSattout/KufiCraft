@@ -7,8 +7,8 @@
 >
 > Wave 4 rewrote the item model to match the reference app one-to-one: items are
 > **classes** with full-word JSON field names, every tool is a class in a
-> registry, and the pen paints exactly what the pointer crossed. This doc is the
-> v2 contract.
+> registry, and the pen paints the cells the pointer crossed — the ones a fast
+> drag flew over included. This doc is the v2 contract.
 
 ## 1. Coordinate system
 
@@ -125,9 +125,10 @@ Every function is deterministic and side-effect free.
 
 ### Gesture → items
 
-* **`penItems(config, anchors, style)`** — the pen paints **exactly the anchors
-  the pointer crossed**: the tool calls it with the in-flight anchor list, which
-  grows one anchor per pointer position (see §6). Consecutive identical anchors
+* **`penItems(config, anchors, style)`** — the pen paints **the anchors of the
+  stroke**: the tool calls it with the in-flight anchor list, which grows by the
+  cells each pointer event crossed — a fast drag fills the cells between two
+  reported positions (`anchorsAlongLine`, see §6). Consecutive identical anchors
   collapse, and a fragment is always a `tile` — the pen never merges a straight
   run into a bar.
 * **`lineItems(config, points, closed, color)`** — a run with **no diagonal
@@ -199,9 +200,9 @@ name. Adding a tool = one class + one registry line.
 | id | label | key | gesture |
 | --- | --- | --- | --- |
 | `select` | تحديد | `V` | click selects (shift toggles), drag on an item moves the selection (clamped to the grid), drag on empty space marquee-selects |
-| `pen` | قلم | `P` | press/drag colours the cells the pointer is moved over — one fragment per pointer position, nothing in between |
+| `pen` | قلم | `P` | press/drag colours the cells the pointer is moved over — one fragment per cell, and a fast drag fills the cells it flew over (`anchorsAlongLine`) |
 | `line` | خط | `L` | click sequence: click A, click B… commits an open run; click the last point again ends it, click the first one closes it. A drag also works (pointer-up ends the *drag*, not the run). A run with no diagonal segment is squares (`straightLinesAsSquares`, default) or one bar |
-| `eraser` | ممحاة | `E` | click/drag removes whatever the pointer touches |
+| `eraser` | ممحاة | `E` | click/drag removes whatever the pointer touches; a fast drag sweeps the cells it flew over |
 | `arc` | قوس | `A` | press-drag-release A→B, **or** click A then click B (clicking A again cancels) |
 | `hand` | يد | `H` | the one **view** tool: the pointer scrolls the canvas pane (`panScrollOffset`), `KufiTool.pans` tells the controller so, and a double click recentres the board (`centreScroll`) |
 
@@ -214,18 +215,27 @@ name. Adding a tool = one class + one registry line.
 * `ToolState` is the in-flight gesture (`pen`, `erase`, `arc`, `line`, `marquee`,
   `move`, `none`); `ToolPreview` (below) is what the overlay paints.
 
-### Pen rules (the “only what I moved on” contract)
+### Pen rules
 
-1. Every pointer position paints **the one cell under the pointer** (its ink or
-   space fragment, `anchorAt`) — exactly the reference app's pen.
-2. **Nothing is painted between two positions.** A fast flick leaves the cells the
-   browser never reported blank; there is no Bresenham fill and no teleport
-   rule. `docs/PLAN.md` records the round that removed them.
+1. Every pointer position paints **the cell under the pointer** (its ink or
+   space fragment, `anchorAt`) — the reference app's pen.
+2. **A fast drag is filled in.** The pointer reports one position per event and
+   can fly over whole cells, so the tool connects its last anchor to the new one
+   with `anchorsAlongLine` — a supercover walk of the segment between the two
+   cell centres that advances one cell per gridline crossed and reports **both**
+   cells at an exact corner crossing, so a diagonal stroke is edge-connected and
+   never reads as dotted at `ratio < 1`. There is no teleport rule and no
+   maximum gap: a stroke is the line between the positions the browser reported.
 3. Anchors are deduplicated by identity (`anchorKey` = column/row/zone), so a
-   fragment is never listed twice in one stroke.
+   fragment is never listed twice in one stroke: the fill drops the cells the
+   stroke already carries instead of listing them again.
 4. Nothing is previewed before the pointer touches the canvas (no hover ghost):
    the pen has no pending state, and the in-flight fragments are the real items.
 5. Nothing merges: a straight run stays a row of `tile` fragments, never a bar.
+
+The **eraser** sweeps the same way: the reported position is hit-tested exactly,
+and every cell a fast drag flew over is hit-tested at its centre, so a quick
+sweep does not skip the items it passed between two events.
 
 ### Preview
 
@@ -283,6 +293,13 @@ lives in `interaction.ts` and is covered by `interaction.test.ts`:
   prevent creating one.
 * The pen paints **over** what is already there: same key → replaced in place,
   which is how recolouring a fragment works.
+* The pen's gap fill is **back** (`anchorsAlongLine`, reversing the round that
+  had removed it — a fast drag leaving scattered points was the live-testing
+  complaint). It is a supercover walk, not a Bresenham line: both cells are
+  reported at a corner crossing, there is no teleport rule and no maximum gap,
+  the in-between cells carry the target anchor's zone, and the walk is capped at
+  the grid's own cell count. The pen still never merges, and the eraser sweeps
+  with the same fill.
 
 ## 8. Quick start for consumers
 

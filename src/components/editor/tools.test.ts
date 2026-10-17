@@ -70,39 +70,51 @@ function expectArc(state: ToolState): Extract<ToolState, { kind: "arc" }> {
 /* ------------------------------------------------------------------ */
 
 describe("PenTool", () => {
-  it("paints the cell under the pointer and nothing in between", () => {
+  it("connects the cells a fast drag flew over", () => {
     const ctx = context();
     const start = beginTool("pen", ctx, NO_STATE, input(pointOf(1, 1)));
     const moved = moveTool("pen", ctx, start.state, input(pointOf(5, 1)));
-    // Only the positions the pointer reported — never the cells a Bresenham
-    // walk would have crossed on the way (docs/CANVAS.md §Pen).
+    // One pointer event jumped four cells; the stroke is the whole run
+    // (docs/CANVAS.md §Pen), not just the two reported positions.
     expect(expectPen(moved.state).anchors).toEqual([
       { column: 1, row: 1, zone: 0 },
+      { column: 2, row: 1, zone: 0 },
+      { column: 3, row: 1, zone: 0 },
+      { column: 4, row: 1, zone: 0 },
       { column: 5, row: 1, zone: 0 },
     ]);
   });
 
-  it("keeps only the cells the pointer was actually over", () => {
+  it("fills each segment of its own sweep, in order and without repeats", () => {
     const ctx = context();
     let state = beginTool("pen", ctx, NO_STATE, input(pointOf(1, 1))).state;
     state = moveTool("pen", ctx, state, input(pointOf(5, 1))).state;
     state = moveTool("pen", ctx, state, input(pointOf(5, 5))).state;
 
-    expect(expectPen(state).anchors).toEqual([
-      { column: 1, row: 1, zone: 0 },
-      { column: 5, row: 1, zone: 0 },
-      { column: 5, row: 5, zone: 0 },
+    expect(
+      expectPen(state).anchors.map((anchor) => `${anchor.column}:${anchor.row}`),
+    ).toEqual([
+      "1:1",
+      "2:1",
+      "3:1",
+      "4:1",
+      "5:1",
+      "5:2",
+      "5:3",
+      "5:4",
+      "5:5",
     ]);
 
-    // A cell the pointer jumped over stays blank.
-    state = moveTool("pen", ctx, state, input(pointOf(6, 5))).state;
+    // Only the segment the pointer just swept is filled: the pen never draws
+    // from the stroke's first anchor to the cursor, so a cell off both runs
+    // stays blank.
     const keys = new Set(
       expectPen(state).anchors.map((anchor) =>
         tileKey(anchor.column, anchor.row, anchor.zone),
       ),
     );
-    expect(keys.has(tileKey(4, 1, 0))).toBe(false);
-    expect(keys.has(tileKey(5, 3, 0))).toBe(false);
+    expect(keys.has(tileKey(2, 2, 0))).toBe(false);
+    expect(keys.has(tileKey(4, 3, 0))).toBe(false);
   });
 
   it("is unchanged when the pointer stays inside the same cell", () => {
@@ -121,11 +133,28 @@ describe("PenTool", () => {
 
     expect(out.state).toBe(NO_STATE);
     expect(out.commit?.label).toBe("رسم");
-    // Two fragments — the pen never merges a straight run into a bar.
-    expect(out.commit?.items).toHaveLength(2);
+    // Three fragments — the run the pointer swept, never merged into a bar.
+    expect(out.commit?.items).toHaveLength(3);
     expect(out.commit?.items.map((item) => item.type)).toEqual([
       "tile",
       "tile",
+      "tile",
+    ]);
+  });
+
+  it("commits a continuous run of tiles for a far drag", () => {
+    const ctx = context();
+    const start = beginTool("pen", ctx, NO_STATE, input(pointOf(2, 2)));
+    const moved = moveTool("pen", ctx, start.state, input(pointOf(7, 2)));
+    const out = endTool("pen", ctx, moved.state);
+
+    expect(out.commit?.items.map((item) => item.key)).toEqual([
+      tileKey(2, 2, 0),
+      tileKey(3, 2, 0),
+      tileKey(4, 2, 0),
+      tileKey(5, 2, 0),
+      tileKey(6, 2, 0),
+      tileKey(7, 2, 0),
     ]);
   });
 
@@ -373,6 +402,21 @@ describe("EraserTool", () => {
     expect(out.commit?.label).toBe("مسح");
     expect(out.commit?.items).toEqual([]);
     expect(out.commit?.selection).toEqual([]);
+  });
+
+  it("sweeps the cells a fast drag flew over, not just its endpoints", () => {
+    const items = [1, 3, 5].map((column) =>
+      makeTile({ column, row: 2, zone: 0 }),
+    );
+    const ctx = context(items, { tool: "eraser" });
+
+    const start = beginTool("eraser", ctx, NO_STATE, input(pointOf(1, 2)));
+    const swept = moveTool("eraser", ctx, start.state, input(pointOf(5, 2)));
+    const out = endTool("eraser", ctx, swept.state);
+
+    // Without the sweep the middle tile (3, 2) survives — the pointer never
+    // reported a position over it.
+    expect(out.commit?.items).toEqual([]);
   });
 });
 

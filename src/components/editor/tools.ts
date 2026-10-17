@@ -25,7 +25,9 @@ import { Arc } from "@/lib/canvas/items";
 import {
   anchorKey,
   anchorAt,
+  anchorsAlongLine,
   arcBetween,
+  cellCentre,
   clampDelta,
   hitTest,
   inkAnchorAt,
@@ -61,7 +63,7 @@ export interface ToolInput {
 export type ToolState =
   | { kind: "none" }
   | { kind: "pen"; anchors: Anchor[] }
-  | { kind: "erase"; keys: string[] }
+  | { kind: "erase"; keys: string[]; from: Anchor }
   | { kind: "arc"; from: Anchor; to: Anchor }
   | { kind: "line"; points: Cell[]; hover: Cell | null }
   | { kind: "marquee"; from: Point; to: Point; base: readonly string[] }
@@ -334,11 +336,15 @@ function moveDelta(
 /* ------------------------------------------------------------------ */
 
 /**
- * The pen colours the cells the pointer is moved over: one fragment per
- * pointer position, painted **over** whatever is already there (same key →
- * replaced), which is how recolouring works in the old app. Nothing is drawn
- * between two positions — a stroke is exactly the cells that were visited —
- * and nothing is previewed before the pointer touches the canvas.
+ * The pen colours the cells the pointer is moved over: one fragment per cell,
+ * painted **over** whatever is already there (same key → replaced), which is
+ * how recolouring works in the old app. Nothing is previewed before the
+ * pointer touches the canvas: the in-flight fragments are the real items.
+ *
+ * The pointer reports one position per event, so a fast drag flies over whole
+ * cells. The segment between the last anchor and the new one is filled with
+ * `anchorsAlongLine`, so a stroke stays continuous instead of coming out
+ * scattered — and the pen still never merges a run into a bar.
  */
 class PenTool extends KufiTool {
   readonly id = "pen" as const;
@@ -359,11 +365,22 @@ class PenTool extends KufiTool {
   move(ctx: ToolContext, state: ToolState, input: ToolInput): ToolOutcome {
     if (state.kind !== "pen") return unchanged(state);
     const anchor = anchorAt(ctx.config, input.point);
-    // One fragment per pointer position, and an anchor's key is its identity,
-    // so the same cell is never listed twice.
+    const last = state.anchors[state.anchors.length - 1];
+    // Inside one cell only the fragment under the pointer can change, so the
+    // one-anchor step stays exactly what it was; a step to another cell brings
+    // the cells the pointer flew over along with it.
+    const candidates =
+      last.column === anchor.column && last.row === anchor.row
+        ? [anchor]
+        : anchorsAlongLine(ctx.config, last, anchor);
+    // An anchor's key is its identity, so a fragment is never listed twice and
+    // the already-painted part of the line is dropped, not re-added.
     const taken = new Set(state.anchors.map(anchorKey));
-    if (taken.has(anchorKey(anchor))) return unchanged(state);
-    return { state: { kind: "pen", anchors: [...state.anchors, anchor] } };
+    const fresh = candidates.filter(
+      (candidate) => !taken.has(anchorKey(candidate)),
+    );
+    if (fresh.length === 0) return unchanged(state);
+    return { state: { kind: "pen", anchors: [...state.anchors, ...fresh] } };
   }
 
   end(ctx: ToolContext, state: ToolState): ToolOutcome {
@@ -513,6 +530,12 @@ class LineTool extends KufiTool {
 /* Eraser                                                              */
 /* ------------------------------------------------------------------ */
 
+/**
+ * The eraser removes whatever the pointer touches. The reported position is
+ * exact, and the cells a fast drag flew over between two reported positions are
+ * swept at their centre (in the same spirit as the pen's gap fill), so a quick
+ * sweep does not skip the items it passed over.
+ */
 class EraserTool extends KufiTool {
   readonly id = "eraser" as const;
   readonly label = "ممحاة";
@@ -526,14 +549,31 @@ class EraserTool extends KufiTool {
   begin(ctx: ToolContext, state: ToolState, input: ToolInput): ToolOutcome {
     void state;
     const hit = hitTest(ctx.config, ctx.items, input.point);
-    return { state: { kind: "erase", keys: hit ? [hit.key] : [] } };
+    return {
+      state: {
+        kind: "erase",
+        keys: hit ? [hit.key] : [],
+        from: anchorAt(ctx.config, input.point),
+      },
+    };
   }
 
   move(ctx: ToolContext, state: ToolState, input: ToolInput): ToolOutcome {
     if (state.kind !== "erase") return unchanged(state);
+    const anchor = anchorAt(ctx.config, input.point);
+    const keys = new Set(state.keys);
     const hit = hitTest(ctx.config, ctx.items, input.point);
-    if (!hit || state.keys.includes(hit.key)) return unchanged(state);
-    return { state: { kind: "erase", keys: [...state.keys, hit.key] } };
+    if (hit) keys.add(hit.key);
+    for (const step of anchorsAlongLine(ctx.config, state.from, anchor)) {
+      const brushed = hitTest(
+        ctx.config,
+        ctx.items,
+        cellCentre(ctx.config, step),
+      );
+      if (brushed) keys.add(brushed.key);
+    }
+    if (keys.size === state.keys.length) return unchanged(state);
+    return { state: { kind: "erase", keys: [...keys], from: anchor } };
   }
 
   end(ctx: ToolContext, state: ToolState): ToolOutcome {

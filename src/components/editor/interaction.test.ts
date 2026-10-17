@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_PROJECT_CONFIG, arcKey, lineKey, tileKey } from "@/lib/canvas/model";
+import {
+  DEFAULT_PROJECT_CONFIG,
+  arcKey,
+  lineKey,
+  maxGridIndex,
+  tileKey,
+} from "@/lib/canvas/model";
 import type {
+  Anchor,
   CanvasItem,
   ProjectConfig,
   StrokeItem,
@@ -12,6 +19,7 @@ import {
   DEFAULT_ARC_STYLE,
   DEFAULT_STYLE,
   anchorAt,
+  anchorsAlongLine,
   arcBetween,
   cellLimits,
   centreScroll,
@@ -522,6 +530,116 @@ describe("comparison helpers", () => {
     expect(isProjectId("abc12345678")).toBe(false);
     expect(isProjectId("ABC123456789")).toBe(false);
     expect(isProjectId("../../etc/passwd")).toBe(false);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Anchor lines (the pen's gap fill)                                   */
+/* ------------------------------------------------------------------ */
+
+describe("anchorsAlongLine", () => {
+  const at = (column: number, row: number, zone: Zone = 0): Anchor => ({
+    column,
+    row,
+    zone,
+  });
+
+  it("fills a far horizontal jump with every cell in between", () => {
+    expect(anchorsAlongLine(square, at(1, 2), at(5, 2))).toEqual([
+      at(2, 2),
+      at(3, 2),
+      at(4, 2),
+      at(5, 2),
+    ]);
+  });
+
+  it("walks the same cells back in the reverse direction", () => {
+    expect(anchorsAlongLine(square, at(5, 2), at(1, 2))).toEqual([
+      at(4, 2),
+      at(3, 2),
+      at(2, 2),
+      at(1, 2),
+    ]);
+    expect(anchorsAlongLine(square, at(3, 3), at(1, 1))).toEqual([
+      at(2, 3),
+      at(3, 2),
+      at(2, 2),
+      at(1, 2),
+      at(2, 1),
+      at(1, 1),
+    ]);
+  });
+
+  it("keeps a far diagonal jump free of gaps", () => {
+    // Every exact corner crossing reports both cells that share it, so the
+    // stroke is edge-connected instead of only touching at corners.
+    const anchors = anchorsAlongLine(square, at(0, 0), at(3, 3));
+    expect(anchors).toEqual([
+      at(1, 0),
+      at(0, 1),
+      at(1, 1),
+      at(2, 1),
+      at(1, 2),
+      at(2, 2),
+      at(3, 2),
+      at(2, 3),
+      at(3, 3),
+    ]);
+    for (let index = 1; index < anchors.length; index++) {
+      const dColumn = Math.abs(anchors[index].column - anchors[index - 1].column);
+      const dRow = Math.abs(anchors[index].row - anchors[index - 1].row);
+      expect(Math.max(dColumn, dRow)).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("keeps an axis-aligned one-cell step exactly as it was", () => {
+    expect(anchorsAlongLine(square, at(4, 4), at(5, 4))).toEqual([at(5, 4)]);
+    expect(anchorsAlongLine(square, at(4, 4), at(4, 5))).toEqual([at(4, 5)]);
+  });
+
+  it("fills the shared corner of a diagonal one-cell step", () => {
+    expect(anchorsAlongLine(square, at(4, 4), at(5, 5))).toEqual([
+      at(5, 4),
+      at(4, 5),
+      at(5, 5),
+    ]);
+  });
+
+  it("is empty for the same cell, whatever the zone did", () => {
+    expect(anchorsAlongLine(square, at(2, 2, 0), at(2, 2, 3))).toEqual([]);
+  });
+
+  it("carries the target's zone on the cells in between", () => {
+    expect(anchorsAlongLine(square, at(1, 1, 0), at(3, 1, 3))).toEqual([
+      at(2, 1, 3),
+      at(3, 1, 3),
+    ]);
+  });
+
+  it("wraps the sectors the short way round on the circular grid", () => {
+    expect(anchorsAlongLine(circular, at(0, 35), at(0, 1))).toEqual([
+      at(0, 0),
+      at(0, 1),
+    ]);
+  });
+
+  it("stays total on degenerate input", () => {
+    expect(
+      anchorsAlongLine(square, { column: Number.NaN, row: 0, zone: 0 }, at(1, 0)),
+    ).toEqual([]);
+    expect(
+      anchorsAlongLine(square, at(0, 0), { column: 0, row: Infinity, zone: 0 }),
+    ).toEqual([]);
+
+    // A jump far outside the board stops at the grid's own cell count, and
+    // every cell it did return is a real one.
+    const cap = (maxGridIndex(square.base) + 1) ** 2;
+    const runaway = anchorsAlongLine(square, at(0, 0), at(1_000_000, 0));
+    expect(runaway.length).toBeGreaterThan(0);
+    expect(runaway.length).toBeLessThanOrEqual(cap);
+    expect(
+      runaway.every((anchor) => Number.isFinite(anchor.column + anchor.row)),
+    ).toBe(true);
   });
 });
 

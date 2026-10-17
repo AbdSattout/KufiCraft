@@ -207,6 +207,18 @@ backend) · Better Auth (passkeys, local-install component) · Bun · vitest.
   `/account` needs only the session, so it gates on `sessionFailed` and keeps
   working while Convex is unreachable.
 
+* **Follow-up (live testing): the pen's gap fill came back.** A fast drag
+  reported one position per `pointermove` and the pen painted exactly those
+  cells, so a quick stroke came out as scattered points. `move` now walks the
+  cells between its last anchor and the new one with `anchorsAlongLine` — a
+  *supercover* rasterisation of the segment between the two cell centres
+  (one cell per gridline crossed, **both** cells at an exact corner crossing, so
+  a diagonal stroke stays edge-connected and is never dotted at a ratio below
+  `1:1`). There is no `MAX_PEN_GAP` teleport rule and no maximum gap this time,
+  the fill is bounded by the grid's own cell count, and the pen still never
+  merges a run. The eraser sweeps the same way (each cell the drag flew over is
+  hit-tested at its centre), so a quick erase no longer skips what it passed.
+
 | wave | work | who |
 | --- | --- | --- |
 | 1 | A auth & account UX · B canvas engine + tests · D dashboard · F landing | merged ✅ |
