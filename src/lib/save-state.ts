@@ -17,15 +17,18 @@
  */
 
 import { ConvexError } from "convex/values";
+import { AUTH_REQUIRED_MESSAGE } from "../../convex/lib/auth";
 
 export type SaveState = "saved" | "saving" | "retrying" | "offline";
 
 /**
  * The message every Convex function throws when the caller has no session —
- * `requireUserId` in `convex/lib/auth.ts`. It is the one *transient* rejection
- * the editor can classify: the token will come back and the write is re-sent.
+ * defined once in `requireUserId`'s module and imported from there, so the
+ * string the server throws and the string the editor matches can never drift.
+ * It is the one *transient* rejection the editor can classify: the token will
+ * come back and the write is re-sent.
  */
-export const AUTH_REQUIRED_MESSAGE = "يجب تسجيل الدخول أولًا";
+export { AUTH_REQUIRED_MESSAGE };
 
 /** Silence after which an in-flight write is called retrying. */
 export const SAVE_STALL_MS = 5_000;

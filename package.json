@@ -2,11 +2,11 @@
   "name": "kuficraft",
   "version": "0.1.0",
   "private": true,
-  "//dev": "NODE_OPTIONS=--dns-result-order=ipv4first is a workaround for this machine: its IPv6 route to *.convex.site never connects and Node tries it first (docs/AUTH.md § Transient failures).",
+  "//dev": "No DNS flag is baked into these scripts: this machine's IPv6 route to *.convex.site can stall, and the app itself is what handles that (docs/AUTH.md § Transient failures).",
   "scripts": {
-    "dev": "NODE_OPTIONS=--dns-result-order=ipv4first next dev",
+    "dev": "next dev",
     "build": "next build",
-    "start": "NODE_OPTIONS=--dns-result-order=ipv4first next start",
+    "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
     "typecheck": "next typegen && tsc --noEmit"
