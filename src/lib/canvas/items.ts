@@ -8,7 +8,9 @@
  *   • `render(config)`  — the path to draw and how to paint it;
  *   • `bounds`/`contains`/`cellRange` — the geometry the editor needs;
  *   • `toJSON()` — the exact JSON that is stored (`docs/FORMAT.md`), with the
- *     same class rebuilt by `itemOf`.
+ *     same class rebuilt by `itemOf`; its key set is exactly the shared
+ *     `canvasItemValidator`'s, and every whole cell is copied to
+ *     `{column, row}` (a tool's `Anchor` carries a `zone` the server rejects).
  *
  * The JSON is the transport format (Convex documents, `.kuficraft` files), so
  * the editor keeps plain objects in React state and wraps them through
@@ -37,6 +39,7 @@ import type {
   CanvasItem,
   CanvasItemType,
   Cell,
+  GridType,
   ItemBorder,
   ItemRounding,
   LineItem,
@@ -52,7 +55,6 @@ import {
   L,
   M,
   Z,
-  CENTER,
   arcCentre,
   boundsOfPoints,
   circularSlice,
@@ -63,9 +65,6 @@ import {
   inkUnit,
   polar,
   rectContains,
-  sectorPath,
-  shortestSectorDelta,
-  sectorSpan,
   slicePath,
   unionRect,
   zoneRect,
@@ -126,6 +125,19 @@ export interface ItemStyle {
 /** `rect ∪ rect` for the empty case. */
 function rectFrom(points: readonly Point[], pad: number): Rect {
   return expandRect(boundsOfPoints(points), pad);
+}
+
+/**
+ * A whole-cell anchor as it is **stored**: exactly `{column, row}`.
+ *
+ * Tool state carries an `Anchor` (cell + zone), and the backend's
+ * `cellValidator` is `{column, row}` only — a `line`/`arc` that kept the
+ * caller's object shipped a `zone` and Convex rejected the whole batch. Every
+ * item class copies its cells through here (constructor **and** `toJSON`), so
+ * no caller can leak one; `docs/CANVAS.md` §3.
+ */
+function plainCell(cell: Cell): Cell {
+  return { column: cell.column, row: cell.row };
 }
 
 /** Bounding box of an annular sector (corners + any cardinal angle inside). */
@@ -452,6 +464,10 @@ export interface LineInit {
  * the old line tool's two-point case. The old app emitted the bar as a run of
  * ink/space fragments; the union of those fragments is exactly this rectangle,
  * and one item is easier to erase and cheaper to store.
+ *
+ * A line is a square-grid item: a circular board neither creates nor draws one
+ * (`docs/CANVAS.md` §3, «Per-grid item rules»), so the class carries no polar
+ * geometry.
  */
 export class Line extends KufiItem {
   readonly type = "line" as const;
@@ -466,8 +482,8 @@ export class Line extends KufiItem {
       compareCells(init.from, init.to) <= 0
         ? [init.from, init.to]
         : [init.to, init.from];
-    this.from = from;
-    this.to = to;
+    this.from = plainCell(from);
+    this.to = plainCell(to);
     this.border = init.border;
     this.color = init.color;
   }
@@ -480,8 +496,8 @@ export class Line extends KufiItem {
     const item: LineItem = {
       type: "line",
       key: this.key,
-      from: this.from,
-      to: this.to,
+      from: plainCell(this.from),
+      to: plainCell(this.to),
     };
     if (this.border !== undefined) item.border = this.border;
     if (this.color !== undefined) item.color = this.color;
@@ -513,9 +529,6 @@ export class Line extends KufiItem {
   }
 
   render(config: ProjectConfig): Rendered {
-    if (config.gridType === "circular") {
-      return { path: this.circularPath(config), mode: "fill", width: 0 };
-    }
     if (this.from.row === this.to.row || this.from.column === this.to.column) {
       return { path: rectToPath(this.bar(config)), mode: "fill", width: 0 };
     }
@@ -529,24 +542,7 @@ export class Line extends KufiItem {
     };
   }
 
-  private circularPath(config: ProjectConfig): string {
-    const base = cellSize(config);
-    const minBand = Math.min(this.from.column, this.to.column);
-    const maxBand = Math.max(this.from.column, this.to.column);
-    const unit = (2 * Math.PI) / 36;
-    const a1 = this.from.row * unit;
-    return sectorPath(
-      CENTER,
-      CENTER,
-      minBand * base,
-      (maxBand + 1) * base,
-      a1,
-      a1 + sectorSpan(this.from.row, this.to.row) * unit,
-    );
-  }
-
   bounds(config: ProjectConfig): Rect {
-    if (config.gridType === "circular") return this.circularBounds(config);
     if (this.from.row === this.to.row || this.from.column === this.to.column) {
       return this.bar(config);
     }
@@ -554,22 +550,6 @@ export class Line extends KufiItem {
       [cellCentre(config, this.from), cellCentre(config, this.to)],
       inkUnit(config) / 2,
     );
-  }
-
-  private circularBounds(config: ProjectConfig): Rect {
-    const base = cellSize(config);
-    const minBand = Math.min(this.from.column, this.to.column);
-    const maxBand = Math.max(this.from.column, this.to.column);
-    const unit = (2 * Math.PI) / 36;
-    const a1 = this.from.row * unit;
-    return sliceBounds({
-      cx: CENTER,
-      cy: CENTER,
-      r1: minBand * base,
-      r2: (maxBand + 1) * base,
-      a1,
-      a2: a1 + sectorSpan(this.from.row, this.to.row) * unit,
-    });
   }
 
   contains(config: ProjectConfig, point: Point): boolean {
@@ -648,7 +628,7 @@ export class Stroke extends KufiItem {
 
   constructor(init: StrokeInit) {
     super();
-    this.points = init.points;
+    this.points = init.points.map(plainCell);
     this.closed = init.closed ?? false;
     this.border = init.border;
     this.color = init.color;
@@ -662,7 +642,7 @@ export class Stroke extends KufiItem {
     const item: StrokeItem = {
       type: "stroke",
       key: this.key,
-      points: this.points.map((cell) => ({ column: cell.column, row: cell.row })),
+      points: this.points.map(plainCell),
     };
     if (this.closed) item.closed = true;
     if (this.border !== undefined) item.border = this.border;
@@ -799,6 +779,10 @@ export interface ArcGeometry {
  * exactly (`kufi.js:285‑311` and `radius()`), but derived from a **canonical**
  * cell order so the result no longer depends on which anchor was clicked
  * first; the click-order quirk became the explicit `direction` control.
+ *
+ * A rib is a square-grid item: a circular board neither creates nor draws one
+ * (`docs/CANVAS.md` §3, «Per-grid item rules»), so the class carries no polar
+ * geometry.
  */
 export class Arc extends KufiItem {
   readonly type = "arc" as const;
@@ -815,8 +799,8 @@ export class Arc extends KufiItem {
       compareCells(init.from, init.to) <= 0
         ? [init.from, init.to]
         : [init.to, init.from];
-    this.from = from;
-    this.to = to;
+    this.from = plainCell(from);
+    this.to = plainCell(to);
     this.direction = init.direction;
     this.size = init.size;
     this.border = init.border;
@@ -831,8 +815,8 @@ export class Arc extends KufiItem {
     const item: ArcItem = {
       type: "arc",
       key: this.key,
-      from: this.from,
-      to: this.to,
+      from: plainCell(this.from),
+      to: plainCell(this.to),
       direction: this.direction,
       size: this.size,
     };
@@ -908,9 +892,6 @@ export class Arc extends KufiItem {
   }
 
   render(config: ProjectConfig): Rendered {
-    if (config.gridType === "circular") {
-      return { path: this.circularPath(config), mode: "stroke", width: inkUnit(config) };
-    }
     const { start, end, radius, largeArc, sweep } = this.geometry(config);
     return {
       path: cmdsToPath([
@@ -922,36 +903,7 @@ export class Arc extends KufiItem {
     };
   }
 
-  private circularPath(config: ProjectConfig): string {
-    const base = cellSize(config);
-    const unit = (2 * Math.PI) / 36;
-    const r1 = (this.from.column + 0.5) * base;
-    const r2 = (this.to.column + 0.5) * base;
-    const a1 = (this.from.row + 0.5) * unit;
-    const delta = shortestSectorDelta(this.from.row, this.to.row);
-    const p1 = polar(CENTER, CENTER, r1, a1);
-    const p2 = polar(CENTER, CENTER, r2, a1 + delta * unit);
-    const radius = (r1 + r2) / 2;
-    return cmdsToPath([
-      M(p1.x, p1.y),
-      A(radius, radius, 0, this.direction === "clockwise" ? 1 : 0, p2.x, p2.y),
-    ]);
-  }
-
   bounds(config: ProjectConfig): Rect {
-    if (config.gridType === "circular") {
-      const points: Point[] = [];
-      const base = cellSize(config);
-      for (let step = 0; step <= 8; step++) {
-        const t = step / 8;
-        const unit = (2 * Math.PI) / 36;
-        const r = (this.from.column + 0.5) * base +
-          (this.to.column - this.from.column) * base * t;
-        const a = ((this.from.row + 0.5) + shortestSectorDelta(this.from.row, this.to.row) * t) * unit;
-        points.push(polar(CENTER, CENTER, r, a));
-      }
-      return rectFrom(points, inkUnit(config) / 2);
-    }
     const { start, end, radius, largeArc, sweep } = this.geometry(config);
     const centre = arcCentre(start, end, radius, largeArc, sweep);
     const points: Point[] = [];
@@ -963,9 +915,6 @@ export class Arc extends KufiItem {
   }
 
   contains(config: ProjectConfig, point: Point): boolean {
-    if (config.gridType === "circular") {
-      return rectContains(this.bounds(config), point);
-    }
     const { start, end, radius, largeArc, sweep } = this.geometry(config);
     const centre = arcCentre(start, end, radius, largeArc, sweep);
     return distanceToArc(point, centre) <= inkUnit(config);
@@ -1179,6 +1128,49 @@ export function styleItem(item: CanvasItem, style: ItemStyle): CanvasItem {
 /** Item keys in a list, for set operations. */
 export function keysOf(items: readonly CanvasItem[]): string[] {
   return items.map((item) => item.key);
+}
+
+/* ------------------------------------------------------------------ */
+/* Per-grid item rules                                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The item types a circular board does not carry. A `line` bar and an `arc`
+ * rib are chords of the square grid — there is no polar equivalent — so a
+ * board that switched from square to circular **hides** them instead of
+ * re-interpreting them (user rule; `docs/CANVAS.md` §3 «Per-grid item rules»).
+ *
+ * Hiding is a **view** rule and nothing else: the document, the history, the
+ * `applyOps` diff and `.kuficraft` files keep the items untouched, so
+ * switching back to a square grid draws them again. Every renderer, hit test,
+ * selection and export asks `isItemAllowed` / `visibleItems` first.
+ */
+const CIRCULAR_HIDDEN_TYPES: readonly CanvasItemType[] = ["line", "arc"];
+
+/** Whether a board of `gridType` carries items of `type`. */
+export function isItemTypeAllowed(
+  gridType: GridType,
+  type: CanvasItemType,
+): boolean {
+  return gridType !== "circular" || !CIRCULAR_HIDDEN_TYPES.includes(type);
+}
+
+/** Whether `item` is drawn and interactive on `config`'s board. */
+export function isItemAllowed(config: ProjectConfig, item: CanvasItem): boolean {
+  return isItemTypeAllowed(config.gridType, item.type);
+}
+
+/**
+ * The items `config`'s board shows. The same array is returned when nothing is
+ * hidden, so the memoised canvas layers keep their identity.
+ */
+export function visibleItems(
+  gridType: GridType,
+  items: readonly CanvasItem[],
+): readonly CanvasItem[] {
+  if (gridType !== "circular") return items;
+  const visible = items.filter((item) => isItemTypeAllowed(gridType, item.type));
+  return visible.length === items.length ? items : visible;
 }
 
 /* ------------------------------------------------------------------ */

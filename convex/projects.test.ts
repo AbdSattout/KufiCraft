@@ -1057,6 +1057,45 @@ describe("applyOps", () => {
     );
     expect(after).toEqual(before);
   });
+
+  it("rejects a cell carrying a zone, so the client must normalise", async () => {
+    const t = newTest();
+    const asA = t.withIdentity(USER_A);
+    const projectId = await createProject(t, USER_A);
+    // The reported crash, as it reached the wire: the arc tool armed with an
+    // `Anchor` (a cell **plus** a zone) and `toJSON` passed it through, while
+    // `cellValidator` is `{column, row}` only — ArgumentValidationError.
+    const leaked = {
+      type: "arc",
+      key: arcKey(
+        { column: 3, row: 33 },
+        { column: 3, row: 35 },
+        "clockwise",
+        "half",
+      ),
+      from: { column: 3, row: 33, zone: 0 },
+      to: { column: 3, row: 35, zone: 0 },
+      direction: "clockwise",
+      size: "half",
+      color: "#9f1239",
+    } as unknown as CanvasItem;
+
+    // The validator stays strict. `convex-test` words its failure as
+    // "Expected one of object, object, object" and echoes the offending value
+    // (`zone` and all); the cloud reports `ArgumentValidationError` for the
+    // same batch. Either way the document is untouched — that is the contract
+    // the client side must meet.
+    const attempt = asA.mutation(api.projects.applyOps, {
+      projectId,
+      ops: [{ type: "add", items: [leaked] }],
+    });
+    await expect(attempt).rejects.toThrow(/zone/);
+    const doc = required(
+      await asA.query(api.projects.get, { projectId }),
+      "project should exist",
+    );
+    expect(doc.items).toEqual([]);
+  });
 });
 
 /* ------------------------------------------------------------------ */

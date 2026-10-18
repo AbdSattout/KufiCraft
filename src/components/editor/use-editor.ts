@@ -59,6 +59,7 @@ import {
   nextRotation,
   nextZoom,
   panScrollOffset,
+  pruneSelection,
   recolourItems,
   reshapeItems,
   wheelSteps,
@@ -76,6 +77,8 @@ import {
   NO_STATE,
   beginTool,
   endTool,
+  fallbackTool,
+  isToolAvailable,
   moveTool,
   previewTool,
   toolOf,
@@ -212,7 +215,7 @@ export function useEditor(
   // Prefs are read synchronously on mount so the editor opens the way the
   // designer left it; the rest of the project `config` stays authoritative.
   const [initialPrefs] = useState(() => loadEditorPrefs());
-  const [tool, setToolState] = useState<ToolId>(initialPrefs.tool);
+  const [toolPref, setToolState] = useState<ToolId>(initialPrefs.tool);
   const [style, setStyle] = useState<DrawStyle>({
     shape: initialPrefs.shape,
     rotation: initialPrefs.rotation,
@@ -253,6 +256,17 @@ export function useEditor(
     [documentConfig, showGrid],
   );
 
+  /**
+   * The active tool is the user's preference **filtered by the board's grid**
+   * (`docs/CANVAS.md` §3): a circular board has no line and no arc tool, so a
+   * preference for one falls back to the first tool the board carries. Nothing
+   * synchronises — there is no state to keep in step, and switching back to a
+   * square board restores the preference on its own.
+   */
+  const tool: ToolId = isToolAvailable(config.gridType, toolPref)
+    ? toolPref
+    : fallbackTool(config.gridType);
+
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   /**
@@ -291,14 +305,35 @@ export function useEditor(
 
   /**
    * Live selection: entries whose item disappeared (erased here, changed in
-   * another tab) are dropped during render, and the identity of the array is
-   * kept when nothing was pruned so the memoised layers stay put.
+   * another tab) or that the grid hides (a circular board and its line/arc
+   * items — `docs/CANVAS.md` §3) are dropped during render, and the identity
+   * of the array is kept when nothing was pruned so the memoised layers stay
+   * put. Delete, move, colour and arrange read only this list, so they can
+   * never act on an item the user cannot see.
    */
-  const liveKeys = useMemo(() => new Set(items.map((item) => item.key)), [items]);
   const selection = useMemo(() => {
-    const kept = selectionState.filter((key) => liveKeys.has(key));
+    const kept = pruneSelection(config, items, selectionState);
     return kept.length === selectionState.length ? selectionState : kept;
-  }, [liveKeys, selectionState]);
+  }, [config, items, selectionState]);
+
+  /**
+   * A grid switch drops any armed gesture: it was aimed at the old geometry,
+   * and the tool it belongs to may not exist on the new board
+   * (`docs/CANVAS.md` §3). The tool itself needs no repair — it is derived
+   * above — and `previewConfig` only ever carries slider values, so this is
+   * the one place a grid change goes through.
+   */
+  const patchEditorConfig = useCallback(
+    (patch: Partial<ProjectConfig>) => {
+      if (patch.gridType !== undefined && patch.gridType !== config.gridType) {
+        stateRef.current = NO_STATE;
+        setState(NO_STATE);
+        panRef.current = null;
+      }
+      patchConfig(patch);
+    },
+    [config.gridType, patchConfig],
+  );
 
   /* ---------------------------------------------------------------- */
   /* State helpers                                                     */
@@ -627,15 +662,18 @@ export function useEditor(
       ) {
         return;
       }
-      const shortcut = shortcutFor({
-        key: event.key,
-        ctrlKey: event.ctrlKey,
-        metaKey: event.metaKey,
-        shiftKey: event.shiftKey,
-        altKey: event.altKey,
-        // `shortcutFor` stays DOM-free: hand it only the two fields it reads.
-        target: target instanceof HTMLElement ? target : null,
-      });
+      const shortcut = shortcutFor(
+        {
+          key: event.key,
+          ctrlKey: event.ctrlKey,
+          metaKey: event.metaKey,
+          shiftKey: event.shiftKey,
+          altKey: event.altKey,
+          // `shortcutFor` stays DOM-free: hand it only the two fields it reads.
+          target: target instanceof HTMLElement ? target : null,
+        },
+        config.gridType,
+      );
       if (!shortcut) return;
       event.preventDefault();
       switch (shortcut.kind) {
@@ -673,6 +711,7 @@ export function useEditor(
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
     arrange,
+    config.gridType,
     deleteSelection,
     duplicateSelection,
     enabled,
@@ -872,7 +911,7 @@ export function useEditor(
     name: document.name,
     rename: document.rename,
     config,
-    patchConfig,
+    patchConfig: patchEditorConfig,
     previewConfig: document.previewConfig,
     items,
     save: document.save,

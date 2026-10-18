@@ -146,9 +146,9 @@ see `docs/CANVAS.md` §6 for the contract.
 | --- | --- | --- |
 | تحديد (select) | `V` | click selects (shift toggles), drag on an item moves the selection, drag on empty space marquee-selects |
 | قلم (pen) | `P` | press/drag colours the cells the pointer is moved over — one fragment per cell, a fast drag fills the cells it flew over, nothing merged |
-| خط (line) | `L` | click sequence: click A, click B… commits an open run; click the last point again to end it, click the first one to close it; a drag works too |
-| ممحاة (eraser) | `E` | click/drag removes whatever the pointer touches — a fast drag sweeps the cells it flew over (the swept items ring as a ghost) |
-| قوس (arc) | `A` | press-drag-release A→B, or click A then click B; the armed start cell stays highlighted until it commits, and clicking A again cancels |
+| خط (line) | `L` | **square grid only** — click sequence: click A, click B… commits an open run; click the last point again to end it, click the first one to close it; a drag works too |
+| ممحاة (eraser) | `E` | click/drag removes whatever the pointer touches — a fast drag sweeps the cells it flew over (the swept items ring as a ghost); items the grid hides are never touched |
+| قوس (arc) | `A` | **square grid only** — press-drag-release A→B, or click A then click B; the armed start cell stays highlighted until it commits, and clicking A again cancels |
 | يد (hand) | `H` | drags the *view*, not the board: press and drag to move around a board bigger than the pane, and double click (on the canvas or on the rail button) to put the middle of the board back in the middle |
 
 The line and arc tools are **persistent**: their click sequence survives
@@ -156,6 +156,16 @@ pointer-up. While one is armed the overlay shows a filled highlight (no border)
 on the start cell. The arc reveals its own controls next to it in the rail:
 اتجاه القوس (مع عقارب الساعة / عكس عقارب الساعة) and حجم القوس (نصف دائرة /
 ثلاثة أرباع).
+
+The line and arc tools are also **square-grid only** (their classes declare
+`creates: ["line"]` / `creates: ["arc"]`): the rail lists `toolsFor(gridType)`
+and drops them on a circular board, `L` / `A` are inert there, and a tool that
+was active when the grid changed falls back to the first tool of the rail with
+its gesture cancelled. The items those tools drew earlier are **hidden on a
+circular board, never deleted**: not drawn, not selectable, not erasable, not
+exported, not in the thumbnail, and the status line counts what the board shows.
+The document keeps them, so switching back to a square grid brings them back
+untouched (`docs/CANVAS.md` §3).
 
 Bigger boards scroll: the canvas sits in an `overflow-auto` pane, and the square
 centres itself with `margin: auto` so its overflow always lands on the reachable
@@ -180,8 +190,10 @@ Sidebar, top to bottom: الأشكال (palette + selection), لون الحبر,
 then the board — نسبة الحبر as the five presets `1:1`…`1:5` (live re-render; the
 `1:1` hint explains that the ink fills the whole cell and the grid shows no inner
 edges), حجم الخلية (`base`), نوع الشبكة (square/circular — switching warns that
-existing items may look odd; the hint explains what each type is), خيارات اللوحة
-(إظهار الشبكة and الخط المستقيم مربّعات) — and مسح الكل at the end (confirm).
+existing items may look different, and that lines and arcs are hidden on a
+circular board while staying in the drawing; the hint explains what each type
+is), خيارات اللوحة (إظهار الشبكة and الخط المستقيم مربّعات) — and مسح الكل at
+the end (confirm).
 
 إظهار الشبكة is a **view guide, not artwork**: the construction grid's two
 families (cell borders plus the stronger inner ink edges) are what you draw
@@ -247,7 +259,8 @@ undo/redo, `Ctrl+D` duplicate, `R` rotate the active shape, `Escape`/`Enter`
 cancel a click sequence, digits `1…9` pick a shape, `V` select, `P` pen, `L`
 line, `E` eraser, `A` arc, `H` hand. The tool keys come from the tool classes
 and the shape digits from the shape registry (`SHAPE_ORDER`), so the map cannot
-drift from the UI.
+drift from the UI; the grid decides which of them exist, so `L` and `A` do
+nothing on a circular board.
 
 ## Landing (`/welcome`, served at `/`)
 

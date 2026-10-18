@@ -47,6 +47,7 @@ import {
   moveItems,
   nextZoom,
   panScrollOffset,
+  pruneSelection,
   recolourItems,
   rectFromPoints,
   rectsIntersect,
@@ -225,6 +226,30 @@ describe("hit testing", () => {
     expect(hitTest(square, [stroke], { x: 10, y: 40 })).toBeNull();
   });
 
+  it("ignores the items the grid hides", () => {
+    // A line and an arc are square-grid items; a circular board hides them
+    // (`docs/CANVAS.md` §3), so the pointer must not find them even where
+    // their square geometry lies.
+    const line = makeLine({ column: 0, row: 1 }, { column: 4, row: 1 });
+    const arc = makeArc({
+      from: { column: 0, row: 0 },
+      to: { column: 4, row: 0 },
+      direction: "clockwise",
+      size: "half",
+    });
+    const board = [line, arc, tile(30, 0)];
+
+    for (const point of [{ x: 5, y: 12 }, { x: 3.75, y: 7.5 }]) {
+      expect(hitTest(square, board, point)).not.toBeNull();
+      expect(hitTest(circular, board, point)).toBeNull();
+    }
+    // The visible item is still found on the circular board (band 30 is
+    // radius 300…310 around the centre, sector 0 is 0°…10°).
+    expect(hitTest(circular, board, { x: 802.5, y: 502.5 })?.key).toBe(
+      tileKey(30, 0, 0),
+    );
+  });
+
   it("hits circular slices by radius and angle", () => {
     const items = [tile(10, 0, 0)];
     // Band 10 covers radius 100…110; sector 0 is 0°…10°.
@@ -274,6 +299,40 @@ describe("marquee selection", () => {
       rectFromPoints({ x: -5, y: -5 }, { x: 80, y: 80 }),
     );
     expect(keys).toEqual([tileKey(0, 0, 0), tileKey(5, 5, 0)]);
+  });
+
+  it("leaves the items the grid hides out of the selection", () => {
+    const line = makeLine({ column: 0, row: 1 }, { column: 4, row: 1 });
+    const board = [line, tile(0, 0), tile(1, 0)];
+    const box = { x: 0, y: 0, w: 1000, h: 1000 };
+    expect(marqueeSelection(square, board, box)).toEqual([
+      line.key,
+      tileKey(0, 0, 0),
+      tileKey(1, 0, 0),
+    ]);
+    expect(marqueeSelection(circular, board, box)).toEqual([
+      tileKey(0, 0, 0),
+      tileKey(1, 0, 0),
+    ]);
+  });
+});
+
+describe("pruneSelection", () => {
+  it("keeps live keys in order and drops the ones that are gone", () => {
+    const items = [tile(0, 0), tile(1, 0)];
+    expect(
+      pruneSelection(square, items, [items[1].key, "ghost", items[0].key]),
+    ).toEqual([items[1].key, items[0].key]);
+    expect(pruneSelection(square, items, [])).toEqual([]);
+  });
+
+  it("drops the line and arc keys a circular board hides", () => {
+    const line = makeLine({ column: 0, row: 1 }, { column: 4, row: 1 });
+    const items = [line, tile(0, 0)];
+    const keys = [line.key, tileKey(0, 0, 0)];
+    expect(pruneSelection(square, items, keys)).toEqual(keys);
+    // The grid switched under the selection: the line is no longer in it.
+    expect(pruneSelection(circular, items, keys)).toEqual([tileKey(0, 0, 0)]);
   });
 });
 

@@ -5,18 +5,20 @@
  *
  * Vertical icon rail on desktop (RTL: right edge, labels under the icons),
  * horizontal bar above the status line on mobile. It is generated from the
- * tool registry (`TOOLS` in `tools.ts`): the order, the labels, the shortcut
- * hints and the glyphs all come from the tool classes, so a new tool shows up
- * here without touching this file.
+ * tool registry (`tools.ts`): the order, the labels, the shortcut hints and
+ * the glyphs all come from the tool classes, and a grid that does not carry a
+ * tool's items does not list it (`toolsFor`, docs/CANVAS.md §3) — so a new
+ * tool shows up here without touching this file.
  *
  * The arc tool reveals its own controls next to it: the sweep direction and
  * the circle size (`docs/CANVAS.md` §5).
  */
 
 import { Button } from "@/components/ui/button";
+import type { GridType } from "@/lib/canvas/model";
 import { cn } from "@/lib/utils";
 import { MESSAGES } from "./messages";
-import { TOOLS, toolOf } from "./tools";
+import { isToolAvailable, toolOf, toolsFor } from "./tools";
 import type { ToolIconPart } from "./tools";
 import type { ArcStyle, ToolId } from "./interaction";
 
@@ -52,6 +54,8 @@ export function ToolGlyph({
 export interface ToolRailProps {
   tool: ToolId;
   setTool: (tool: ToolId) => void;
+  /** The board's grid — decides which tools exist (docs/CANVAS.md §3). */
+  gridType: GridType;
   arc: ArcStyle;
   setArcDirection: (direction: ArcStyle["direction"]) => void;
   setArcSize: (size: ArcStyle["size"]) => void;
@@ -64,6 +68,7 @@ export interface ToolRailProps {
 export function ToolRail({
   tool,
   setTool,
+  gridType,
   arc,
   setArcDirection,
   setArcSize,
@@ -86,7 +91,7 @@ export function ToolRail({
         className,
       )}
     >
-      {TOOLS.map((entry) => {
+      {toolsFor(gridType).map((entry) => {
         const active = entry.id === tool;
         const hint = entry.pans
           ? `${entry.label} (${entry.shortcut}) — ${MESSAGES.handDoubleClick}`
@@ -111,7 +116,7 @@ export function ToolRail({
         );
       })}
 
-      {tool === "arc" ? (
+      {isToolAvailable(gridType, "arc") && tool === "arc" ? (
         <>
           <div
             role="group"

@@ -100,6 +100,40 @@ recolour behaviour), on the client (`paintItems`) and on the backend
   one column; a diagonal (or a 3+-point run) is a `stroke` polyline.
   `Arc.isSupported` accepts the same row / column / 45° diagonal cases.
 
+### Per-grid item rules
+
+A `line` bar and an `arc` rib are chords of the **square** grid; the polar grid
+has no equivalent. One rule, one place (`items.ts`):
+
+* On a **circular** board the line and arc **tools do not exist**. `KufiTool`
+  declares `creates` (the item types it produces), and `isToolAvailable` reads it
+  against `isItemTypeAllowed`: the rail lists `toolsFor(gridType)`, `L` / `A` are
+  inert (`toolForShortcut(key, gridType)` → `null`), and a tool that was armed
+  when the grid changed falls back to `fallbackTool(gridType)` with its gesture
+  state cancelled (`use-editor.ts`).
+* Existing `line` / `arc` items on a circular board are **hidden, not deleted**:
+  not drawn (canvas and overlay), not hit-tested, not marquee-selected, not
+  erasable, not duplicated, not arranged, not exported (SVG/PNG) and not in the
+  thumbnail — and they cannot be in the selection (`pruneSelection`). Every one
+  of those paths asks `isItemAllowed(config, item)` / `visibleItems(gridType,
+  items)`, so a new renderer cannot forget the rule.
+* The **document keeps them**. They stay in editor state, the undo/redo stack,
+  every `applyOps` batch (`toOps` never emits a `remove` for them) and
+  `.kuficraft` files, and switching back to a square grid draws them again
+  untouched. Hidden means "cannot be edited", never "delete on sight"; the server
+  validator is not narrowed and old files keep loading.
+
+### Stored shape (the wire contract)
+
+`toJSON()` emits **exactly** the fields of `canvasItemValidator`
+(`convex/lib/model.ts`) and nothing else, and every whole cell is copied to
+`{column, row}`. Tool state holds an `Anchor` (a cell **plus** a `zone`), and
+`cellValidator` rejects the extra key — the reported `applyOps`
+`ArgumentValidationError` was an arc that shipped the tool's `Anchor` unchanged.
+The classes therefore copy their cells through `plainCell` in the constructor
+**and** in `toJSON()`; `items.test.ts` sweeps every item type (and the edit
+paths) against the validator's own field list.
+
 ### Item classes (`src/lib/canvas/items.ts`)
 
 The data model above is what is stored; in the engine every item is a **class**
@@ -150,7 +184,7 @@ and export.
 | `shapes.ts` | `KufiShape` + the ten shapes (`shapeById`, `shapeLabel`, `shapePath`, `shapeOrderIndex`, `SHAPE_ORDER`); the **same** renderer draws the canvas fragment and the toolbar icon (`tileIconPath`) |
 | `rounding.ts` | `roundingRadius`, `rotateCornerMask`, `hasRounding`, `roundCorners` (per-corner rounding generated from a shape's own commands) |
 | `border.ts` | `borderPath`, `borderOutline` (an outside border on the sides of an item's box) |
-| `items.ts` | the item classes and factories above, `itemRender`, `itemColor`, `itemBounds`, `itemContains`, `itemCellRange`, `tileIconPath`, `itemsBounds`, `itemIntersectsRect` |
+| `items.ts` | the item classes and factories above, `itemRender`, `itemColor`, `itemBounds`, `itemContains`, `itemCellRange`, `tileIconPath`, `itemsBounds`, `itemIntersectsRect`, the per-grid rules (`isItemTypeAllowed`, `isItemAllowed`, `visibleItems`) |
 | `ops.ts` | `addItems`, `removeItems`, `paintItems`, `replaceItems`, `toOps(prev, next)` → backend batch, `penItems`, `lineItems` |
 | `render.ts` | `renderSvg(config, items, opts?)` → standalone SVG **string**, `renderThumbnail(config, items)` → compact string |
 
@@ -180,11 +214,13 @@ Every function is deterministic and side-effect free.
 
 * Every item renders through its class: `item.render(config)` →
   `{ path, mode, width }`.
-  * `mode: "fill"` → `<path d fill={itemColor}>` (tiles, straight lines on the
-    square grid, circular lines).
+  * `mode: "fill"` → `<path d fill={itemColor}>` (tiles, straight lines).
   * `mode: "stroke"` → `<path d fill="none" stroke={itemColor}
-    stroke-width={width}>` (polylines, arcs, diagonal `line` fallbacks, circular
-    arcs) with `width = inkUnit(config)`.
+    stroke-width={width}>` (polylines, arcs, diagonal `line` fallbacks) with
+    `width = inkUnit(config)`.
+* The board draws `visibleItems(gridType, items)` (§3): a circular board leaves
+  its line/arc items out of the canvas, the overlay, the exports and the
+  thumbnail.
 * **Style is part of the item, not the renderer**: a tile may carry `rounding`
   (radius as a fraction of the shorter side + a physical corner mask) and every
   item may carry an outside `border` (side mask, width in viewBox units, optional
@@ -227,9 +263,9 @@ click-order quirk became the explicit `direction` control
 * `size: "half"` → a semicircle over the chord: radius `chord/2` (or
   `dColumn·cell + ink/2` on a diagonal), `largeArc = 0`.
 * `size: "threeQuarter"` → 270°: radius `chord/√2`, `largeArc = 1`.
-* On the circular grid the arc runs at the mean radius between the two bands,
-  spanning the sectors from `from.row` to `to.row` along the shortest angular
-  path, with the same sweep-flag meaning.
+* A rib is a **square-grid item**: a circular board hides every `arc` (§3), so
+  the class carries no polar geometry. (Earlier rounds drew a circular arc at the
+  mean radius between the two bands; that path is gone, not disabled.)
 
 ## 6. Tools (`src/components/editor/tools.ts`)
 
@@ -242,10 +278,16 @@ name. Adding a tool = one class + one registry line.
 | --- | --- | --- | --- |
 | `select` | تحديد | `V` | click selects (shift toggles), drag on an item moves the selection (clamped to the grid), drag on empty space marquee-selects |
 | `pen` | قلم | `P` | press/drag colours the cells the pointer is moved over — one fragment per cell, and a fast drag fills the cells it flew over (`anchorsAlongLine`) |
-| `line` | خط | `L` | click sequence: click A, click B… commits an open run; click the last point again ends it, click the first one closes it. A drag also works (pointer-up ends the *drag*, not the run). A run with no diagonal segment is squares (`straightLinesAsSquares`, default) or one bar |
-| `eraser` | ممحاة | `E` | click/drag removes whatever the pointer touches; a fast drag sweeps the cells it flew over |
-| `arc` | قوس | `A` | press-drag-release A→B, **or** click A then click B (clicking A again cancels) |
+| `line` | خط | `L` | **square grid only** (`creates: ["line"]`). Click sequence: click A, click B… commits an open run; click the last point again ends it, click the first one closes it. A drag also works (pointer-up ends the *drag*, not the run). A run with no diagonal segment is squares (`straightLinesAsSquares`, default) or one bar |
+| `eraser` | ممحاة | `E` | click/drag removes whatever the pointer touches; a fast drag sweeps the cells it flew over (hidden items are never touched) |
+| `arc` | قوس | `A` | **square grid only** (`creates: ["arc"]`). Press-drag-release A→B, **or** click A then click B (clicking A again cancels) |
 | `hand` | يد | `H` | the one **view** tool: the pointer scrolls the canvas pane (`panScrollOffset`), `KufiTool.pans` tells the controller so, and a double click recentres the board (`centreScroll`) |
+
+* `KufiTool.creates` — the item types a tool produces. A grid that does not
+  carry them does not carry the tool (`isToolAvailable`, §3): on a circular board
+  the rail lists `toolsFor(gridType)` without `line`/`arc`, their shortcuts are
+  inert, and the controller falls back when the grid changes under an armed
+  tool.
 
 * `KufiTool.persistent` — a tool whose in-flight state survives pointer-up
   (`line`, `arc`); the others commit on pointer-up.
@@ -361,6 +403,9 @@ The hand tool pans, the wheel zooms. The maths is pure, lives in
 * A `LineItem` that is diagonal (invalid by the model) falls back to a stroked
   segment between the two cell centres instead of throwing — the editor must
   prevent creating one.
+* Lines and arcs are **square-grid items**: their polar branches were removed
+  rather than disabled (hidden is not re-drawn), and a circular board hides them
+  while the document keeps them (§3).
 * The pen paints **over** what is already there: same key → replaced in place,
   which is how recolouring a fragment works.
 * The pen's gap fill is **back** (`anchorsAlongLine`, reversing the round that
@@ -396,10 +441,13 @@ The engine suite (`bun run test`) covers, file by file: `geometry.test.ts`
 (frames, zone rects, slices, arc centres), `grid.test.ts` (addressing,
 round-trips, two-family grid paths, the drawn-cell tiling, the space-less
 `1:1` case), `items.test.ts`
-(item classes, keys, geometry, hit-testing, rounding / border styling),
+(item classes, keys, geometry, hit-testing, rounding / border styling, the
+stored shape against `canvasItemValidator`, the per-grid rules),
 `ops.test.ts` (add/remove/paint/
-replace, `toOps`, pen/line items), `model.test.ts` (presets, snapping, keys,
-signatures, style clamping), `render.test.ts` (markup, thumbnail budget),
+replace, `toOps`, pen/line items, hidden items surviving the diff),
+`model.test.ts` (presets, snapping, keys, signatures, style clamping),
+`render.test.ts` (markup, thumbnail budget),
 `rounding.test.ts` / `border.test.ts` (the style geometry), `kuficraft-file.test.ts`
 (v2 round-trip + v1 upgrade), plus the backend `convex/**/*.test.ts` suites and
-the editor's `tools.test.ts` / `interaction.test.ts`.
+the editor's `tools.test.ts` /
+`interaction.test.ts` / `shortcuts.test.ts`.

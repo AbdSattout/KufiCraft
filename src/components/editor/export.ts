@@ -4,9 +4,14 @@
  * Both formats come from the engine: `renderSvg` produces the standalone
  * document, and the PNG is that same document rasterised through an
  * `<img>` + `<canvas>` so exports and thumbnails can never drift apart.
+ *
+ * An export draws what the board shows: a circular board hides its line/arc
+ * items (`docs/CANVAS.md` §3). They stay in the document — the `.kuficraft`
+ * file is the artwork's storage, not its view.
  */
 
 import { renderSvg } from "@/lib/canvas/render";
+import { visibleItems } from "@/lib/canvas/items";
 import type { CanvasItem, ProjectConfig } from "@/lib/canvas/model";
 
 const PNG_SIZE = 2000;
@@ -41,7 +46,10 @@ export function downloadSvg(
   items: readonly CanvasItem[],
   name: string,
 ): void {
-  const svg = renderSvg(config, items, { showGrid: false, size: 1000 });
+  const svg = renderSvg(config, visibleItems(config.gridType, items), {
+    showGrid: false,
+    size: 1000,
+  });
   triggerDownload(
     new Blob([svg], { type: "image/svg+xml;charset=utf-8" }),
     `${safeFileName(name)}.svg`,
@@ -54,7 +62,10 @@ export async function downloadPng(
   items: readonly CanvasItem[],
   name: string,
 ): Promise<void> {
-  const svg = renderSvg(config, items, { showGrid: false, size: PNG_SIZE });
+  const svg = renderSvg(config, visibleItems(config.gridType, items), {
+    showGrid: false,
+    size: PNG_SIZE,
+  });
   const image = new Image();
   image.width = PNG_SIZE;
   image.height = PNG_SIZE;

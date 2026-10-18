@@ -25,6 +25,7 @@ import type { PointerEvent as ReactPointerEvent, RefObject } from "react";
 import { Minus, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CanvasPreview } from "@/components/canvas/canvas-preview";
+import { visibleItems } from "@/lib/canvas/items";
 import type { Anchor, CanvasItem, ProjectConfig } from "@/lib/canvas/model";
 import type { Rect } from "@/lib/canvas/geometry";
 import { MAX_ZOOM, MIN_ZOOM } from "@/lib/editor-prefs";
@@ -81,6 +82,9 @@ export function CanvasStage({
   onPointerCancel,
 }: CanvasStageProps) {
   const selected = selectionItems.length;
+  // The board draws only what its grid carries (`docs/CANVAS.md` §3): a
+  // circular board hides line/arc items, which stay in the document untouched.
+  const shown = visibleItems(config.gridType, items);
   // The cursor, the hint and the pan flag all come from the tool class, so a
   // new tool cannot forget them.
   const active = toolOf(tool);
@@ -121,7 +125,7 @@ export function CanvasStage({
           >
             <CanvasPreview
               config={config}
-              items={items}
+              items={shown}
               className="absolute inset-0 h-full w-full"
             />
             <CanvasOverlay
@@ -139,7 +143,7 @@ export function CanvasStage({
 
       <div className="flex h-9 shrink-0 items-center gap-2 border-t border-border/70 bg-background px-3 text-xs text-muted-foreground">
         <span className="tabular-nums">
-          {formatCount(items.length)} {MESSAGES.itemsCount}
+          {formatCount(shown.length)} {MESSAGES.itemsCount}
         </span>
         {selected > 0 ? (
           <span className="tabular-nums text-foreground">

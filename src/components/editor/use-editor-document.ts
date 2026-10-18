@@ -32,6 +32,7 @@ import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { DEFAULT_PROJECT_CONFIG } from "@/lib/canvas/model";
 import type { CanvasItem, ProjectConfig } from "@/lib/canvas/model";
+import { visibleItems } from "@/lib/canvas/items";
 import { toOps } from "@/lib/canvas/ops";
 import { renderThumbnail } from "@/lib/canvas/render";
 import { sanitizeProjectConfig } from "@/lib/kuficraft-file";
@@ -382,7 +383,10 @@ export function useEditorDocument(
     }
     thumbnailTimer.current = window.setTimeout(() => {
       thumbnailTimer.current = null;
-      const svg = renderThumbnail(config, items);
+      // The card is a view of the board, so it shows what the board shows —
+      // a circular board hides its line/arc items (`docs/CANVAS.md` §3); the
+      // document keeps them.
+      const svg = renderThumbnail(config, visibleItems(config.gridType, items));
       if (svg === lastThumbnail.current) return;
       lastThumbnail.current = svg;
       updateThumbnail({ projectId, thumbnail: svg }).catch((error: unknown) => {

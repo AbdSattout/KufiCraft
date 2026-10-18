@@ -28,7 +28,7 @@ import {
   replaceItems,
   toOps,
 } from "@/lib/canvas/ops";
-import { itemColor } from "@/lib/canvas/items";
+import { itemColor, makeArc, makeLine } from "@/lib/canvas/items";
 import { inkUnit, zoneRect } from "@/lib/canvas/geometry";
 
 function makeConfig(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
@@ -994,5 +994,52 @@ describe("arrangeItems", () => {
       expect(toOps(stack, next)).not.toEqual([]);
       expect(ids(applyOpsLocally(stack, toOps(stack, next)))).toEqual(ids(next));
     }
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Per-grid rules: the document keeps what the board hides             */
+/* ------------------------------------------------------------------ */
+
+describe("hidden items stay in the document", () => {
+  // A circular board hides its line/arc items (`docs/CANVAS.md` §3), but they
+  // are still part of the drawing: every commit holds the whole board and the
+  // diff must never emit a `remove` for them — the server would obey.
+  const line = makeLine({ column: 0, row: 1 }, { column: 4, row: 1 });
+  const arc = makeArc({
+    from: { column: 0, row: 0 },
+    to: { column: 4, row: 0 },
+    direction: "clockwise",
+    size: "half",
+  });
+  const hidden = [line, arc];
+
+  it("keeps them through a paint commit, with no remove op", () => {
+    const before = state([A, line, arc, B]);
+    const painted = paintItems(before, [tile(9, 9, 0)]);
+    expect(painted.items).toEqual([A, ...hidden, B, tile(9, 9, 0)]);
+    expect(toOps(before.items, painted.items)).toEqual([
+      { type: "add", items: [tile(9, 9, 0)] },
+    ]);
+  });
+
+  it("never removes them when a visible item is deleted", () => {
+    const before = state([A, line, arc, B]);
+    const after = removeItems(before, [B.key]);
+    expect(after.items).toEqual([A, line, arc]);
+    expect(toOps(before.items, after.items)).toEqual([
+      { type: "remove", keys: [B.key] },
+    ]);
+  });
+
+  it("keeps them through a replace (a history replay)", () => {
+    const before = state([line, A]);
+    const after = replaceItems(before, [line, A, C]);
+    expect(after.items).toEqual([line, A, C]);
+    // The diff is the appended tail: nothing it emits touches the hidden line.
+    expect(toOps(before.items, after.items)).toEqual([
+      { type: "add", items: [C] },
+    ]);
+    expect(after.items).toContain(line);
   });
 });

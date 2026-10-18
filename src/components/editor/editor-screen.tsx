@@ -39,6 +39,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import type { CanvasItem } from "@/lib/canvas/model";
+import { visibleItems } from "@/lib/canvas/items";
 import { MESSAGES } from "./messages";
 import { useEditor } from "./use-editor";
 import type { EditorController } from "./use-editor";
@@ -198,9 +199,14 @@ export function EditorScreen() {
 
   const itemByKey = useMemo(() => {
     const map = new Map<string, CanvasItem>();
-    for (const item of editor.items) map.set(item.key, item);
+    // Only what the board shows: a circular board hides its line/arc items
+    // (`docs/CANVAS.md` §3), so a ring or an erase preview can never resolve
+    // one, whatever a stale key says.
+    for (const item of visibleItems(editor.config.gridType, editor.items)) {
+      map.set(item.key, item);
+    }
     return map;
-  }, [editor.items]);
+  }, [editor.config.gridType, editor.items]);
 
   const selectionItems = useMemo(
     () => resolveItems(itemByKey, editor.selection),
@@ -264,6 +270,7 @@ export function EditorScreen() {
           orientation="vertical"
           tool={editor.tool}
           setTool={editor.setTool}
+          gridType={editor.config.gridType}
           arc={editor.arc}
           setArcDirection={editor.setArcDirection}
           setArcSize={editor.setArcSize}
@@ -296,6 +303,7 @@ export function EditorScreen() {
             orientation="horizontal"
             tool={editor.tool}
             setTool={editor.setTool}
+            gridType={editor.config.gridType}
             arc={editor.arc}
             setArcDirection={editor.setArcDirection}
             setArcSize={editor.setArcSize}

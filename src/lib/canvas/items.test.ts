@@ -19,6 +19,7 @@ import {
   DEFAULT_PROJECT_CONFIG,
   SHAPE_IDS,
   arcKey,
+  canvasItemValidator,
   cellSize,
   itemSignature,
   lineKey,
@@ -26,10 +27,12 @@ import {
   tileKey,
 } from "@/lib/canvas/model";
 import type {
+  Anchor,
   ArcDirection,
   ArcItem,
   ArcSize,
   CanvasItem,
+  CanvasItemType,
   Cell,
   LineItem,
   ProjectConfig,
@@ -47,13 +50,14 @@ import {
   zoneRect,
 } from "@/lib/canvas/geometry";
 import type { Point } from "@/lib/canvas/geometry";
-import { cellCentre } from "@/lib/canvas/grid";
 import {
   Arc,
   Line,
   Stroke,
   Tile,
   colorItem,
+  isItemAllowed,
+  isItemTypeAllowed,
   itemBounds,
   itemCellRange,
   itemColor,
@@ -71,6 +75,7 @@ import {
   parseItem,
   styleItem,
   tileIconPath,
+  visibleItems,
 } from "@/lib/canvas/items";
 import { shapePath } from "@/lib/canvas/shapes";
 import { borderPath } from "@/lib/canvas/border";
@@ -86,7 +91,6 @@ function makeConfig(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
 const SQUARE = makeConfig();
 const INKED = makeConfig({ ink: "#123456" });
 const CIRCULAR = makeConfig({ gridType: "circular" });
-const CIRCULAR_MONO = makeConfig({ gridType: "circular", ratio: 1 });
 
 function tile(
   column: number,
@@ -287,13 +291,6 @@ describe("render", () => {
     expectPointNear(end, geometry.end, 1e-4);
     // Clockwise springs off the bottom ink edge of the row.
     expect(start.y).toBeCloseTo(6 * cellSize(SQUARE) + inkUnit(SQUARE), 6);
-  });
-
-  it("starts and ends an arc on the two cell centres of a circular grid", () => {
-    const subject = new Arc({ from: { column: 5, row: 3 }, to: { column: 5, row: 8 }, direction: "clockwise", size: "half" });
-    const { start, end } = endpoints(itemRender(CIRCULAR_MONO, subject).path);
-    expectPointNear(start, cellCentre(CIRCULAR_MONO, subject.from), 0.5);
-    expectPointNear(end, cellCentre(CIRCULAR_MONO, subject.to), 0.5);
   });
 });
 
@@ -708,5 +705,181 @@ describe("item-level helpers", () => {
       arc({ column: 0, row: 6 }, { column: 4, row: 6 }),
     ];
     expect(new Set(items.map(itemSignature)).size).toBe(items.length);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* stored shape (the shared wire validator)                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The fields `canvasItemValidator` demands for `type`, read off the validator
+ * itself so this sweep cannot drift from the contract. `convex/values` has no
+ * public "validate this value" entry point on the client, so the test compares
+ * key sets instead: an **extra** key is exactly what Convex rejected in the
+ * field — an `Anchor`'s `zone` riding along on `from` / `to`.
+ */
+interface RawValidator {
+  value?: unknown;
+  fields?: Record<string, RawValidator>;
+  members?: RawValidator[];
+  isOptional?: "required" | "optional";
+}
+
+function validatorFields(type: CanvasItemType): {
+  required: string[];
+  allowed: string[];
+} {
+  const union = canvasItemValidator as unknown as RawValidator;
+  const member = (union.members ?? []).find(
+    (candidate) => candidate.fields?.type?.value === type,
+  );
+  if (!member?.fields) throw new Error(`no validator member for ${type}`);
+  const required: string[] = [];
+  const allowed: string[] = [];
+  for (const [field, validator] of Object.entries(member.fields)) {
+    allowed.push(field);
+    if (validator.isOptional !== "optional") required.push(field);
+  }
+  return { required, allowed };
+}
+
+/** Asserts an item is exactly what the server's validator accepts. */
+function expectStoredShape(item: CanvasItem): void {
+  const { required, allowed } = validatorFields(item.type);
+  const keys = Object.keys(item);
+  expect(keys.filter((key) => !allowed.includes(key))).toEqual([]);
+  expect(required.filter((key) => !keys.includes(key))).toEqual([]);
+  // Whole cells are exactly `{column, row}` — `cellValidator` rejects any
+  // other key on the same wire value.
+  const cells =
+    item.type === "line" || item.type === "arc"
+      ? [item.from, item.to]
+      : item.type === "stroke"
+        ? item.points
+        : [];
+  for (const cell of cells) {
+    expect(Object.keys(cell).sort()).toEqual(["column", "row"]);
+  }
+}
+
+describe("stored shape", () => {
+  it("emits exactly the validator's fields for every item type", () => {
+    const anchor: Anchor = { column: 3, row: 33, zone: 0 };
+    const other: Anchor = { column: 3, row: 35, zone: 0 };
+    const subjects: CanvasItem[] = [
+      makeTile({ column: 1, row: 2, zone: 3 }),
+      makeTile({
+        column: 1,
+        row: 2,
+        zone: 0,
+        shape: "hamza1",
+        rotation: 3,
+        color: "#9f1239",
+      }),
+      makeLine({ column: 1, row: 1 }, { column: 4, row: 1 }),
+      makeLine({ column: 1, row: 1 }, { column: 4, row: 1 }, "#9f1239"),
+      makeStroke([{ column: 0, row: 0 }, { column: 2, row: 2 }], true, "#9f1239"),
+      makeArc({
+        from: { column: 1, row: 1 },
+        to: { column: 4, row: 1 },
+        direction: "clockwise",
+        size: "half",
+        color: "#9f1239",
+      }),
+      // The reported repro: the arc tool held `inkAnchorAt` results (an
+      // `Anchor` = cell + zone) and `toJSON` shipped the zone to Convex.
+      makeLine(anchor, other),
+      makeArc({ from: anchor, to: other, direction: "clockwise", size: "half" }),
+    ];
+    for (const subject of subjects) expectStoredShape(subject);
+  });
+
+  it("keeps the shape through the edit paths too", () => {
+    const anchor: Anchor = { column: 3, row: 33, zone: 0 };
+    const other: Anchor = { column: 3, row: 35, zone: 0 };
+    const subjects: CanvasItem[] = [
+      makeTile({ column: 1, row: 2, zone: 0 }),
+      makeLine(anchor, other),
+      makeStroke([{ column: 0, row: 0 }, { column: 2, row: 2 }], false),
+      makeArc({ from: anchor, to: other, direction: "clockwise", size: "half" }),
+    ];
+    for (const subject of subjects) {
+      for (const edited of [
+        moveItem(subject, 1, 2),
+        colorItem(subject, "#9f1239"),
+        colorItem(subject, undefined),
+        styleItem(subject, { shape: "hamza1", rotation: 1 }),
+        parseItem(subject).toJSON(),
+      ]) {
+        expectStoredShape(edited);
+      }
+    }
+  });
+
+  it("copies tool-shaped anchors to plain cells", () => {
+    // A tool hands the class its `Anchor` objects; the class must copy the
+    // two fields it stores and drop the rest (docs/CANVAS.md §3).
+    const anchor: Anchor = { column: 3, row: 33, zone: 0 };
+    const other: Anchor = { column: 3, row: 35, zone: 2 };
+    const drawn = new Arc({
+      from: anchor,
+      to: other,
+      direction: "clockwise",
+      size: "half",
+    });
+    expect(drawn.toJSON()).toEqual({
+      type: "arc",
+      key: arcKey({ column: 3, row: 33 }, { column: 3, row: 35 }, "clockwise", "half"),
+      from: { column: 3, row: 33 },
+      to: { column: 3, row: 35 },
+      direction: "clockwise",
+      size: "half",
+    });
+    expect(drawn.toJSON().from).not.toBe(anchor);
+    expect(
+      new Line({ from: anchor, to: other }).toJSON().from,
+    ).toEqual({ column: 3, row: 33 });
+    for (const point of new Stroke({ points: [anchor, other] }).toJSON().points) {
+      expect(Object.keys(point)).toEqual(["column", "row"]);
+    }
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* per-grid item rules                                                 */
+/* ------------------------------------------------------------------ */
+
+describe("per-grid item rules", () => {
+  const items: CanvasItem[] = [
+    tile(1, 2, 0),
+    line({ column: 0, row: 1 }, { column: 4, row: 1 }),
+    stroke([{ column: 0, row: 0 }, { column: 1, row: 1 }]),
+    arc({ column: 0, row: 6 }, { column: 4, row: 6 }),
+  ];
+
+  it("hides exactly the line and the arc on a circular grid", () => {
+    expect(isItemTypeAllowed("square", "line")).toBe(true);
+    expect(isItemTypeAllowed("square", "arc")).toBe(true);
+    expect(isItemTypeAllowed("circular", "line")).toBe(false);
+    expect(isItemTypeAllowed("circular", "arc")).toBe(false);
+    for (const type of ["tile", "stroke"] as const) {
+      expect(isItemTypeAllowed("square", type)).toBe(true);
+      expect(isItemTypeAllowed("circular", type)).toBe(true);
+    }
+
+    expect(items.filter((item) => isItemAllowed(CIRCULAR, item))).toEqual([
+      items[0],
+      items[2],
+    ]);
+    expect(visibleItems("circular", items)).toEqual([items[0], items[2]]);
+  });
+
+  it("returns the same array when nothing is hidden", () => {
+    expect(visibleItems("square", items)).toBe(items);
+    const already = items.filter((item) => isItemAllowed(CIRCULAR, item));
+    expect(visibleItems("circular", already)).toBe(already);
+    const visible = visibleItems("circular", items);
+    expect(visibleItems("circular", visible)).toBe(visible);
   });
 });

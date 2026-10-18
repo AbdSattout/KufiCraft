@@ -109,6 +109,11 @@ that omits them renders **exactly** like a v2 file written before they existed.
   editor and the dashboard: `exportProjectFile`, `parseProjectFile`,
   `downloadProjectFile`, `readProjectFile`, and the legacy bridge
   `upgradeItem`. Client-only; server code never reads project files.
+* The file is the **document**, never a view: a circular board hides its
+  line/arc items on screen (`docs/CANVAS.md` §3) but still writes, reads back
+  and keeps them — export/import never drops an item because a grid cannot show
+  it. (SVG/PNG exports and the dashboard thumbnail *are* views and leave them
+  out.)
 * Forward compatibility: readers reject unknown `version`s instead of guessing;
   writers must not emit unknown fields.
 

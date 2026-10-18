@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_PROJECT_CONFIG, tileKey } from "@/lib/canvas/model";
+import { DEFAULT_PROJECT_CONFIG, arcKey, tileKey } from "@/lib/canvas/model";
 import type { Anchor, CanvasItem, ProjectConfig } from "@/lib/canvas/model";
 import { anchorPath } from "@/lib/canvas/grid";
 import { makeArc, makeLine, makeTile } from "@/lib/canvas/items";
@@ -15,12 +15,16 @@ import {
   TOOL_ORDER,
   beginTool,
   endTool,
+  fallbackTool,
+  isToolAvailable,
   moveTool,
   previewTool,
   toolForShortcut,
   toolOf,
+  toolsFor,
 } from "./tools";
 import type { ToolState } from "./tools";
+import { shortcutFor } from "./shortcuts";
 
 const CONFIG: ProjectConfig = { ...DEFAULT_PROJECT_CONFIG };
 
@@ -62,6 +66,10 @@ function expectLine(state: ToolState): Extract<ToolState, { kind: "line" }> {
 }
 function expectArc(state: ToolState): Extract<ToolState, { kind: "arc" }> {
   if (state.kind !== "arc") throw new Error(`expected arc, got ${state.kind}`);
+  return state;
+}
+function expectErase(state: ToolState): Extract<ToolState, { kind: "erase" }> {
+  if (state.kind !== "erase") throw new Error(`expected erase, got ${state.kind}`);
   return state;
 }
 
@@ -450,6 +458,32 @@ describe("ArcTool", () => {
     expect(out.state).toBe(NO_STATE);
     expect(out.commit).toBeUndefined();
   });
+
+  it("commits a wire-legal arc from anchor-shaped tool state (the repro)", () => {
+    // The tool arms with `inkAnchorAt` results — an `Anchor` is a cell **plus**
+    // a zone — and the second click two cells away commits. The stored JSON
+    // must hold exactly a `Cell` per endpoint: the leaked `zone` was what the
+    // server's `cellValidator` rejected (`applyOps` → ArgumentValidationError).
+    const ctx = context();
+    const armed = beginTool("arc", ctx, NO_STATE, input(pointOf(3, 33)));
+    expect(expectArc(armed.state).from).toEqual({ column: 3, row: 33, zone: 0 });
+    const moved = moveTool("arc", ctx, armed.state, input(pointOf(3, 35)));
+    const out = beginTool("arc", ctx, moved.state, input(pointOf(3, 35)));
+
+    expect(out.state).toBe(NO_STATE);
+    expect(out.commit?.items).toEqual([
+      {
+        type: "arc",
+        key: arcKey({ column: 3, row: 33 }, { column: 3, row: 35 }, "clockwise", "half"),
+        from: { column: 3, row: 33 },
+        to: { column: 3, row: 35 },
+        direction: "clockwise",
+        size: "half",
+        // The tool stamps the project's ink on what it draws.
+        color: CONFIG.ink,
+      },
+    ]);
+  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -654,6 +688,58 @@ describe("tool registry", () => {
       if (tool.hint !== null) expect(tool.hint).not.toBe("");
     }
   });
+
+  it("offers the line and arc tools on a square grid only", () => {
+    // The board's grid decides which tools exist (`docs/CANVAS.md` §3): the
+    // rail lists `toolsFor`, and the controller falls back to `fallbackTool`.
+    expect(toolsFor("square").map((tool) => tool.id)).toEqual([...TOOL_ORDER]);
+    expect(toolsFor("circular").map((tool) => tool.id)).toEqual([
+      "select",
+      "pen",
+      "eraser",
+      "hand",
+    ]);
+    expect(isToolAvailable("circular", "line")).toBe(false);
+    expect(isToolAvailable("circular", "arc")).toBe(false);
+    for (const id of TOOL_ORDER) {
+      expect(isToolAvailable("square", id)).toBe(true);
+    }
+    for (const id of ["select", "pen", "eraser", "hand"] as const) {
+      expect(isToolAvailable("circular", id)).toBe(true);
+    }
+    // The first tool of the rail is always available, on every grid.
+    expect(fallbackTool("square")).toBe("select");
+    expect(fallbackTool("circular")).toBe("select");
+  });
+
+  it("makes their shortcuts inert on a circular grid", () => {
+    expect(toolForShortcut("l", "square")).toBe("line");
+    expect(toolForShortcut("a", "square")).toBe("arc");
+    expect(toolForShortcut("l", "circular")).toBeNull();
+    expect(toolForShortcut("L", "circular")).toBeNull();
+    expect(toolForShortcut("a", "circular")).toBeNull();
+    expect(toolForShortcut("p", "circular")).toBe("pen");
+    // Without a grid there is no per-grid filtering (tests, and callers that
+    // do not know the board).
+    expect(toolForShortcut("l")).toBe("line");
+
+    expect(shortcutFor({ key: "l" }, "square")).toEqual({
+      kind: "tool",
+      tool: "line",
+    });
+    expect(shortcutFor({ key: "l" }, "circular")).toBeNull();
+    expect(shortcutFor({ key: "a" }, "circular")).toBeNull();
+    expect(shortcutFor({ key: "p" }, "circular")).toEqual({
+      kind: "tool",
+      tool: "pen",
+    });
+    // The grid does not touch anything else on the map.
+    expect(shortcutFor({ key: "r" }, "circular")).toEqual({ kind: "rotate" });
+    expect(shortcutFor({ key: "1" }, "circular")).toEqual({
+      kind: "shape",
+      shape: "square",
+    });
+  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -682,5 +768,32 @@ describe("HandTool", () => {
     const preview = previewTool("hand", ctx, NO_STATE);
     expect(preview.items).toEqual([]);
     expect(preview.marker).toBeNull();
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Per-grid item rules                                                 */
+/* ------------------------------------------------------------------ */
+
+describe("per-grid rules", () => {
+  const CIRCULAR: ProjectConfig = { ...CONFIG, gridType: "circular" };
+
+  it("never erases an item the grid hides", () => {
+    // The line lies across row 1, and the pointer sits inside its bar on the
+    // square board — the eraser's hit test finds it there. A circular board
+    // hides lines, so the same sweep sees nothing (docs/CANVAS.md §3).
+    const hidden = makeLine({ column: 1, row: 1 }, { column: 4, row: 1 });
+
+    const square = context([hidden], { tool: "eraser" });
+    const hit = beginTool("eraser", square, NO_STATE, input(pointOf(1, 1)));
+    expect(expectErase(hit.state).keys).toEqual([hidden.key]);
+
+    const circular = context([hidden], { tool: "eraser", config: CIRCULAR });
+    const start = beginTool("eraser", circular, NO_STATE, input(pointOf(1, 1)));
+    expect(expectErase(start.state).keys).toEqual([]);
+    const out = endTool("eraser", circular, start.state);
+    expect(out.commit).toBeUndefined();
+    // Hidden, not deleted: the item is still on the board, untouched.
+    expect(circular.items).toContain(hidden);
   });
 });

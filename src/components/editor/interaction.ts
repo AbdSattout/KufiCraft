@@ -46,6 +46,7 @@ import { lineItems, removeItems } from "@/lib/canvas/ops";
 import {
   Arc,
   colorItem,
+  isItemAllowed,
   itemBounds as boundsOfItem,
   itemCellRange,
   itemContains as hitTestItem,
@@ -56,6 +57,7 @@ import {
   makeTile,
   moveItem,
   styleItem,
+  visibleItems,
 } from "@/lib/canvas/items";
 import type { ItemStyle } from "@/lib/canvas/items";
 import type { Point, Rect } from "@/lib/canvas/geometry";
@@ -238,14 +240,19 @@ export function hitsItem(
   return hitTestItem(config, item, point);
 }
 
-/** Topmost item under `point` (last drawn wins), or `null`. */
+/** Topmost **visible** item under `point` (last drawn wins), or `null`. */
 export function hitTest(
   config: ProjectConfig,
   items: readonly CanvasItem[],
   point: Point,
 ): CanvasItem | null {
   for (let index = items.length - 1; index >= 0; index--) {
-    if (hitsItem(config, items[index], point)) return items[index];
+    const item = items[index];
+    // An item the grid hides is not there as far as the pointer is concerned
+    // (`docs/CANVAS.md` §3): it cannot be clicked, moved or erased. The
+    // document keeps it (see the per-grid rules in items.ts).
+    if (!isItemAllowed(config, item)) continue;
+    if (hitsItem(config, item, point)) return item;
   }
   return null;
 }
@@ -270,7 +277,7 @@ export function rectsIntersect(a: Rect, b: Rect): boolean {
   );
 }
 
-/** Keys of the items the marquee box touches. */
+/** Keys of the **visible** items the marquee box touches. */
 export function marqueeSelection(
   config: ProjectConfig,
   items: readonly CanvasItem[],
@@ -278,6 +285,7 @@ export function marqueeSelection(
 ): string[] {
   const keys: string[] = [];
   for (const item of items) {
+    if (!isItemAllowed(config, item)) continue;
     if (itemIntersectsRect(config, item, box)) keys.push(item.key);
   }
   return keys;
@@ -286,6 +294,26 @@ export function marqueeSelection(
 /* ------------------------------------------------------------------ */
 /* Selection operations                                                */
 /* ------------------------------------------------------------------ */
+
+/**
+ * Drops selection keys whose item is gone, or which the current grid hides.
+ *
+ * The controller runs this every render, so a switch to a circular board
+ * clears the line/arc keys it hides at once (`docs/CANVAS.md` §3) — delete,
+ * move, colour and arrange can never act on something the user cannot see.
+ * Key order is kept; the array identity is the caller's business.
+ */
+export function pruneSelection(
+  config: ProjectConfig,
+  items: readonly CanvasItem[],
+  keys: readonly string[],
+): string[] {
+  if (keys.length === 0) return [];
+  const live = new Set(
+    visibleItems(config.gridType, items).map((item) => item.key),
+  );
+  return keys.filter((key) => live.has(key));
+}
 
 /** Largest delta (in cells) that keeps every listed item inside the grid. */
 export function clampDelta(

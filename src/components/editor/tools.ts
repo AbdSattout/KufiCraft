@@ -9,19 +9,27 @@
  * draw while the gesture is live.
  *
  * The registry is the single list the rest of the editor reads: the rail maps
- * `TOOLS`, shortcuts and labels come from the classes, and the controller
- * dispatches through `beginTool` / `moveTool` / `endTool` / `previewTool`
- * instead of switching on a tool name. Adding a tool means adding a class and
- * one line in `REGISTRY` — nothing else in the editor changes.
+ * `toolsFor(grid)` (the board's tools, in `TOOLS` order), shortcuts and labels
+ * come from the classes, and the controller dispatches through `beginTool` /
+ * `moveTool` / `endTool` / `previewTool` instead of switching on a tool name.
+ * Adding a tool means adding a class and one line in `REGISTRY` — nothing else
+ * in the editor changes.
  *
  * The items a tool produces are built by the item classes in
  * `@/lib/canvas/items`, so a tool never hand-writes geometry.
  */
 
-import type { Anchor, ArcItem, CanvasItem, Cell } from "@/lib/canvas/model";
+import type {
+  Anchor,
+  ArcItem,
+  CanvasItem,
+  CanvasItemType,
+  Cell,
+  GridType,
+} from "@/lib/canvas/model";
 import type { Point, Rect } from "@/lib/canvas/geometry";
 import { addItems, lineItems, paintItems, penItems, removeItems } from "@/lib/canvas/ops";
-import { Arc } from "@/lib/canvas/items";
+import { Arc, isItemTypeAllowed } from "@/lib/canvas/items";
 import {
   anchorKey,
   anchorAt,
@@ -134,6 +142,14 @@ export abstract class KufiTool {
   abstract readonly cursor: string;
   /** Toolbar icon, drawn by the tool itself. */
   abstract readonly icon: readonly ToolIconPart[];
+  /**
+   * The item types this tool creates — the grid rule the whole editor reads.
+   * A tool is usable only on boards that carry its items (`isToolAvailable`):
+   * a circular board has no `line` and no `arc`, so those tools are absent
+   * from the rail and inert on the keyboard. Tools that create nothing
+   * (select, eraser, hand) are available everywhere.
+   */
+  readonly creates: readonly CanvasItemType[] = [];
   /** True when the tool keeps its state across pointer-up. */
   readonly persistent: boolean = false;
   /**
@@ -457,6 +473,7 @@ class LineTool extends KufiTool {
   readonly shortcut = "L";
   readonly cursor = "cursor-crosshair";
   override readonly persistent = true;
+  override readonly creates = ["line"] as const;
   override readonly hint =
     "انقر لتحديد النقاط، ثم انقر النقطة الأخيرة للإنهاء أو الأولى للإغلاق";
   readonly icon: readonly ToolIconPart[] = [
@@ -656,6 +673,7 @@ class ArcTool extends KufiTool {
   readonly shortcut = "A";
   readonly cursor = "cursor-crosshair";
   override readonly persistent = true;
+  override readonly creates = ["arc"] as const;
   readonly icon: readonly ToolIconPart[] = [
     { d: "M4 18 A 8 8 0 0 1 20 18" },
     { d: "M4 18 L4 21.5" },
@@ -818,12 +836,35 @@ export const TOOL_LABELS: Readonly<Record<ToolId, string>> = Object.fromEntries(
 ) as Record<ToolId, string>;
 
 /** The tool whose class declares `key`, or `null`. */
-export function toolForShortcut(key: string): ToolId | null {
+export function toolForShortcut(key: string, gridType?: GridType): ToolId | null {
   const upper = key.toUpperCase();
   for (const id of TOOL_ORDER) {
-    if (REGISTRY[id].shortcut === upper) return id;
+    if (REGISTRY[id].shortcut !== upper) continue;
+    // A tool the grid does not carry has no shortcut either: on a circular
+    // board `L`/`A` are inert instead of arming an invisible tool.
+    return gridType === undefined || isToolAvailable(gridType, id) ? id : null;
   }
   return null;
+}
+
+/**
+ * Whether `id` is usable on a board of `gridType`. This is **the** per-grid
+ * tool rule (`docs/CANVAS.md` §3, docs/UI.md §Editor): the rail lists
+ * `toolsFor`, the keyboard asks `toolForShortcut`, and the controller falls
+ * back to `fallbackTool` when the grid changes under an armed tool.
+ */
+export function isToolAvailable(gridType: GridType, id: ToolId): boolean {
+  return REGISTRY[id].creates.every((type) => isItemTypeAllowed(gridType, type));
+}
+
+/** The tools of `gridType`, in rail order. */
+export function toolsFor(gridType: GridType): readonly KufiTool[] {
+  return TOOLS.filter((tool) => isToolAvailable(gridType, tool.id));
+}
+
+/** The tool to activate when the current one is not on this board. */
+export function fallbackTool(gridType: GridType): ToolId {
+  return TOOLS.find((tool) => isToolAvailable(gridType, tool.id))?.id ?? "select";
 }
 
 /* ------------------------------------------------------------------ */

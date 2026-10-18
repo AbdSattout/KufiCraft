@@ -11,7 +11,7 @@
  * the shape registry (`SHAPE_ORDER`), so this map cannot drift from the UI.
  */
 
-import type { ShapeId } from "@/lib/canvas/model";
+import type { GridType, ShapeId } from "@/lib/canvas/model";
 import type { ArrangeAction } from "@/lib/canvas/ops";
 import { SHAPE_ORDER } from "@/lib/canvas/shapes";
 import { toolForShortcut } from "./tools";
@@ -55,7 +55,16 @@ function hasPrimary(event: ShortcutEvent): boolean {
   return event.ctrlKey === true || event.metaKey === true;
 }
 
-export function shortcutFor(event: ShortcutEvent): EditorShortcut | null {
+/**
+ * `gridType` is the board's grid, when the caller knows it (`docs/CANVAS.md`
+ * §3): a tool the grid does not carry has no shortcut there, so `L` and `A`
+ * stay inert on a circular board instead of arming an invisible tool. Others
+ * may omit it — no grid, no per-grid filtering.
+ */
+export function shortcutFor(
+  event: ShortcutEvent,
+  gridType?: GridType,
+): EditorShortcut | null {
   if (isTyping(event)) return null;
   const key = event.key;
 
@@ -95,6 +104,6 @@ export function shortcutFor(event: ShortcutEvent): EditorShortcut | null {
 
   if (key.toLowerCase() === "r") return { kind: "rotate" };
 
-  const tool = toolForShortcut(key);
+  const tool = toolForShortcut(key, gridType);
   return tool ? { kind: "tool", tool } : null;
 }
