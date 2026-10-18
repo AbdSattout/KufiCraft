@@ -1,11 +1,8 @@
 "use client";
 
-import { ConvexReactClient } from "convex/react";
-import {
-  ConvexBetterAuthProvider,
-  type AuthClient,
-} from "@convex-dev/better-auth/react";
-import { authClient } from "@/lib/auth-client";
+import { useMemo } from "react";
+import { ConvexProviderWithAuth, ConvexReactClient } from "convex/react";
+import { createConvexAuthHook } from "@/lib/convex-auth";
 
 const convex = new ConvexReactClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
 
@@ -16,15 +13,11 @@ export function ConvexClientProvider({
   children: React.ReactNode;
   initialToken?: string | null;
 }) {
+  const useAuth = useMemo(() => createConvexAuthHook(initialToken), [initialToken]);
+
   return (
-    <ConvexBetterAuthProvider
-      client={convex}
-      // The component's AuthClient type does not infer the additional
-      // passkey plugin's generic, so we widen to its public type here.
-      authClient={authClient as unknown as AuthClient}
-      initialToken={initialToken}
-    >
+    <ConvexProviderWithAuth client={convex} useAuth={useAuth}>
       {children}
-    </ConvexBetterAuthProvider>
+    </ConvexProviderWithAuth>
   );
 }

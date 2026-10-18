@@ -19,7 +19,7 @@ export function BoardsScreen() {
     <div className="flex min-h-dvh flex-col bg-background">
       <SiteHeader />
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:py-10">
-        {gate.unavailable ? (
+        {gate.reconnecting ? (
           <SessionUnavailable className="mt-10" onRetry={gate.retry} />
         ) : gate.ready ? (
           <ProjectsView />

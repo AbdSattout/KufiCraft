@@ -42,14 +42,15 @@ everything about the live deployment that a unit test cannot reach is marked
 | `convex/betterAuth/auth.ts` | static `auth` export **for schema generation only** — never import at runtime |
 | `convex/betterAuth/adapter.ts` | adapter functions (`create`/`findOne`/… ) from the local schema |
 | `convex/http.ts` | `authComponent.registerRoutes(http, createAuth)` → mounts `/api/auth/*` |
-| `src/lib/auth-client.ts` | `createAuthClient({ plugins: [convexClient(), passkeyClient()] })` |
+| `src/lib/auth-client.ts` | `createAuthClient({ plugins: [convexClient(), passkeyClient()], fetchOptions: { customFetchImpl } })` — the resilient fetch of § Transient failures |
+| `src/lib/{auth-fetch,retry,session-gate,convex-token,save-state}.ts` | the resilience layer: budgeted+retried auth GETs, the session gate decision, the Convex token cache, the save-state mapping (each with a sibling `*.test.ts`) |
 | `src/app/(auth)/{layout,account}` | Arabic RTL shell: `/account` is “الحساب والأمان” (there is no sign-in route — the dialog lives on the landing) |
 | `src/app/page.tsx`, `src/app/[projectId]/page.tsx` | the boards (home) and a board — one segment apart, no `/app` prefix |
 | `src/components/auth/**` | the sign-in dialog (one button, silent auto-attempt) and its CTA triggers, account screen + account & security card (account name = passkey name, sign-out), passkey error mapping, `require-auth` guard (`useSession`, so a failed Convex token cannot sign anyone out) |
 | `src/proxy.ts` + `src/lib/route-guards.ts` | pre-render routing: `/` is the boards with a session and the landing without one, `/?signin=1` is the landing either way, `/account` and `/<id>` → `/?signin=1` without a session, and `/signin`/`/signup` redirect for the old sign-in addresses |
 | `src/lib/auth-server.ts` | `convexBetterAuthNextJs(...)` helpers (`getToken`, `preloadAuthQuery`, …) |
 | `src/app/api/auth/[...all]/route.ts` | `export const { GET, POST } = handler` (proxies to Convex) |
-| `src/components/convex-client-provider.tsx` | `ConvexBetterAuthProvider` (client) |
+| `src/components/convex-client-provider.tsx` | `ConvexProviderWithAuth` on the client, authenticated by `src/lib/convex-auth.ts` (the vendor's hook, made resilient) |
 | `src/lib/canvas/model.ts` | unrelated but same pattern: re-export shim |
 
 ## Environment
@@ -221,6 +222,88 @@ Sign-in/sign-up must work **without** passwords, email or OAuth:
 4. Behaviour **is verified against the live dev deployment**: HTTP checks for
    every option/verify endpoint plus a real-browser Chromium virtual
    authenticator E2E (sign-up → account → rename → sign-out → sign-in).
+
+## Transient failures on the way to the deployment
+
+**The rule, first: only a resolved, authoritative “no session” may sign anyone
+out** — a 200 whose session is null, or a clean 401. Everything else is
+*transient*: a timeout, `fetch failed`, an aborted request, a 5xx from the auth
+proxy, or a session that is live while Convex has not received a token. A
+transient failure keeps the current screen, navigates nowhere, and shows at most
+a quiet “جارٍ إعادة الاتصال…”. The decision is the pure function in
+`src/lib/session-gate.ts` (tests: `session-gate.test.ts`), and `useRequireAuth`
+is its only caller: it navigates on `signedOut` alone. Guessing “signed out”
+from a hiccup is what the `/?signin=1` rule then has to undo (§ Gotchas).
+
+Why this exists: every `/api/auth/*` call is proxied by the Next server to the
+deployment, and **on this machine that one hop is unreliable.** Measured from
+Node 26 against `*.convex.site`:
+
+| probe | result |
+| --- | --- |
+| IPv6 (`curl -6`) | never connects — `connect` never completes |
+| IPv4 (`curl -4`) | connects in 0.28–0.56 s |
+| fresh `fetch`, new process | 1.4–2 s when it works; **`UND_ERR_CONNECT_TIMEOUT` at ~10.5 s on a quarter to four fifths of fresh attempts** |
+| the same with `--dns-result-order=ipv4first` | IPv4 is first in DNS, and the stalls remain — the loss is on the IPv4 path too |
+| second request in a warm process | 0.4–0.8 s (connection reuse) |
+
+undici gives a fresh connection 10 s before it gives up, which is what turned a
+click into an error flash instead of a wait.
+
+The same failure seen from the app, while the dev server was running:
+`GET /api/auth/get-session` through the proxy answered **500 after 10.5–13.5 s**
+— the proxy's own outbound call stalling out. That 500 is the transient case in
+the first paragraph, and it is why a 5xx must never be read as “signed out”.
+
+What the client does about it:
+
+* **A budget, for GETs only.** `src/lib/auth-fetch.ts` is the `customFetchImpl`
+  the Better Auth client uses (`src/lib/auth-client.ts`): a GET that has not
+  produced response headers within 4 s is abandoned and asked again once, after
+  a 250 ms backoff. The budget is cleared the moment headers arrive, so a slow
+  *body* is never cut in half, and a caller's own abort (Better Auth cancels a
+  superseded session fetch) is not a failure to retry. POSTs pass through
+  untouched: `passkey/verify-registration` and `sign-out` are writes, and a
+  replayed one is a second account, not a second read. The passkey *options*
+  calls are GETs and do get retried — `generate-register-options` mints, and it
+  is safe to replay because the retry carries the same context token, which
+  `resolveUser` reaps (§ Known follow-ups, 1).
+* **A token that is kept.** `src/lib/convex-token.ts` reuses the Convex token
+  until shortly before its JWT `exp`, gives concurrent callers one request
+  (single flight) and never caches a failure. It is wired in
+  `src/lib/convex-auth.ts` — our replacement for the vendor's
+  `ConvexBetterAuthProvider` hook, with the same `isLoading`/`isAuthenticated`
+  semantics plus `refetchConvexToken()`, the only public way to make Convex run
+  `setAuth()` again (a real retry instead of a page reload).
+* **A gate that waits.** `useRequireAuth` refetches the session and re-arms the
+  token twice (400 ms, then 800 ms) before it shows anything; after that the
+  screens keep what they had and show the quiet Arabic “جارٍ إعادة الاتصال…”
+  with a manual retry — and the gate keeps asking, one slow ping every 10 s, so
+  a link that heals on its own heals the app too.
+* **A save indicator that does not lie.** The editor's top bar is the single
+  place the app reports writes: `محفوظ تلقائيًا` / `جارٍ الحفظ…` /
+  `تعذّر الاتصال — جارٍ إعادة المحاولة…` / `غير محفوظ — ستتم إعادة المحاولة`
+  (`src/lib/save-state.ts`, mapped in `src/components/editor/editor-top-bar.tsx`).
+  A transient rejection is never a toast: the change stays in the overlay **and**
+  in the queue, so the indicator cannot report `saved` for a change that has not
+  landed. Convex's client already replays mutations it never got an answer for;
+  a mutation the server *rejected* while the client was between tokens is not
+  replayed by it, so the held document is offered again as one `replace` —
+  order-safe and idempotent (`applyOps` dedupes by key) — where a replayed
+  *diff* would be stale. `convex/projects.ts` is unchanged.
+* **The `dev`/`start` hint.** Both scripts run Node with
+  `--dns-result-order=ipv4first` because this machine's IPv6 route to
+  `*.convex.site` never connects. It is a workaround for this machine, not a
+  product decision, and it does **not** make the stalls go away on its own
+  (measured above) — the budget and the retry are what do.
+
+Deliberately not done: reimplementing the Next auth proxy
+(`src/app/api/auth/[...all]/route.ts`) to retry the outbound call. That proxy is
+the library's `handler`, which accepts no `fetch`/`signal` knob, and a
+client-side retry is the better shape anyway: it can start while the dead
+attempt is still stuck where a server-side sequential retry would have to wait
+out the 10 s first. The knob is documented as out of reach rather than patched
+around.
 
 ## Gotchas (learned the hard way)
 

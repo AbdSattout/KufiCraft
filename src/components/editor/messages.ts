@@ -16,6 +16,8 @@ export const MESSAGES = {
   untitled: "لوحة بلا عنوان",
   savedAutomatically: "محفوظ تلقائيًا",
   saving: "جارٍ الحفظ…",
+  savingRetrying: "تعذّر الاتصال — جارٍ إعادة المحاولة…",
+  unsavedOffline: "غير محفوظ — ستتم إعادة المحاولة",
   missingTitle: "اللوحة غير موجودة",
   missingBody: "قد تكون اللوحة محذوفة أو لا تملك صلاحية الوصول إليها.",
   invalidLink: "الرابط غير صالح",

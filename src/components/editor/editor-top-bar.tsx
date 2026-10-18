@@ -28,7 +28,35 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import type { SaveState } from "@/lib/save-state";
 import { MESSAGES } from "./messages";
+
+/** Dot, label and tone for each save state — the two warnings are the only loud ones. */
+const SAVE_INDICATORS: Record<
+  SaveState,
+  { label: string; dot: string; warning: boolean }
+> = {
+  saved: {
+    label: MESSAGES.savedAutomatically,
+    dot: "bg-primary/40",
+    warning: false,
+  },
+  saving: {
+    label: MESSAGES.saving,
+    dot: "bg-accent",
+    warning: false,
+  },
+  retrying: {
+    label: MESSAGES.savingRetrying,
+    dot: "bg-destructive/70",
+    warning: true,
+  },
+  offline: {
+    label: MESSAGES.unsavedOffline,
+    dot: "bg-destructive",
+    warning: true,
+  },
+};
 
 interface ProjectNameInputProps {
   name: string;
@@ -74,7 +102,8 @@ function ProjectNameInput({ name, rename }: ProjectNameInputProps) {
 export interface EditorTopBarProps {
   name: string;
   rename: (name: string) => void;
-  saving: boolean;
+  /** Saved / saving / retrying / offline — the one place the app says it. */
+  save: SaveState;
   canUndo: boolean;
   canRedo: boolean;
   undo: () => void;
@@ -88,7 +117,7 @@ export interface EditorTopBarProps {
 export function EditorTopBar({
   name,
   rename,
-  saving,
+  save,
   canUndo,
   canRedo,
   undo,
@@ -98,6 +127,8 @@ export function EditorTopBar({
   exportFile,
   onOpenSettings,
 }: EditorTopBarProps) {
+  const indicator = SAVE_INDICATORS[save];
+
   return (
     <header className="flex h-14 shrink-0 items-center gap-1 border-b border-border/70 bg-background px-2 sm:px-3">
       <Button
@@ -114,16 +145,16 @@ export function EditorTopBar({
 
       <span
         aria-live="polite"
-        className="hidden shrink-0 items-center gap-1.5 text-xs text-muted-foreground sm:flex"
+        className={cn(
+          "hidden shrink-0 items-center gap-1.5 text-xs sm:flex",
+          indicator.warning ? "text-destructive" : "text-muted-foreground",
+        )}
       >
         <span
           aria-hidden
-          className={cn(
-            "size-1.5 rounded-full",
-            saving ? "bg-accent" : "bg-primary/40",
-          )}
+          className={cn("size-1.5 rounded-full", indicator.dot)}
         />
-        {saving ? MESSAGES.saving : MESSAGES.savedAutomatically}
+        {indicator.label}
       </span>
 
       <div className="ms-auto flex shrink-0 items-center gap-1">

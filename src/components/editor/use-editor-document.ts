@@ -10,6 +10,17 @@
  * (`updatedAt` ack comparison), which makes a second tab or device win
  * without fighting the local state.
  *
+ * A write the server *rejects* while the client is between tokens is the one
+ * case that needs care (docs/AUTH.md § Transient failures). Convex's client
+ * replays mutations that were never acknowledged, but a rejected one is gone:
+ * the change would be dropped from the screen and would never reach the
+ * server. So a transient rejection *holds* the change — it stays in the
+ * overlay and in the queue, the indicator keeps saying it is not saved — and
+ * the document is offered again as one `replace` once Convex holds a token.
+ * That retry is deliberately document-shaped and order-safe: a replayed
+ * *diff* can be stale by the time auth comes back, a `replace` converged with
+ * whatever the server had.
+ *
  * Thumbnails follow the same document but at a slower rhythm: one
  * `updateThumbnail` at least 2 s after the last commit (docs/UI.md §Editor).
  */
@@ -24,6 +35,13 @@ import type { CanvasItem, ProjectConfig } from "@/lib/canvas/model";
 import { toOps } from "@/lib/canvas/ops";
 import { renderThumbnail } from "@/lib/canvas/render";
 import { sanitizeProjectConfig } from "@/lib/kuficraft-file";
+import {
+  isTransientSaveError,
+  RESYNC_RETRY_MS,
+  SAVE_TICK_MS,
+  saveStateOf,
+  type SaveState,
+} from "@/lib/save-state";
 import { configsEqual, itemsEqual } from "./interaction";
 import { errorMessage } from "./messages";
 
@@ -34,11 +52,13 @@ export type DocumentStatus = "loading" | "missing" | "ready";
 
 export interface EditorDocument {
   status: DocumentStatus;
+  /** This project's document has been read at least once. */
+  loaded: boolean;
   name: string;
   config: ProjectConfig;
   items: readonly CanvasItem[];
-  /** True while a write is in flight. */
-  saving: boolean;
+  /** The top bar's single save/connection indicator. */
+  save: SaveState;
   /** Applies `next` locally and sends the diff as one `applyOps` batch. */
   commitItems: (next: readonly CanvasItem[]) => void;
   rename: (name: string) => void;
@@ -48,6 +68,14 @@ export interface EditorDocument {
    * reaches the server through `patchConfig` when the gesture ends.
    */
   previewConfig: (patch: Partial<ProjectConfig>) => void;
+}
+
+/** Writes the server has not acknowledged: in flight, or held after a rejection. */
+interface WriteQueue {
+  inFlight: number;
+  held: number;
+  /** When the oldest pending write was made, or null when nothing is pending. */
+  since: number | null;
 }
 
 export function useEditorDocument(
@@ -67,33 +95,101 @@ export function useEditorDocument(
   const [items, setItems] = useState<readonly CanvasItem[] | null>(null);
   const [config, setConfig] = useState<ProjectConfig | null>(null);
   const [name, setName] = useState<string | null>(null);
-  const [pending, setPending] = useState(0);
+  const [queue, setQueue] = useState<WriteQueue>({
+    inFlight: 0,
+    held: 0,
+    since: null,
+  });
+  const [loadedFor, setLoadedFor] = useState<Id<"projects"> | null>(null);
+  const [online, setOnline] = useState(true);
+  const [now, setNow] = useState(() => Date.now());
 
   /** Items of the newest query result — the fallback when a write fails. */
   const serverItems = useRef<readonly CanvasItem[] | null>(null);
   /** Highest `updatedAt` acked by our own `applyOps` calls. */
   const ackUpdatedAt = useRef(0);
-  const pendingRef = useRef(0);
+  /** The queue as the callbacks see it, without waiting for a render. */
+  const queueRef = useRef<WriteQueue>(queue);
   const itemsRef = useRef<readonly CanvasItem[] | null>(null);
   const configRef = useRef<ProjectConfig | null>(null);
+  const nameRef = useRef<string | null>(null);
   const docRef = useRef(doc);
+  /** The board `loadedFor` already names; a ref so it is announced once. */
+  const loadedForRef = useRef<Id<"projects"> | null>(null);
+  /** Whether the indicator's clock is already running below. */
+  const tickingRef = useRef(false);
 
   // Write-only caches for the callbacks below; synced after each commit.
   useEffect(() => {
     itemsRef.current = items;
     configRef.current = config;
-  }, [config, items]);
+    nameRef.current = name;
+  }, [config, items, name]);
 
   useEffect(() => {
     docRef.current = doc;
   }, [doc]);
 
+  const publishQueue = useCallback(() => {
+    const current = queueRef.current;
+    if (current.inFlight + current.held === 0) current.since = null;
+    setQueue({ ...current });
+  }, []);
+
+  const beginWrite = useCallback(() => {
+    const current = queueRef.current;
+    if (current.inFlight + current.held === 0) current.since = Date.now();
+    current.inFlight += 1;
+    publishQueue();
+  }, [publishQueue]);
+
+  /** Ends one write: `held` keeps it (and the overlay) for the resync. */
+  const endWrite = useCallback(
+    (outcome: "acked" | "rejected" | "held") => {
+      const current = queueRef.current;
+      current.inFlight = Math.max(0, current.inFlight - 1);
+      if (outcome === "held") current.held += 1;
+      publishQueue();
+    },
+    [publishQueue],
+  );
+
+  const releaseHeld = useCallback(() => {
+    queueRef.current.held = 0;
+    publishQueue();
+  }, [publishQueue]);
+
+  /**
+   * One place for a write's failure, so all three writers agree: a transient
+   * rejection is held quietly, anything else is the server's verdict and is
+   * surfaced the way it always was.
+   */
+  const failWrite = useCallback(
+    (error: unknown, revert?: () => void) => {
+      if (isTransientSaveError(error)) {
+        endWrite("held");
+        return;
+      }
+      toast.error(errorMessage(error));
+      revert?.();
+      endWrite("rejected");
+    },
+    [endWrite],
+  );
+
   useEffect(() => {
     if (!doc) return;
     serverItems.current = doc.items;
+    // Announced once per board — the ref makes that a decision the effect can
+    // take without asking React again.
+    if (projectId !== null && loadedForRef.current !== projectId) {
+      loadedForRef.current = projectId;
+      setLoadedFor(projectId);
+    }
     // A write is still in flight, or the echo is older than our last ack:
     // keep the optimistic overlay until the server caught up.
-    if (pendingRef.current > 0 || doc.updatedAt < ackUpdatedAt.current) return;
+    if (queueRef.current.inFlight + queueRef.current.held > 0) return;
+    if (doc.updatedAt < ackUpdatedAt.current) return;
     // A deployment can be older than the client: normalise here so the editor
     // only ever holds a complete `ProjectConfig`.
     const nextConfig = sanitizeProjectConfig(doc.config);
@@ -104,7 +200,7 @@ export function useEditorDocument(
       prev !== null && configsEqual(prev, nextConfig) ? prev : nextConfig,
     );
     setName((prev) => (prev === doc.name ? prev : doc.name));
-  }, [doc, pending]);
+  }, [doc, projectId, queue]);
 
   const commitItems = useCallback(
     (next: readonly CanvasItem[]) => {
@@ -113,39 +209,35 @@ export function useEditorDocument(
       const ops = toOps(current, next);
       if (ops.length === 0) return;
       setItems(next);
-      pendingRef.current += 1;
-      setPending(pendingRef.current);
+      beginWrite();
       applyOps({ projectId, ops })
         .then((result) => {
           ackUpdatedAt.current = Math.max(ackUpdatedAt.current, result.updatedAt);
+          endWrite("acked");
         })
         .catch((error: unknown) => {
-          toast.error(errorMessage(error));
-          // Drop the rejected overlay: the server still has the old items.
-          if (serverItems.current !== null) setItems(serverItems.current);
-        })
-        .finally(() => {
-          pendingRef.current -= 1;
-          setPending(pendingRef.current);
+          failWrite(error, () => {
+            // Drop the rejected overlay: the server still has the old items.
+            if (serverItems.current !== null) setItems(serverItems.current);
+          });
         });
     },
-    [applyOps, projectId],
+    [applyOps, beginWrite, endWrite, failWrite, projectId],
   );
 
   const rename = useCallback(
     (next: string) => {
       if (!projectId) return;
       setName(next);
-      pendingRef.current += 1;
-      setPending(pendingRef.current);
+      beginWrite();
       renameProject({ projectId, name: next })
-        .catch((error: unknown) => toast.error(errorMessage(error)))
-        .finally(() => {
-          pendingRef.current -= 1;
-          setPending(pendingRef.current);
+        .then(() => endWrite("acked"))
+        .catch((error: unknown) => {
+          // The echo restores the server's name; nothing to revert here.
+          failWrite(error);
         });
     },
-    [projectId, renameProject],
+    [beginWrite, endWrite, failWrite, projectId, renameProject],
   );
 
   const patchConfig = useCallback(
@@ -154,25 +246,117 @@ export function useEditorDocument(
       const current = configRef.current;
       if (current === null) return;
       setConfig({ ...current, ...patch });
-      pendingRef.current += 1;
-      setPending(pendingRef.current);
+      beginWrite();
       updateConfig({ projectId, patch })
+        .then(() => endWrite("acked"))
         .catch((error: unknown) => {
-          toast.error(errorMessage(error));
-          const latest = docRef.current;
-          if (latest) setConfig(sanitizeProjectConfig(latest.config));
-        })
-        .finally(() => {
-          pendingRef.current -= 1;
-          setPending(pendingRef.current);
+          failWrite(error, () => {
+            const latest = docRef.current;
+            if (latest) setConfig(sanitizeProjectConfig(latest.config));
+          });
         });
     },
-    [projectId, updateConfig],
+    [beginWrite, endWrite, failWrite, projectId, updateConfig],
   );
 
   const previewConfig = useCallback((patch: Partial<ProjectConfig>) => {
     setConfig((previous) => (previous === null ? previous : { ...previous, ...patch }));
   }, []);
+
+  /* -------------------------------------------------------------- */
+  /* Held writes: sent again as one document-shaped `replace`        */
+  /* -------------------------------------------------------------- */
+
+  const lastResync = useRef(0);
+
+  const resync = useCallback(() => {
+    const target = projectId;
+    const server = docRef.current;
+    const currentItems = itemsRef.current;
+    const currentConfig = configRef.current;
+    const currentName = nameRef.current;
+    if (!target || !server || currentItems === null) return;
+
+    const writes: Array<Promise<unknown>> = [];
+    if (!itemsEqual(currentItems, server.items)) {
+      writes.push(
+        applyOps({
+          projectId: target,
+          ops: [{ type: "replace", items: [...currentItems] }],
+        }),
+      );
+    }
+    if (
+      currentConfig !== null &&
+      !configsEqual(currentConfig, sanitizeProjectConfig(server.config))
+    ) {
+      writes.push(updateConfig({ projectId: target, patch: currentConfig }));
+    }
+    if (currentName !== null && currentName !== server.name) {
+      writes.push(renameProject({ projectId: target, name: currentName }));
+    }
+    if (writes.length === 0) {
+      // The echo already carries everything: nothing to hold on to.
+      releaseHeld();
+      return;
+    }
+    Promise.all(writes)
+      .then(() => {
+        releaseHeld();
+      })
+      .catch((error: unknown) => {
+        // Still down: stay held, the tick below will offer it again. A real
+        // verdict (the item cap, a deleted board) falls back to the server.
+        if (isTransientSaveError(error)) return;
+        toast.error(errorMessage(error));
+        setItems(server.items);
+        setConfig(sanitizeProjectConfig(server.config));
+        setName(server.name);
+        releaseHeld();
+      });
+  }, [applyOps, projectId, releaseHeld, renameProject, updateConfig]);
+
+  useEffect(() => {
+    if (!enabled || projectId === null || queue.held === 0) return;
+    if (now - lastResync.current < RESYNC_RETRY_MS) return;
+    lastResync.current = now;
+    resync();
+  }, [doc, enabled, now, projectId, queue.held, resync]);
+
+  /* -------------------------------------------------------------- */
+  /* The indicator's clock and its offline hint                      */
+  /* -------------------------------------------------------------- */
+
+  useEffect(() => {
+    const pending = queue.inFlight + queue.held > 0;
+    // Ref-guarded so a re-run while something is still pending neither restarts
+    // the clock nor costs a render.
+    if (pending === tickingRef.current) return;
+    tickingRef.current = pending;
+    setNow(Date.now());
+    if (!pending) return;
+    const timer = window.setInterval(() => setNow(Date.now()), SAVE_TICK_MS);
+    return () => window.clearInterval(timer);
+  }, [queue.inFlight, queue.held]);
+
+  useEffect(() => {
+    const update = () => setOnline(navigator.onLine);
+    update();
+    window.addEventListener("online", update);
+    window.addEventListener("offline", update);
+    return () => {
+      window.removeEventListener("online", update);
+      window.removeEventListener("offline", update);
+    };
+  }, []);
+
+  const save = saveStateOf({
+    pending: queue.inFlight + queue.held,
+    since: queue.since,
+    held: queue.held,
+    online,
+    now,
+  });
 
   /* -------------------------------------------------------------- */
   /* Thumbnail: one write, at least 2 s after the last commit        */
@@ -203,6 +387,8 @@ export function useEditorDocument(
       lastThumbnail.current = svg;
       updateThumbnail({ projectId, thumbnail: svg }).catch((error: unknown) => {
         lastThumbnail.current = null;
+        // A thumbnail is a nicety: no toast, and the next commit retries it.
+        if (isTransientSaveError(error)) return;
         toast.error(errorMessage(error));
       });
     }, THUMBNAIL_DELAY_MS);
@@ -214,20 +400,30 @@ export function useEditorDocument(
     };
   }, [config, items, projectId, updateThumbnail]);
 
-  const status: DocumentStatus = !enabled
-    ? "loading"
-    : doc === undefined
-      ? "loading"
-      : doc === null
-        ? "missing"
-        : "ready";
+  /**
+   * Reading, not writing: a document that was read once keeps its screen while
+   * the gate is closed. That is the “keep the current screen” rule — a hiccup
+   * must not throw the board away and show a spinner, and the indicator carries
+   * the state instead.
+   */
+  const loaded = projectId !== null && loadedFor === projectId;
+
+  const status: DocumentStatus = (() => {
+    // The server said the board is gone, whatever we had locally.
+    if (doc === null) return "missing";
+    // No answer (yet): hold the screen when there is a document on it — a
+    // hiccup must not throw the canvas away for a spinner.
+    if (doc === undefined) return loaded ? "ready" : "loading";
+    return "ready";
+  })();
 
   return {
     status,
+    loaded,
     name: name ?? "",
     config: config ?? DEFAULT_PROJECT_CONFIG,
     items: items ?? EMPTY_ITEMS,
-    saving: pending > 0,
+    save,
     commitItems,
     rename,
     patchConfig,

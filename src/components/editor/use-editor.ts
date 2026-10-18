@@ -92,6 +92,7 @@ import { shortcutFor } from "./shortcuts";
 import { useEditorDocument } from "./use-editor-document";
 import { downloadPng, downloadSvg } from "./export";
 import { MESSAGES, errorMessage } from "./messages";
+import type { SaveState } from "@/lib/save-state";
 import type { Point, Rect } from "@/lib/canvas/geometry";
 
 export { MAX_ZOOM, MIN_ZOOM } from "@/lib/editor-prefs";
@@ -115,7 +116,8 @@ export interface EditorController {
   /** Live, mutation-free config preview (slider dragging). */
   previewConfig: (patch: Partial<ProjectConfig>) => void;
   items: readonly CanvasItem[];
-  saving: boolean;
+  /** The top bar's single save/connection indicator. */
+  save: SaveState;
 
   tool: ToolId;
   setTool: (tool: ToolId) => void;
@@ -814,7 +816,7 @@ export function useEditor(
     patchConfig,
     previewConfig: document.previewConfig,
     items,
-    saving: document.saving,
+    save: document.save,
     tool,
     setTool: setToolStateAndReset,
     style,

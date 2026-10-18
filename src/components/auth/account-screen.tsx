@@ -13,12 +13,14 @@ import { Skeleton } from "@/components/ui/skeleton";
  * that expired while the page was open.
  *
  * The passkey list is a Better Auth call, not a Convex query, so this screen
- * only waits on the session itself (`sessionFailed`), never on Convex's token.
+ * only waits on the session itself: a missing Convex token is not its problem,
+ * and a transient session failure leaves the skeleton (plus the quiet notice
+ * once the gate has stopped retrying) in place rather than an error.
  */
 export function AccountScreen() {
   const gate = useRequireAuth();
 
-  if (gate.sessionFailed) {
+  if (gate.reconnecting && !gate.isAuthenticated) {
     return <SessionUnavailable onRetry={gate.retry} />;
   }
   if (!gate.isAuthenticated) return <AccountSkeleton />;

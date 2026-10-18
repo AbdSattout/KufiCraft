@@ -206,14 +206,17 @@ export function EditorScreen() {
     [itemByKey, editor.previewKeys],
   );
 
-  if (gate.unavailable) {
+  if (gate.reconnecting && editor.status === "loading") {
+    // Nothing to keep on screen yet: say, quietly, what is happening. Once a
+    // document is open the editor stays exactly as it is and the top bar's
+    // indicator carries the state (docs/AUTH.md § Transient failures).
     return (
       <div className="grid h-dvh place-items-center bg-background p-6">
         <SessionUnavailable onRetry={gate.retry} />
       </div>
     );
   }
-  if (!gate.isLoading && !gate.isAuthenticated) return <Redirecting />;
+  if (gate.signedOut) return <Redirecting />;
 
   if (editor.status === "invalid") {
     return (
@@ -240,7 +243,7 @@ export function EditorScreen() {
       <EditorTopBar
         name={editor.name}
         rename={editor.rename}
-        saving={editor.saving}
+        save={editor.save}
         canUndo={editor.canUndo}
         canRedo={editor.canRedo}
         undo={editor.undo}
