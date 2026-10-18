@@ -25,6 +25,8 @@ import {
   cellSize,
   compareCells,
   lineKey,
+  sanitizeBorder,
+  sanitizeRounding,
   strokeKey,
   tileKey,
 } from "./model";
@@ -35,6 +37,8 @@ import type {
   CanvasItem,
   CanvasItemType,
   Cell,
+  ItemBorder,
+  ItemRounding,
   LineItem,
   ProjectConfig,
   Rotation,
@@ -67,19 +71,36 @@ import {
   zoneRect,
 } from "./geometry";
 import type { CircularSlice, PathCmd, Point, Rect } from "./geometry";
+import { borderOutline } from "./border";
 import { cellCentre } from "./grid";
+import { roundingRadius } from "./rounding";
 import { shapeById, shapePath } from "./shapes";
 
 /* ------------------------------------------------------------------ */
 /* Shared vocabulary                                                   */
 /* ------------------------------------------------------------------ */
 
-/** How a path is painted: a filled shape or a stroked line of ink width. */
+/**
+ * How a path is painted: a filled shape or a stroked line of ink width.
+ */
 export interface Rendered {
   path: string;
   mode: "fill" | "stroke";
   /** Stroke width in viewBox units (0 for fills). */
   width: number;
+  /**
+   * The item's outside border, when it carries one (`draw`, not `render`).
+   * Drawn **before** the item's own path so ink always wins over a border.
+   */
+  outline?: RenderedOutline;
+}
+
+/** A border ready to paint: path, stroke width and resolved colour. */
+export interface RenderedOutline {
+  path: string;
+  /** Stroke width in viewBox units (always `> 0`). */
+  width: number;
+  color: string;
 }
 
 /** Inclusive cell extent of an item — used to clamp a selection move. */
@@ -90,10 +111,16 @@ export interface CellRange {
   maxRow: number;
 }
 
+/**
+ * Style patch applied to an item. Shape and rotation are the tile's own; a
+ * border is a stroke outside **any** item. `null` clears a field, `undefined`
+ * leaves it alone.
+ */
 export interface ItemStyle {
   shape?: ShapeId;
   rotation?: Rotation;
-  color?: string;
+  rounding?: ItemRounding | null;
+  border?: ItemBorder | null;
 }
 
 /** `rect ∪ rect` for the empty case. */
@@ -134,10 +161,31 @@ export abstract class KufiItem {
   /** The colour override, if the item carries one. */
   readonly color?: string;
 
+  /** The outside border, if the item carries one (any item type can). */
+  readonly border?: ItemBorder;
+
   abstract toJSON(): CanvasItem;
 
-  /** The path and the paint mode, in viewBox units. */
+  /** The item's **own** paint, without its border, in viewBox units. */
   abstract render(config: ProjectConfig): Rendered;
+
+  /**
+   * What a renderer paints for this item: the outside border first (so the
+   * item's ink always wins), then the item's own path. This is the entry point
+   * of every renderer; `render` is for callers that want the shape alone
+   * (selection rings, toolbar icons).
+   */
+  draw(config: ProjectConfig): Rendered {
+    const rendered = this.render(config);
+    const border = this.border;
+    if (border === undefined) return rendered;
+    const outline = borderOutline(
+      this.bounds(config),
+      border,
+      this.resolvedColor(config),
+    );
+    return outline === undefined ? rendered : { ...rendered, outline };
+  }
 
   abstract bounds(config: ProjectConfig): Rect;
 
@@ -154,7 +202,12 @@ export abstract class KufiItem {
     return this;
   }
 
-  /** Shape + rotation; only tiles have them, so the default is a no-op. */
+  /**
+   * Style patch; each item type applies the fields it has — shape, rotation and
+   * rounding belong to tiles, a border to every type. The default is a no-op,
+   * and a subclass that has nothing to change returns itself (so a patch that
+   * does not concern an item keeps its object identity).
+   */
   withStyle(style: ItemStyle): KufiItem {
     void style;
     return this;
@@ -176,6 +229,8 @@ export interface TileInit {
   zone: Zone;
   shape?: ShapeId;
   rotation?: Rotation;
+  rounding?: ItemRounding;
+  border?: ItemBorder;
   color?: string;
 }
 
@@ -187,6 +242,8 @@ export class Tile extends KufiItem {
   readonly zone: Zone;
   readonly shape?: ShapeId;
   readonly rotation?: Rotation;
+  readonly rounding?: ItemRounding;
+  readonly border?: ItemBorder;
   readonly color?: string;
 
   constructor(init: TileInit) {
@@ -196,6 +253,8 @@ export class Tile extends KufiItem {
     this.zone = init.zone;
     this.shape = init.shape;
     this.rotation = init.rotation;
+    this.rounding = init.rounding;
+    this.border = init.border;
     this.color = init.color;
   }
 
@@ -213,6 +272,10 @@ export class Tile extends KufiItem {
     };
     if (this.shape !== undefined && this.shape !== "square") item.shape = this.shape;
     if (this.rotation !== undefined && this.rotation !== 0) item.rotation = this.rotation;
+    if (this.rounding !== undefined && this.rounding.radius > 0) {
+      item.rounding = this.rounding;
+    }
+    if (this.border !== undefined) item.border = this.border;
     if (this.color !== undefined) item.color = this.color;
     return item;
   }
@@ -223,7 +286,7 @@ export class Tile extends KufiItem {
     }
     const box = zoneRect(config, this.column, this.row, this.zone);
     return {
-      path: shapePath(this.shape, box, this.rotation ?? 0),
+      path: shapePath(this.shape, box, this.rotation ?? 0, this.rounding),
       mode: "fill",
       width: 0,
     };
@@ -231,8 +294,10 @@ export class Tile extends KufiItem {
 
   /**
    * Circular fragment: the zone fragment *is* an annular sector, so the square
-   * shape renders as one. Other shapes are fitted into the slice's
-   * radial/tangential frame, which keeps the palette usable on a polar grid.
+   * shape renders as one (and has no corners to round — the sector's own
+   * corners are grid geometry, not the shape's box). Other shapes are fitted
+   * into the slice's radial/tangential frame, which keeps the palette usable on
+   * a polar grid; their corners are rounded in that local frame.
    */
   private circularPath(config: ProjectConfig): string {
     const slice = circularSlice(config, this.column, this.row, this.zone);
@@ -248,6 +313,7 @@ export class Tile extends KufiItem {
     const px = slice.cx + rMid * cos;
     const py = slice.cy + rMid * sin;
     // Local +x runs outward along the radius, local +y counter-clockwise.
+    const radius = roundingRadius(this.rounding, w, h);
     return shapeById(this.shape).inFrame(
       w,
       h,
@@ -259,6 +325,9 @@ export class Tile extends KufiItem {
         oy: py - (w / 2) * sin - (h / 2) * cos,
       },
       (aMid * 180) / Math.PI,
+      radius > 0 && this.rounding !== undefined
+        ? { radius, corners: this.rounding.corners }
+        : undefined,
     );
   }
 
@@ -300,6 +369,8 @@ export class Tile extends KufiItem {
       zone: this.zone,
       shape: this.shape,
       rotation: this.rotation,
+      rounding: this.rounding,
+      border: this.border,
       color: this.color,
     });
   }
@@ -311,20 +382,58 @@ export class Tile extends KufiItem {
       zone: this.zone,
       shape: this.shape,
       rotation: this.rotation,
+      rounding: this.rounding,
+      border: this.border,
       color,
     });
   }
 
   withStyle(style: ItemStyle): Tile {
+    const shape = style.shape ?? this.shape;
+    const rotation = style.rotation ?? this.rotation;
+    const rounding =
+      style.rounding === undefined ? this.rounding : (style.rounding ?? undefined);
+    const border =
+      style.border === undefined ? this.border : (style.border ?? undefined);
+    if (
+      shape === this.shape &&
+      rotation === this.rotation &&
+      sameRounding(rounding, this.rounding) &&
+      sameBorder(border, this.border)
+    ) {
+      return this;
+    }
     return new Tile({
       column: this.column,
       row: this.row,
       zone: this.zone,
-      shape: style.shape ?? this.shape,
-      rotation: style.rotation ?? this.rotation,
-      color: style.color ?? this.color,
+      shape,
+      rotation,
+      rounding,
+      border,
+      color: this.color,
     });
   }
+}
+
+/** Value equality of two rounding settings (`undefined` = square corners). */
+export function sameRounding(
+  a: ItemRounding | undefined,
+  b: ItemRounding | undefined,
+): boolean {
+  if (a === b) return true;
+  if (a === undefined || b === undefined) return false;
+  return a.radius === b.radius && a.corners === b.corners;
+}
+
+/** Value equality of two borders (`undefined` = none). */
+export function sameBorder(
+  a: ItemBorder | undefined,
+  b: ItemBorder | undefined,
+): boolean {
+  if (a === b) return true;
+  if (a === undefined || b === undefined) return false;
+  return a.sides === b.sides && a.width === b.width && a.color === b.color;
 }
 
 /* ------------------------------------------------------------------ */
@@ -334,6 +443,7 @@ export class Tile extends KufiItem {
 export interface LineInit {
   from: Cell;
   to: Cell;
+  border?: ItemBorder;
   color?: string;
 }
 
@@ -347,6 +457,7 @@ export class Line extends KufiItem {
   readonly type = "line" as const;
   readonly from: Cell;
   readonly to: Cell;
+  readonly border?: ItemBorder;
   readonly color?: string;
 
   constructor(init: LineInit) {
@@ -357,6 +468,7 @@ export class Line extends KufiItem {
         : [init.to, init.from];
     this.from = from;
     this.to = to;
+    this.border = init.border;
     this.color = init.color;
   }
 
@@ -371,6 +483,7 @@ export class Line extends KufiItem {
       from: this.from,
       to: this.to,
     };
+    if (this.border !== undefined) item.border = this.border;
     if (this.color !== undefined) item.color = this.color;
     return item;
   }
@@ -480,12 +593,31 @@ export class Line extends KufiItem {
     return new Line({
       from: { column: this.from.column + columns, row: this.from.row + rows },
       to: { column: this.to.column + columns, row: this.to.row + rows },
+      border: this.border,
       color: this.color,
     });
   }
 
   withColor(color: string | undefined): Line {
-    return new Line({ from: this.from, to: this.to, color });
+    return new Line({
+      from: this.from,
+      to: this.to,
+      border: this.border,
+      color,
+    });
+  }
+
+  /** A line has no shape or rounding; a border is the one style it can carry. */
+  withStyle(style: ItemStyle): Line {
+    if (style.border === undefined || sameBorder(style.border ?? undefined, this.border)) {
+      return this;
+    }
+    return new Line({
+      from: this.from,
+      to: this.to,
+      border: style.border ?? undefined,
+      color: this.color,
+    });
   }
 }
 
@@ -496,6 +628,7 @@ export class Line extends KufiItem {
 export interface StrokeInit {
   points: Cell[];
   closed?: boolean;
+  border?: ItemBorder;
   color?: string;
 }
 
@@ -510,12 +643,14 @@ export class Stroke extends KufiItem {
   readonly type = "stroke" as const;
   readonly points: readonly Cell[];
   readonly closed: boolean;
+  readonly border?: ItemBorder;
   readonly color?: string;
 
   constructor(init: StrokeInit) {
     super();
     this.points = init.points;
     this.closed = init.closed ?? false;
+    this.border = init.border;
     this.color = init.color;
   }
 
@@ -530,6 +665,7 @@ export class Stroke extends KufiItem {
       points: this.points.map((cell) => ({ column: cell.column, row: cell.row })),
     };
     if (this.closed) item.closed = true;
+    if (this.border !== undefined) item.border = this.border;
     if (this.color !== undefined) item.color = this.color;
     return item;
   }
@@ -608,12 +744,31 @@ export class Stroke extends KufiItem {
         row: cell.row + rows,
       })),
       closed: this.closed,
+      border: this.border,
       color: this.color,
     });
   }
 
   withColor(color: string | undefined): Stroke {
-    return new Stroke({ points: [...this.points], closed: this.closed, color });
+    return new Stroke({
+      points: [...this.points],
+      closed: this.closed,
+      border: this.border,
+      color,
+    });
+  }
+
+  /** A polyline has no shape or rounding; a border is its one style field. */
+  withStyle(style: ItemStyle): Stroke {
+    if (style.border === undefined || sameBorder(style.border ?? undefined, this.border)) {
+      return this;
+    }
+    return new Stroke({
+      points: [...this.points],
+      closed: this.closed,
+      border: style.border ?? undefined,
+      color: this.color,
+    });
   }
 }
 
@@ -626,6 +781,7 @@ export interface ArcInit {
   to: Cell;
   direction: ArcDirection;
   size: ArcSize;
+  border?: ItemBorder;
   color?: string;
 }
 
@@ -650,6 +806,7 @@ export class Arc extends KufiItem {
   readonly to: Cell;
   readonly direction: ArcDirection;
   readonly size: ArcSize;
+  readonly border?: ItemBorder;
   readonly color?: string;
 
   constructor(init: ArcInit) {
@@ -662,6 +819,7 @@ export class Arc extends KufiItem {
     this.to = to;
     this.direction = init.direction;
     this.size = init.size;
+    this.border = init.border;
     this.color = init.color;
   }
 
@@ -678,6 +836,7 @@ export class Arc extends KufiItem {
       direction: this.direction,
       size: this.size,
     };
+    if (this.border !== undefined) item.border = this.border;
     if (this.color !== undefined) item.color = this.color;
     return item;
   }
@@ -827,6 +986,7 @@ export class Arc extends KufiItem {
       to: { column: this.to.column + columns, row: this.to.row + rows },
       direction: this.direction,
       size: this.size,
+      border: this.border,
       color: this.color,
     });
   }
@@ -837,7 +997,23 @@ export class Arc extends KufiItem {
       to: this.to,
       direction: this.direction,
       size: this.size,
+      border: this.border,
       color,
+    });
+  }
+
+  /** An arc has no shape or rounding; a border is its one style field. */
+  withStyle(style: ItemStyle): Arc {
+    if (style.border === undefined || sameBorder(style.border ?? undefined, this.border)) {
+      return this;
+    }
+    return new Arc({
+      from: this.from,
+      to: this.to,
+      direction: this.direction,
+      size: this.size,
+      border: style.border ?? undefined,
+      color: this.color,
     });
   }
 }
@@ -887,14 +1063,22 @@ export function parseItem(item: CanvasItem): KufiItem {
         zone: item.zone,
         shape: item.shape,
         rotation: item.rotation,
+        rounding: item.rounding,
+        border: item.border,
         color: item.color,
       });
     case "line":
-      return new Line({ from: item.from, to: item.to, color: item.color });
+      return new Line({
+        from: item.from,
+        to: item.to,
+        border: item.border,
+        color: item.color,
+      });
     case "stroke":
       return new Stroke({
         points: item.points,
         closed: item.closed,
+        border: item.border,
         color: item.color,
       });
     case "arc":
@@ -903,6 +1087,7 @@ export function parseItem(item: CanvasItem): KufiItem {
         to: item.to,
         direction: item.direction,
         size: item.size,
+        border: item.border,
         color: item.color,
       });
   }
@@ -929,6 +1114,10 @@ export function itemOf(item: CanvasItem): KufiItem {
 
 export function itemRender(config: ProjectConfig, item: CanvasItem): Rendered {
   return itemOf(item).render(config);
+}
+
+export function itemDraw(config: ProjectConfig, item: CanvasItem): Rendered {
+  return itemOf(item).draw(config);
 }
 
 export function itemColor(config: ProjectConfig, item: CanvasItem): string {
@@ -964,7 +1153,27 @@ export function colorItem(item: CanvasItem, color: string | undefined): CanvasIt
 }
 
 export function styleItem(item: CanvasItem, style: ItemStyle): CanvasItem {
-  return itemOf(item).withStyle(style).toJSON();
+  // A style patch is stored canonically: the same clamps the backend and the
+  // file reader apply. That way a width-only border patch with no side on
+  // clears the field instead of storing an invisible `sides: 0` outline (and a
+  // zero radius clears rounding instead of storing a no-op object).
+  const rounding =
+    style.rounding === undefined
+      ? undefined
+      : style.rounding === null
+        ? null
+        : (sanitizeRounding(style.rounding) ?? null);
+  const border =
+    style.border === undefined
+      ? undefined
+      : style.border === null
+        ? null
+        : (sanitizeBorder(style.border) ?? null);
+  const wrapper = itemOf(item);
+  const styled = wrapper.withStyle({ ...style, rounding, border });
+  // A patch that asks nothing of this item type leaves the object identity
+  // alone, so a React layer can skip it.
+  return styled === wrapper ? item : styled.toJSON();
 }
 
 /** Item keys in a list, for set operations. */

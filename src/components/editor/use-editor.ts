@@ -30,6 +30,8 @@ import type {
   ArcDirection,
   ArcSize,
   CanvasItem,
+  ItemBorder,
+  ItemRounding,
   ProjectConfig,
   ShapeId,
 } from "@/lib/canvas/model";
@@ -129,6 +131,14 @@ export interface EditorController {
   inkSwatches: readonly string[];
   selectShape: (shape: ShapeId) => void;
   rotateShape: () => void;
+  /** Corner rounding: sets the draw style and re-rounds the selected tiles. */
+  setRounding: (rounding: ItemRounding) => void;
+  /** Corner rounding while a slider is dragged — style only, no write. */
+  previewRounding: (radius: number) => void;
+  /** Outside border: sets the draw style and re-borders the selection. */
+  setBorder: (border: ItemBorder) => void;
+  /** Border width while a slider is dragged — style only, no write. */
+  previewBorderWidth: (width: number) => void;
   /** The ink colour is the pen's colour *and* the project's ink. */
   setInkColor: (color: string) => void;
 
@@ -206,6 +216,8 @@ export function useEditor(
   const [style, setStyle] = useState<DrawStyle>({
     shape: initialPrefs.shape,
     rotation: initialPrefs.rotation,
+    rounding: initialPrefs.rounding,
+    border: initialPrefs.border,
   });
   const [arc, setArc] = useState<ArcStyle>(initialPrefs.arc);
   const [inkSwatches, setInkSwatches] = useState<readonly string[]>(
@@ -470,6 +482,49 @@ export function useEditor(
       applyCommit(reshapeItems(items, selection, { rotation }), "تدوير", selection);
     }
   }, [applyCommit, items, selection, style.rotation]);
+
+  /**
+   * Rounding and the border are style fields *and* item patches: the next
+   * stroke is drawn with them, and a live selection is re-styled in the same
+   * click (`reshapeItems`), exactly like the shape palette. The `preview*`
+   * variants only move the style while a slider is dragged — one backend write
+   * when the thumb is released (`SliderField` in `editor-controls.tsx`).
+   */
+  const setRounding = useCallback(
+    (rounding: ItemRounding) => {
+      setStyle((previous) => ({ ...previous, rounding }));
+      if (selection.length > 0) {
+        applyCommit(
+          reshapeItems(items, selection, { rounding }),
+          "استدارة",
+          selection,
+        );
+      }
+    },
+    [applyCommit, items, selection],
+  );
+
+  const previewRounding = useCallback((radius: number) => {
+    setStyle((previous) => ({ ...previous, rounding: { ...previous.rounding, radius } }));
+  }, []);
+
+  const setBorder = useCallback(
+    (border: ItemBorder) => {
+      setStyle((previous) => ({ ...previous, border }));
+      if (selection.length > 0) {
+        applyCommit(
+          reshapeItems(items, selection, { border }),
+          "حدود",
+          selection,
+        );
+      }
+    },
+    [applyCommit, items, selection],
+  );
+
+  const previewBorderWidth = useCallback((width: number) => {
+    setStyle((previous) => ({ ...previous, border: { ...previous.border, width } }));
+  }, []);
 
   /**
    * The ink colour is a project field, so the panel writes it through the
@@ -779,12 +834,16 @@ export function useEditor(
       zoom,
       showGrid,
       inkSwatches: [...inkSwatches],
+      rounding: style.rounding,
+      border: style.border,
     });
   }, [
     arc,
     inkSwatches,
     showGrid,
+    style.border,
     style.rotation,
+    style.rounding,
     style.shape,
     tool,
     zoom,
@@ -826,6 +885,10 @@ export function useEditor(
     inkSwatches,
     selectShape,
     rotateShape,
+    setRounding,
+    previewRounding,
+    setBorder,
+    previewBorderWidth,
     setInkColor,
     selection,
     setSelection,

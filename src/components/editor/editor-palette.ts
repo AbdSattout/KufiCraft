@@ -35,6 +35,22 @@ export function swatchLabel(prefix: string, color: string): string {
   return `${prefix} ${color.replace("#", "").toUpperCase()}`;
 }
 
+/** The recent colours first, then the defaults, without duplicates. */
+export function mergedSwatches(
+  recent: readonly string[],
+  defaults: readonly string[],
+): string[] {
+  const seen = new Set<string>();
+  const merged: string[] = [];
+  for (const color of [...recent, ...defaults]) {
+    const key = color.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(color);
+  }
+  return merged;
+}
+
 const arabicNumbers = new Intl.NumberFormat("ar-EG");
 
 /** Arabic-Indic digits for counts shown as UI copy. */

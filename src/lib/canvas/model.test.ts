@@ -1,13 +1,28 @@
 import { describe, expect, it } from "vitest";
 import {
+  BORDER_ALL,
+  BORDER_LEFT,
+  BORDER_TOP,
+  CORNER_ALL,
+  CORNER_BOTTOM_LEFT,
+  CORNER_TOP_LEFT,
+  DEFAULT_BORDER_WIDTH,
   DEFAULT_RATIO,
+  MAX_BORDER_WIDTH,
+  MAX_COLOR_LENGTH,
   MAX_RATIO,
+  MAX_ROUNDING_RADIUS,
+  MIN_BORDER_WIDTH,
   MIN_RATIO,
   RATIO_PRESETS,
   arcKey,
+  clampBorderWidth,
+  clampRoundingRadius,
   itemSignature,
   lineKey,
   ratioLabel,
+  sanitizeBorder,
+  sanitizeRounding,
   snapRatio,
   strokeKey,
   tileKey,
@@ -127,6 +142,51 @@ describe("ratioLabel", () => {
   });
 });
 
+describe("rounding / border model", () => {
+  it("names corners and sides physically, with a full mask of 15", () => {
+    expect(CORNER_ALL).toBe(15);
+    expect(BORDER_ALL).toBe(15);
+    expect(CORNER_TOP_LEFT).toBe(1);
+    expect(CORNER_BOTTOM_LEFT).toBe(8);
+    expect(BORDER_TOP).toBe(1);
+    expect(BORDER_LEFT).toBe(8);
+    expect(MAX_ROUNDING_RADIUS).toBe(0.5);
+  });
+
+  it("clamps a radius to [0, half the shorter side] and drops zero", () => {
+    expect(clampRoundingRadius(-1)).toBe(0);
+    expect(clampRoundingRadius(0.9)).toBe(MAX_ROUNDING_RADIUS);
+    expect(clampRoundingRadius(Number.NaN)).toBe(0);
+    expect(
+      sanitizeRounding({ radius: 0, corners: CORNER_ALL }),
+    ).toBeUndefined();
+    expect(
+      sanitizeRounding({ radius: -2, corners: CORNER_ALL }),
+    ).toBeUndefined();
+    expect(
+      sanitizeRounding({ radius: 0.25, corners: CORNER_ALL | 16 }),
+    ).toEqual({ radius: 0.25, corners: CORNER_ALL });
+  });
+
+  it("clamps a border and drops the empty state", () => {
+    expect(clampBorderWidth(0)).toBe(MIN_BORDER_WIDTH);
+    expect(clampBorderWidth(99)).toBe(MAX_BORDER_WIDTH);
+    expect(clampBorderWidth(Number.NaN)).toBe(DEFAULT_BORDER_WIDTH);
+    expect(sanitizeBorder({ sides: 0, width: 2 })).toBeUndefined();
+    expect(
+      sanitizeBorder({ sides: BORDER_TOP | 16, width: 0, color: "" }),
+    ).toEqual({ sides: BORDER_TOP, width: MIN_BORDER_WIDTH });
+    expect(
+      sanitizeBorder({ sides: BORDER_ALL, width: 2, color: "#ff0000" }),
+    ).toEqual({ sides: BORDER_ALL, width: 2, color: "#ff0000" });
+
+    const long = `#${"a".repeat(MAX_COLOR_LENGTH)}`;
+    expect(
+      sanitizeBorder({ sides: BORDER_TOP, width: 2, color: long })?.color,
+    ).toBe(long.slice(0, MAX_COLOR_LENGTH));
+  });
+});
+
 describe("itemSignature", () => {
   const tile: TileItem = {
     type: "tile",
@@ -182,6 +242,29 @@ describe("itemSignature", () => {
     };
     const explicit: TileItem = { ...bare, shape: "square", rotation: 0 };
     expect(itemSignature(bare)).toBe(itemSignature(explicit));
+  });
+
+  it("gives rounding and borders their own signature slot", () => {
+    const rounded: TileItem = {
+      ...tile,
+      rounding: { radius: 0.2, corners: CORNER_ALL },
+    };
+    const bordered: TileItem = {
+      ...tile,
+      border: { sides: BORDER_TOP, width: 2 },
+    };
+    expect(itemSignature(rounded)).not.toBe(itemSignature(tile));
+    expect(itemSignature(bordered)).not.toBe(itemSignature(tile));
+    expect(
+      itemSignature({
+        ...rounded,
+        rounding: { ...rounded.rounding!, corners: CORNER_BOTTOM_LEFT },
+      }),
+    ).not.toBe(itemSignature(rounded));
+    // A line's border is part of its signature too.
+    expect(
+      itemSignature({ ...line, border: { sides: BORDER_TOP, width: 2 } }),
+    ).not.toBe(itemSignature(line));
   });
 
   it("distinguishes every item type and is deterministic", () => {

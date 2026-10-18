@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  BORDER_ALL,
+  BORDER_BOTTOM,
+  BORDER_LEFT,
+  BORDER_TOP,
+  CORNER_ALL,
   DEFAULT_PROJECT_CONFIG,
   MAX_ITEMS,
   MAX_NAME_LENGTH,
@@ -402,6 +407,94 @@ describe("normalizeItem", () => {
     expect(normalizeItem(sampleItems()[4], sampleConfig())).toEqual(
       sampleItems()[4],
     );
+  });
+
+  it("keeps, clamps and drops the style fields", () => {
+    const config = sampleConfig();
+    const styled = normalizeItem(
+      {
+        type: "tile",
+        column: 0,
+        row: 0,
+        zone: 0,
+        rounding: { radius: 0.9, corners: CORNER_ALL | 16 },
+        border: { sides: BORDER_TOP | 16, width: 99, color: "#ff0000" },
+      },
+      config,
+    );
+    expect(styled).toMatchObject({
+      rounding: { radius: 0.5, corners: CORNER_ALL },
+      border: { sides: BORDER_TOP, width: 12, color: "#ff0000" },
+    });
+
+    // Zero is the absent state for both fields: a reader drops them instead of
+    // storing a no-op style.
+    const off = normalizeItem(
+      {
+        type: "tile",
+        column: 0,
+        row: 0,
+        zone: 0,
+        rounding: { radius: 0, corners: CORNER_ALL },
+        border: { sides: 0, width: 2 },
+      },
+      config,
+    );
+    expect(off).not.toHaveProperty("rounding");
+    expect(off).not.toHaveProperty("border");
+    // A broken value drops its field rather than guessing a style.
+    const broken = normalizeItem(
+      {
+        type: "tile",
+        column: 0,
+        row: 0,
+        zone: 0,
+        rounding: { corners: CORNER_ALL },
+        border: { width: 2 },
+      },
+      config,
+    );
+    expect(broken).not.toHaveProperty("rounding");
+    expect(broken).not.toHaveProperty("border");
+  });
+
+  it("keeps a border on every item type but rounding only on tiles", () => {
+    const config = sampleConfig();
+    const border = { sides: BORDER_ALL, width: 2 };
+    for (const item of sampleItems().slice(1)) {
+      expect(normalizeItem({ ...item, border }, config)).toMatchObject({ border });
+    }
+    const lineItem = sampleItems()[2];
+    expect(
+      normalizeItem(
+        { ...lineItem, rounding: { radius: 0.2, corners: CORNER_ALL } },
+        config,
+      ),
+    ).toEqual(lineItem);
+  });
+
+  it("round-trips style fields through export and parse", () => {
+    const config = sampleConfig();
+    const items: CanvasItem[] = [
+      {
+        type: "tile",
+        key: tileKey(0, 0, 0),
+        column: 0,
+        row: 0,
+        zone: 0,
+        rounding: { radius: 0.15, corners: 5 },
+        border: { sides: BORDER_LEFT, width: 3, color: "#123456" },
+      },
+      {
+        type: "line",
+        key: lineKey({ column: 0, row: 1 }, { column: 4, row: 1 }),
+        from: { column: 0, row: 1 },
+        to: { column: 4, row: 1 },
+        border: { sides: BORDER_BOTTOM, width: 2 },
+      },
+    ];
+    const parsed = parseProjectFile(exportProjectFile({ name: "أنماط", config, items }));
+    expect(parsed.items).toEqual(items);
   });
 
   it("returns null for anything that is not a model item", () => {

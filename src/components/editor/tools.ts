@@ -433,6 +433,8 @@ class PenTool extends KufiTool {
     return penItems(ctx.config, anchors, {
       shape: ctx.style.shape,
       rotation: ctx.style.rotation,
+      rounding: ctx.style.rounding,
+      border: ctx.style.border,
     });
   }
 }

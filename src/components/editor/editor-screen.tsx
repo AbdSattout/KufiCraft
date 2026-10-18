@@ -74,9 +74,14 @@ function Panels({ editor }: { editor: EditorController }) {
       <ShapePanel
         style={editor.style}
         inkColor={editor.config.ink}
+        inkSwatches={editor.inkSwatches}
         selectionCount={editor.selection.length}
         selectShape={editor.selectShape}
         rotateShape={editor.rotateShape}
+        setRounding={editor.setRounding}
+        previewRounding={editor.previewRounding}
+        setBorder={editor.setBorder}
+        previewBorderWidth={editor.previewBorderWidth}
         recolourSelection={editor.recolourSelection}
         duplicateSelection={editor.duplicateSelection}
         deleteSelection={editor.deleteSelection}

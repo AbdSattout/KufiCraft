@@ -21,8 +21,10 @@
  */
 
 import {
+  CORNER_ALL,
   DEFAULT_BACKGROUND,
   DEFAULT_BASE,
+  DEFAULT_BORDER_WIDTH,
   DEFAULT_INK,
   DEFAULT_PROJECT_CONFIG,
   DEFAULT_RATIO,
@@ -33,6 +35,8 @@ import {
   arcKey,
   lineKey,
   maxGridIndex,
+  sanitizeBorder,
+  sanitizeRounding,
   snapRatio,
   strokeKey,
   tileKey,
@@ -43,6 +47,8 @@ import type {
   CanvasItem,
   Cell,
   GridType,
+  ItemBorder,
+  ItemRounding,
   LineItem,
   ProjectConfig,
   Rotation,
@@ -214,6 +220,34 @@ export function sanitizeProjectName(value: unknown): string {
 }
 
 /**
+ * Reads an untrusted rounding object the way `sanitizeRounding` does on the
+ * backend: a missing / non-numeric radius means there is no rounding at all,
+ * a missing corner mask means all four corners. The result is `undefined`
+ * (the field is absent) when the radius clamps to zero.
+ */
+function itemRounding(value: unknown): ItemRounding | undefined {
+  if (!isRecord(value) || !isFiniteNumber(value.radius)) return undefined;
+  return sanitizeRounding({
+    radius: value.radius,
+    corners: isFiniteNumber(value.corners) ? value.corners : CORNER_ALL,
+  });
+}
+
+/**
+ * Reads an untrusted border object. `sides` must be a real number — a border
+ * without sides is not a border, so a broken mask drops the whole field rather
+ * than silently outlining all four sides.
+ */
+function itemBorder(value: unknown): ItemBorder | undefined {
+  if (!isRecord(value) || !isFiniteNumber(value.sides)) return undefined;
+  return sanitizeBorder({
+    sides: value.sides,
+    width: isFiniteNumber(value.width) ? value.width : DEFAULT_BORDER_WIDTH,
+    color: itemColour(value.color),
+  });
+}
+
+/**
  * Structural validation of a **v2** item. Returns the canonical item (keys
  * derived from the geometry) or `null`. Coordinates must be finite integers
  * inside the grid for `config`; optional fields are dropped when absent.
@@ -227,6 +261,7 @@ export function normalizeItem(
   const maxRow =
     config.gridType === "circular" ? CIRCULAR_SECTORS - 1 : maxColumn;
   const colour = itemColour(value.color);
+  const border = itemBorder(value.border);
 
   switch (value.type) {
     case "tile": {
@@ -247,6 +282,9 @@ export function normalizeItem(
       if (isRotation(value.rotation) && value.rotation !== 0) {
         item.rotation = value.rotation;
       }
+      const rounding = itemRounding(value.rounding);
+      if (rounding !== undefined) item.rounding = rounding;
+      if (border !== undefined) item.border = border;
       if (colour !== undefined) item.color = colour;
       return item;
     }
@@ -260,6 +298,7 @@ export function normalizeItem(
         from,
         to,
       };
+      if (border !== undefined) item.border = border;
       if (colour !== undefined) item.color = colour;
       return item;
     }
@@ -278,6 +317,7 @@ export function normalizeItem(
         points,
       };
       if (closed) item.closed = true;
+      if (border !== undefined) item.border = border;
       if (colour !== undefined) item.color = colour;
       return item;
     }
@@ -298,6 +338,7 @@ export function normalizeItem(
         direction,
         size,
       };
+      if (border !== undefined) item.border = border;
       if (colour !== undefined) item.color = colour;
       return item;
     }

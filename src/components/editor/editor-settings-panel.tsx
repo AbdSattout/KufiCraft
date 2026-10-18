@@ -35,7 +35,7 @@ import {
 import { RATIO_PRESETS, VIEWBOX_SIZE, ratioLabel } from "@/lib/canvas/model";
 import type { GridType, ProjectConfig } from "@/lib/canvas/model";
 import { MESSAGES } from "./messages";
-import { INK_SWATCHES, PAPER_SWATCHES, formatCount, swatchLabel } from "./editor-palette";
+import { INK_SWATCHES, PAPER_SWATCHES, formatCount, mergedSwatches, swatchLabel } from "./editor-palette";
 import { ColourField, PanelSection, SliderField } from "./editor-controls";
 
 const MIN_BASE = 4;
@@ -54,22 +54,6 @@ export interface SettingsPanelProps {
   /** Live, mutation-free update while a slider is dragged. */
   previewConfig: (patch: Partial<ProjectConfig>) => void;
   clearAll: () => void;
-}
-
-/** The recent colours first, then the defaults, without duplicates. */
-function mergedSwatches(
-  recent: readonly string[],
-  defaults: readonly string[],
-): string[] {
-  const seen = new Set<string>();
-  const merged: string[] = [];
-  for (const color of [...recent, ...defaults]) {
-    const key = color.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    merged.push(color);
-  }
-  return merged;
 }
 
 function ToggleRow({

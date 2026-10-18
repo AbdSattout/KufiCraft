@@ -19,6 +19,8 @@ import type {
   Anchor,
   CanvasItem,
   Cell,
+  ItemBorder,
+  ItemRounding,
   ProjectConfig,
   Rotation,
   ShapeId,
@@ -233,6 +235,10 @@ export interface InkStyle {
   color?: string;
   /** Quarter-turn rotation for the drawn tiles. */
   rotation?: Rotation;
+  /** Corner rounding for the drawn tiles (`radius: 0` → square corners). */
+  rounding?: ItemRounding;
+  /** Outside border for the drawn tiles. */
+  border?: ItemBorder;
 }
 
 /** Consecutive identical anchors collapse to one. */
@@ -272,12 +278,24 @@ function tileFor(
 ): CanvasItem {
   const shape = style.shape ?? "square";
   const rotation = (((style.rotation ?? 0) % 4) + 4) % 4;
+  // `radius: 0` / `sides: 0` are the off ends of the style: they store nothing,
+  // which is exactly how a document drawn before these fields existed looks.
+  const rounding =
+    style.rounding !== undefined && style.rounding.radius > 0
+      ? style.rounding
+      : undefined;
+  const border =
+    style.border !== undefined && style.border.sides !== 0
+      ? style.border
+      : undefined;
   return makeTile({
     column: anchor.column,
     row: anchor.row,
     zone: anchor.zone,
     shape: shape === "square" ? undefined : shape,
     rotation: rotation === 0 ? undefined : (rotation as Rotation),
+    rounding,
+    border,
     color: resolvedColor(config, style.color),
   });
 }

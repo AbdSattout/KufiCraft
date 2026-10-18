@@ -8,6 +8,8 @@ import {
   canvasItemValidator,
   maxGridIndex,
   projectConfigValidator,
+  sanitizeBorder,
+  sanitizeRounding,
   snapRatio,
   arcKey,
   lineKey,
@@ -79,7 +81,9 @@ function requireKey(key: string): string {
  * **key re-derived from the geometry** — keys are identity (`docs/FORMAT.md`),
  * so a document with a drifting key is repaired rather than trusted. Optional
  * fields that were absent stay absent (Convex documents never carry
- * `undefined`). Runs on **every** write.
+ * `undefined`), and the style fields are re-clamped through the model's own
+ * sanitisers, so a rounded tile or an outside border survives a write exactly
+ * as the format defines it. Runs on **every** write.
  */
 function sanitizeItem(item: CanvasItem, config: ProjectConfig): CanvasItem | null {
   const maxColumn = maxGridIndex(config.base);
@@ -93,6 +97,10 @@ function sanitizeItem(item: CanvasItem, config: ProjectConfig): CanvasItem | nul
   });
   const color = capColor(item.color);
   const key = (value: string) => requireKey(value);
+  // A border is the one style every item type can carry; `undefined` stays
+  // `undefined` (the absent state), and a zero-side mask normalises away.
+  const border =
+    item.border === undefined ? undefined : sanitizeBorder(item.border);
 
   switch (item.type) {
     case "tile": {
@@ -109,6 +117,11 @@ function sanitizeItem(item: CanvasItem, config: ProjectConfig): CanvasItem | nul
       if (item.rotation !== undefined && item.rotation !== 0) {
         next.rotation = item.rotation;
       }
+      // Rounding belongs to tiles; a radius of zero is the absent state.
+      const rounding =
+        item.rounding === undefined ? undefined : sanitizeRounding(item.rounding);
+      if (rounding !== undefined) next.rounding = rounding;
+      if (border !== undefined) next.border = border;
       if (color !== undefined) next.color = color;
       return next;
     }
@@ -121,6 +134,7 @@ function sanitizeItem(item: CanvasItem, config: ProjectConfig): CanvasItem | nul
         from,
         to,
       };
+      if (border !== undefined) next.border = border;
       if (color !== undefined) next.color = color;
       return next;
     }
@@ -134,6 +148,7 @@ function sanitizeItem(item: CanvasItem, config: ProjectConfig): CanvasItem | nul
         points,
       };
       if (closed) next.closed = true;
+      if (border !== undefined) next.border = border;
       if (color !== undefined) next.color = color;
       return next;
     }
@@ -154,6 +169,7 @@ function sanitizeItem(item: CanvasItem, config: ProjectConfig): CanvasItem | nul
         direction,
         size,
       };
+      if (border !== undefined) next.border = border;
       if (color !== undefined) next.color = color;
       return next;
     }

@@ -36,6 +36,47 @@ apps never had (see “Legacy” below).
 * `color` is **per item**: it is written on every item the editor creates, so a
   file looks the same no matter what `config.ink` is.
 
+### Style fields (`rounding`, `border`)
+
+Two optional fields extend an item without changing its key or geometry — a file
+that omits them renders **exactly** like a v2 file written before they existed.
+
+```jsonc
+// tile only — rounded corners
+"rounding": { "radius": 0.15, "corners": 15 }
+
+// any item — an outside border on the sides of the item's box
+"border": { "sides": 5, "width": 2, "color": "#7c2d12" }
+```
+
+* `rounding.radius` is a **fraction of the shorter side** of the item's box,
+  `0 < radius ≤ 0.5`, so a radius survives a change of cell size. `0.5` makes a
+  pill; larger values are clamped because two corners would meet.
+* `rounding.corners` is a bit mask of the corners **as seen on screen** — never
+  mirrored by writing direction: `1` top-left, `2` top-right, `4` bottom-right,
+  `8` bottom-left, `15` (default) all four. A vertex at a box corner follows its
+  own bit; interior vertices of a shape (e.g. the hamza notch) follow the radius
+  alone. Bits outside `15` are dropped.
+* The curve is generated from the shape's own geometry with the cubic
+  midpoint-control construction of the reference `rounding.js` (Apache-2.0,
+  Yona Appletree) — **not** an arc or a quadratic. Deliberate deviations: the
+  reference's mutating “virtual close line” is replaced by trimming each edge
+  exactly at the closing corner, and the radius is relative rather than a
+  length.
+* `border.sides` is a bit mask of the sides of the item's box: `1` top,
+  `2` right, `4` bottom, `8` left, `15` all four. `border.width` is in **viewBox
+  units** (`1…12`, default `2` when the field is present but broken). `color`
+  is optional; absent means the item's resolved colour (`color ?? config.ink`).
+* The border stroke lives **outside** the item: its inner edge touches the item's
+  box, so it never covers or erodes ink, and enabled neighbours make an exact
+  square outer corner. Each side is a separate subpath with butt caps.
+* Normalisation on read/write (backend and file import): radius clamped to
+  `[0, 0.5]`, masks masked to the four real bits, width clamped to `[1, 12]`,
+  colours capped at `MAX_COLOR_LENGTH`. A zero radius drops `rounding`; a
+  zero-side border drops `border` (file import also drops a border whose `sides`
+  is missing or not a number rather than guessing all four) — absent is the
+  canonical “off” state, so a round-trip stays byte-stable.
+
 ## Rules
 
 * **Export** lives in two places: the editor’s export menu
@@ -57,10 +98,11 @@ apps never had (see “Legacy” below).
   4. `items` are structurally validated against the model (type discriminants
      `tile`/`line`/`stroke`/`arc`, a non-empty string key, finite integer
      coordinates inside the grid), key-deduped, and re-keyed from their geometry
-     so a file cannot smuggle a non-canonical key; items that fail validation are
-     dropped (only model fields are kept), as are degenerate arcs and strokes
-     with fewer than two points; the list is capped at `MAX_ITEMS` (excess
-     dropped, with a warning toast);
+     so a file cannot smuggle a non-canonical key; style fields are re-clamped
+     and ineffective ones dropped (see “Style fields”); items that fail
+     validation are dropped (only model fields are kept), as are degenerate arcs
+     and strokes with fewer than two points; the list is capped at `MAX_ITEMS`
+     (excess dropped, with a warning toast);
   5. `name` is trimmed/collapsed like the backend and capped at
      `MAX_NAME_LENGTH`.
 * Implemented in **one module** — `src/lib/kuficraft-file.ts` — used by both the

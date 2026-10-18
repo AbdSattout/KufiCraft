@@ -10,7 +10,12 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  BORDER_BOTTOM,
+  BORDER_LEFT,
+  BORDER_TOP,
   CIRCULAR_ANGULAR_UNIT,
+  CORNER_ALL,
+  CORNER_TOP_LEFT,
   DEFAULT_PROJECT_CONFIG,
   SHAPE_IDS,
   arcKey,
@@ -67,6 +72,8 @@ import {
   styleItem,
   tileIconPath,
 } from "@/lib/canvas/items";
+import { shapePath } from "@/lib/canvas/shapes";
+import { borderPath } from "@/lib/canvas/border";
 
 /* ------------------------------------------------------------------ */
 /* fixtures + helpers                                                  */
@@ -420,6 +427,195 @@ describe("colorItem / styleItem", () => {
     expect(styleItem(string, { shape: "triangle" })).toEqual(string);
     expect(styleItem(arc({ column: 0, row: 6 }, { column: 4, row: 6 }), { rotation: 2 })).toEqual(
       arc({ column: 0, row: 6 }, { column: 4, row: 6 }),
+    );
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* rounding / border                                                   */
+/* ------------------------------------------------------------------ */
+
+describe("rounding / border", () => {
+  const ROUNDING = { radius: 0.2, corners: CORNER_TOP_LEFT };
+  const BORDER = { sides: BORDER_TOP | BORDER_LEFT, width: 3, color: "#7c2d12" };
+
+  it("rounds a tile's own path in the shape box", () => {
+    const subject = parseItem(
+      makeTile({ column: 1, row: 2, zone: 0, rounding: ROUNDING }),
+    );
+    const rendered = subject.render(SQUARE);
+    expect(rendered.path).toBe(
+      shapePath("square", zoneRect(SQUARE, 1, 2, 0), 0, ROUNDING),
+    );
+    expect(rendered.path).toContain(" C ");
+    expect(subject.toJSON()).toMatchObject({ rounding: ROUNDING });
+  });
+
+  it("treats a zero radius as the off state", () => {
+    const subject = parseItem(
+      makeTile({
+        column: 0,
+        row: 0,
+        zone: 0,
+        rounding: { radius: 0, corners: CORNER_ALL },
+      }),
+    );
+    expect(subject.toJSON()).not.toHaveProperty("rounding");
+    expect(subject.render(SQUARE).path).toBe(rectPath(zoneRect(SQUARE, 0, 0, 0)));
+  });
+
+  it("round-trips rounding and borders through JSON", () => {
+    const roundedTile = tile(1, 2, 0, { rounding: ROUNDING, border: BORDER });
+    expect(parseItem(roundedTile).toJSON()).toEqual(roundedTile);
+
+    const bordered: LineItem = {
+      ...line({ column: 0, row: 1 }, { column: 4, row: 1 }),
+      border: { sides: BORDER_BOTTOM, width: 2 },
+    };
+    expect(parseItem(bordered).toJSON()).toEqual(bordered);
+  });
+
+  it("styles and clears every item type", () => {
+    const subject = tile(1, 2, 0);
+    const styled = styleItem(subject, { rounding: ROUNDING, border: BORDER });
+    expect(styled).toEqual(
+      makeTile({ column: 1, row: 2, zone: 0, rounding: ROUNDING, border: BORDER }),
+    );
+    expect(styleItem(styled, { rounding: ROUNDING, border: BORDER })).toBe(styled);
+    expect(styleItem(styled, { rounding: null, border: null })).toEqual(subject);
+
+    const items = [
+      line({ column: 0, row: 1 }, { column: 4, row: 1 }),
+      stroke([{ column: 0, row: 0 }, { column: 2, row: 2 }]),
+      arc({ column: 0, row: 6 }, { column: 4, row: 6 }),
+    ];
+    for (const item of items) {
+      const next = styleItem(item, { border: BORDER });
+      expect(next).not.toBe(item);
+      expect(next).toMatchObject({ border: BORDER });
+      // A tile-only field is still inert on these types.
+      expect(styleItem(item, { rounding: ROUNDING })).toBe(item);
+    }
+  });
+
+  it("carries the style through moved() and withColor()", () => {
+    const subject = makeTile({
+      column: 1,
+      row: 2,
+      zone: 0,
+      color: "#00ff00",
+      rounding: ROUNDING,
+      border: BORDER,
+    });
+    expect(moveItem(subject, 2, 3)).toMatchObject({
+      column: 3,
+      row: 5,
+      color: "#00ff00",
+      rounding: ROUNDING,
+      border: BORDER,
+    });
+    expect(colorItem(subject, "#ff0000")).toMatchObject({
+      color: "#ff0000",
+      rounding: ROUNDING,
+      border: BORDER,
+    });
+  });
+
+  it("outlines in draw(), while render() stays the item's own paint", () => {
+    const subject = parseItem(
+      makeTile({ column: 0, row: 0, zone: 0, border: BORDER }),
+    );
+    const rendered = subject.render(SQUARE);
+    expect(rendered.outline).toBeUndefined();
+
+    const drawn = subject.draw(SQUARE);
+    expect(drawn.path).toBe(rendered.path);
+    // The box is the tile's ink fragment of the **drawn** cell: `base: 10`
+    // lays out `1000 / 99.75` cells, so the ink edge is
+    // `inkUnit(SQUARE)` = 0.75 × 7.5… = 7.518797 — never the stored `base`
+    // (docs/CANVAS.md §1).
+    expect(drawn.outline).toEqual({
+      path: "M -3 -1.5 L 7.518797 -1.5 M -1.5 -3 L -1.5 7.518797",
+      width: 3,
+      color: "#7c2d12",
+    });
+
+    // Without a border `draw` paints exactly `render`.
+    const plain = parseItem(makeTile({ column: 0, row: 0, zone: 0 }));
+    expect(plain.draw(SQUARE)).toEqual(plain.render(SQUARE));
+  });
+
+  it("falls back to the resolved item colour for the outline", () => {
+    const subject = parseItem(
+      makeTile({
+        column: 0,
+        row: 0,
+        zone: 0,
+        color: "#abcdef",
+        border: { sides: BORDER_TOP, width: 2 },
+      }),
+    );
+    expect(subject.draw(SQUARE).outline?.color).toBe("#abcdef");
+    expect(
+      parseItem(
+        makeTile({
+          column: 0,
+          row: 0,
+          zone: 0,
+          border: { sides: BORDER_TOP, width: 2 },
+        }),
+      ).draw(INKED).outline?.color,
+    ).toBe("#123456");
+  });
+
+  it("canonicalises a style patch before it reaches an item", () => {
+    // A width-only border patch with no side on is the off state: it clears
+    // instead of storing an invisible `sides: 0` outline.
+    const bordered = styleItem(tile(1, 2, 0), { border: BORDER });
+    expect(styleItem(bordered, { border: { sides: 0, width: 5 } })).toEqual(
+      tile(1, 2, 0),
+    );
+    // The same clamps the backend applies: radius 0.9 → 0.5, width 99 → 12.
+    expect(
+      styleItem(tile(0, 0, 0), {
+        rounding: { radius: 0.9, corners: CORNER_ALL },
+        border: { sides: BORDER_TOP, width: 99, color: "" },
+      }),
+    ).toMatchObject({
+      rounding: { radius: 0.5, corners: CORNER_ALL },
+      border: { sides: BORDER_TOP, width: 12 },
+    });
+  });
+
+  it("outlines a run, a polyline and an arc around their own bounds", () => {
+    const border = { sides: BORDER_TOP | BORDER_LEFT, width: 2 };
+    const items = [
+      line({ column: 0, row: 1 }, { column: 4, row: 1 }),
+      stroke([
+        { column: 0, row: 0 },
+        { column: 2, row: 2 },
+      ]),
+      arc({ column: 0, row: 6 }, { column: 4, row: 6 }),
+    ];
+    for (const item of items) {
+      const bordered = styleItem(item, { border });
+      const drawn = parseItem(bordered).draw(SQUARE);
+      expect(drawn.path).toBe(itemRender(SQUARE, bordered).path);
+      expect(drawn.outline).toEqual({
+        path: borderPath(itemBounds(SQUARE, bordered), border.sides, border.width),
+        width: border.width,
+        color: SQUARE.ink,
+      });
+    }
+  });
+
+  it("is part of the item signature", () => {
+    const plain = tile(1, 2, 0);
+    expect(itemSignature(plain)).not.toBe(
+      itemSignature(tile(1, 2, 0, { rounding: ROUNDING })),
+    );
+    expect(itemSignature(plain)).not.toBe(
+      itemSignature(tile(1, 2, 0, { border: BORDER })),
     );
   });
 });

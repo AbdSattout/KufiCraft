@@ -10,9 +10,13 @@ import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
 import {
+  BORDER_LEFT,
+  BORDER_TOP,
   CIRCULAR_SECTORS,
+  CORNER_ALL,
   DEFAULT_PROJECT_CONFIG,
   DEFAULT_RATIO,
+  MAX_BORDER_WIDTH,
   MAX_COLOR_LENGTH,
   MAX_ITEMS,
   MAX_KEY_LENGTH,
@@ -1375,6 +1379,56 @@ describe("item sanitisation", () => {
     expect(doc.items[0]).not.toHaveProperty("shape");
     expect(doc.items[0]).not.toHaveProperty("rotation");
     expect(doc.items[1]).toMatchObject({ shape: "circle", rotation: 2 });
+  });
+
+  it("keeps rounding and borders, re-clamped and normalised", async () => {
+    const t = newTest();
+    const asA = t.withIdentity(USER_A);
+    const projectId = await createProject(t, USER_A, "أنماط", { base: 10 });
+
+    await asA.mutation(api.projects.applyOps, {
+      projectId,
+      ops: [
+        {
+          type: "add",
+          items: [
+            tile(0, 0, 0, {
+              rounding: { radius: 0.9, corners: CORNER_ALL | 16 },
+              border: {
+                sides: BORDER_TOP | 16,
+                width: 99,
+                color: "#ff0000",
+              },
+            }),
+            tile(1, 0, 0, {
+              rounding: { radius: 0, corners: CORNER_ALL },
+              border: { sides: 0, width: 2 },
+            }),
+            {
+              type: "line",
+              key: lineKey({ column: 0, row: 1 }, { column: 4, row: 1 }),
+              from: { column: 0, row: 1 },
+              to: { column: 4, row: 1 },
+              border: { sides: BORDER_LEFT, width: 2 },
+            },
+          ],
+        },
+      ],
+    });
+
+    const doc = required(
+      await asA.query(api.projects.get, { projectId }),
+      "project should exist",
+    );
+    expect(doc.items[0]).toMatchObject({
+      rounding: { radius: 0.5, corners: CORNER_ALL },
+      border: { sides: BORDER_TOP, width: MAX_BORDER_WIDTH, color: "#ff0000" },
+    });
+    expect(doc.items[1]).not.toHaveProperty("rounding");
+    expect(doc.items[1]).not.toHaveProperty("border");
+    expect(doc.items[2]).toMatchObject({
+      border: { sides: BORDER_LEFT, width: 2 },
+    });
   });
 
   it("uses the configured base to size the legal coordinate range", async () => {

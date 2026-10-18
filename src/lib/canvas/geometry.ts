@@ -61,6 +61,15 @@ export type PathCmd =
   | { c: "M"; x: number; y: number }
   | { c: "L"; x: number; y: number }
   | {
+      c: "C";
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+      x: number;
+      y: number;
+    }
+  | {
       c: "A";
       rx: number;
       ry: number;
@@ -74,6 +83,15 @@ export type PathCmd =
 
 export const M = (x: number, y: number): PathCmd => ({ c: "M", x, y });
 export const L = (x: number, y: number): PathCmd => ({ c: "L", x, y });
+/** Cubic Bézier — the command corner rounding emits (`rounding.ts`). */
+export const C = (
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  x: number,
+  y: number,
+): PathCmd => ({ c: "C", x1, y1, x2, y2, x, y });
 export const A = (
   rx: number,
   ry: number,
@@ -115,6 +133,11 @@ export function cmdsToPath(cmds: readonly PathCmd[]): string {
       case "M":
       case "L":
         d += `${lead}${cmd.c} ${fmt(cmd.x)} ${fmt(cmd.y)}`;
+        break;
+      case "C":
+        d +=
+          `${lead}C ${fmt(cmd.x1)} ${fmt(cmd.y1)} ${fmt(cmd.x2)} ${fmt(cmd.y2)}` +
+          ` ${fmt(cmd.x)} ${fmt(cmd.y)}`;
         break;
       case "A":
         d +=
@@ -167,14 +190,17 @@ export function mapCommands(
   frame: Frame,
   rotDeg: number,
 ): PathCmd[] {
+  const map = (x: number, y: number): Point => ({
+    x: frame.ox + (x * frame.cos - y * frame.sin),
+    y: frame.oy + (x * frame.sin + y * frame.cos),
+  });
   const out: PathCmd[] = [];
   for (const cmd of cmds) {
     if (cmd.c === "Z") {
       out.push(cmd);
       continue;
     }
-    const x = frame.ox + (cmd.x * frame.cos - cmd.y * frame.sin);
-    const y = frame.oy + (cmd.x * frame.sin + cmd.y * frame.cos);
+    const end = map(cmd.x, cmd.y);
     if (cmd.c === "A") {
       out.push({
         c: "A",
@@ -183,11 +209,25 @@ export function mapCommands(
         rot: ((((cmd.rot + rotDeg) % 180) + 180) % 180),
         large: cmd.large,
         sweep: cmd.sweep,
-        x,
-        y,
+        x: end.x,
+        y: end.y,
+      });
+    } else if (cmd.c === "C") {
+      // Both control points are points of the same frame (no rotation is
+      // involved, so a Bézier stays a Bézier with mapped controls).
+      const first = map(cmd.x1, cmd.y1);
+      const second = map(cmd.x2, cmd.y2);
+      out.push({
+        c: "C",
+        x1: first.x,
+        y1: first.y,
+        x2: second.x,
+        y2: second.y,
+        x: end.x,
+        y: end.y,
       });
     } else {
-      out.push({ c: cmd.c, x, y });
+      out.push({ c: cmd.c, x: end.x, y: end.y });
     }
   }
   return out;

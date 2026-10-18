@@ -188,6 +188,97 @@ export function cellSize(config: ProjectConfig): number {
   return gridExtent(config) / (gridCount(config) - 1 + safe);
 }
 
+/**
+ * Corner bits of a rounding mask. The names are the corners of the **shape's
+ * box as it is seen on screen** — top/right/bottom/left are physical, not
+ * writing-direction dependent, so «top right» is the same corner in Arabic and
+ * in English. `CORNER_ALL` is the default whenever a mask is missing.
+ */
+export const CORNER_TOP_LEFT = 1;
+export const CORNER_TOP_RIGHT = 2;
+export const CORNER_BOTTOM_RIGHT = 4;
+export const CORNER_BOTTOM_LEFT = 8;
+export const CORNER_ALL =
+  CORNER_TOP_LEFT | CORNER_TOP_RIGHT | CORNER_BOTTOM_RIGHT | CORNER_BOTTOM_LEFT;
+
+/**
+ * Rounding radius as a fraction of the **shorter side of the item's box**: the
+ * unit is relative so a radius survives a change of cell size, and it is capped
+ * at half the shorter side because a larger radius would have two corners meet.
+ * The editor's slider works in 5 % steps (`0…0.5`); the format accepts any
+ * value in the range.
+ */
+export const MAX_ROUNDING_RADIUS = 0.5;
+
+/** Side bits of a border mask — the sides of the item's box, as seen. */
+export const BORDER_TOP = 1;
+export const BORDER_RIGHT = 2;
+export const BORDER_BOTTOM = 4;
+export const BORDER_LEFT = 8;
+export const BORDER_ALL =
+  BORDER_TOP | BORDER_RIGHT | BORDER_BOTTOM | BORDER_LEFT;
+
+/** Border line width in viewBox units. */
+export const MIN_BORDER_WIDTH = 1;
+export const MAX_BORDER_WIDTH = 12;
+export const DEFAULT_BORDER_WIDTH = 2;
+
+/**
+ * NaN-safe clamp of a rounding radius. A missing / broken value is `0` — the
+ * safe end: there is no rounding at all.
+ */
+export function clampRoundingRadius(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(MAX_ROUNDING_RADIUS, Math.max(0, value));
+}
+
+/** A corner mask with only the four real corners set (unknown bits dropped). */
+export function clampCornerMask(value: number): number {
+  if (!Number.isFinite(value)) return CORNER_ALL;
+  return Math.trunc(value) & CORNER_ALL;
+}
+
+/** A side mask with only the four real sides set (unknown bits dropped). */
+export function clampBorderSides(value: number): number {
+  if (!Number.isFinite(value)) return BORDER_ALL;
+  return Math.trunc(value) & BORDER_ALL;
+}
+
+/** NaN-safe clamp of a border width: `[MIN_BORDER_WIDTH, MAX_BORDER_WIDTH]`. */
+export function clampBorderWidth(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_BORDER_WIDTH;
+  return Math.min(MAX_BORDER_WIDTH, Math.max(MIN_BORDER_WIDTH, value));
+}
+
+/**
+ * Normalises a stored rounding: the radius clamped, the corner mask masked to
+ * the four real corners. Returns `undefined` when the radius is `0` — the
+ * **absent** state, which renders exactly like a document without rounding.
+ */
+export function sanitizeRounding(
+  rounding: ItemRounding,
+): ItemRounding | undefined {
+  const radius = clampRoundingRadius(rounding.radius);
+  if (radius <= 0) return undefined;
+  return { radius, corners: clampCornerMask(rounding.corners) };
+}
+
+/**
+ * Normalises a stored border: the side mask masked to the four real sides, the
+ * width clamped and an empty colour dropped (it would mean "no override", not
+ * "no border"). Returns `undefined` when no side is on — the absent state.
+ */
+export function sanitizeBorder(border: ItemBorder): ItemBorder | undefined {
+  const sides = clampBorderSides(border.sides);
+  if (sides === 0) return undefined;
+  const next: ItemBorder = { sides, width: clampBorderWidth(border.width) };
+  const color = border.color;
+  if (color !== undefined && color.length > 0) {
+    next.color = color.slice(0, MAX_COLOR_LENGTH);
+  }
+  return next;
+}
+
 /** Default palette. */
 export const DEFAULT_INK = "#1a1a2e";
 export const DEFAULT_BACKGROUND = "#ffffff";
@@ -271,6 +362,28 @@ export interface Anchor extends Cell {
   zone: Zone;
 }
 
+/**
+ * Corner rounding of an item's box: the radius (a fraction of the shorter side,
+ * `0…MAX_ROUNDING_RADIUS`) and which of the four box corners are rounded
+ * (`CORNER_*` bits). Absent means square corners — exactly the old rendering.
+ */
+export interface ItemRounding {
+  radius: number;
+  corners: number;
+}
+
+/**
+ * A border drawn **outside** the item's box: which sides (`BORDER_*` bits), the
+ * line width in viewBox units, and an optional colour. Absent means no border.
+ * The stroke's inner edge touches the box, so it never covers the item's ink.
+ */
+export interface ItemBorder {
+  sides: number;
+  width: number;
+  /** Colour override; absent means the item's own resolved colour. */
+  color?: string;
+}
+
 /** One zone fragment, painted with one shape. */
 export interface TileItem {
   type: "tile";
@@ -282,6 +395,10 @@ export interface TileItem {
   shape?: ShapeId;
   /** Rotation in quarter turns; absent means 0. */
   rotation?: Rotation;
+  /** Corner rounding; absent means square corners. Tiles only. */
+  rounding?: ItemRounding;
+  /** Outside border; absent means none. */
+  border?: ItemBorder;
   /** Colour override; absent means `config.ink`. */
   color?: string;
 }
@@ -297,6 +414,7 @@ export interface LineItem {
   key: string;
   from: Cell;
   to: Cell;
+  border?: ItemBorder;
   color?: string;
 }
 
@@ -311,6 +429,7 @@ export interface StrokeItem {
   points: Cell[];
   /** Closed polyline (`Z` in the path); absent means open. */
   closed?: boolean;
+  border?: ItemBorder;
   color?: string;
 }
 
@@ -326,6 +445,7 @@ export interface ArcItem {
   to: Cell;
   direction: ArcDirection;
   size: ArcSize;
+  border?: ItemBorder;
   color?: string;
 }
 
@@ -438,6 +558,8 @@ export function itemSignature(item: CanvasItem): string {
         item.shape ?? "square",
         item.rotation ?? 0,
         item.color ?? "",
+        roundingField(item.rounding),
+        borderField(item.border),
       ].join("|");
     case "line":
       return [
@@ -447,6 +569,7 @@ export function itemSignature(item: CanvasItem): string {
         item.to.column,
         item.to.row,
         item.color ?? "",
+        borderField(item.border),
       ].join("|");
     case "stroke":
       return [
@@ -454,6 +577,7 @@ export function itemSignature(item: CanvasItem): string {
         item.points.map(cellKey).join(";"),
         item.closed ? 1 : 0,
         item.color ?? "",
+        borderField(item.border),
       ].join("|");
     case "arc":
       return [
@@ -465,8 +589,20 @@ export function itemSignature(item: CanvasItem): string {
         item.direction,
         item.size,
         item.color ?? "",
+        borderField(item.border),
       ].join("|");
   }
+}
+
+/** Rounding as one signature field (`""` when there is none). */
+function roundingField(rounding: ItemRounding | undefined): string {
+  return rounding === undefined ? "" : `r${rounding.radius}:${rounding.corners}`;
+}
+
+/** Border as one signature field (`""` when there is none). */
+function borderField(border: ItemBorder | undefined): string {
+  if (border === undefined) return "";
+  return `b${border.sides}:${border.width}:${border.color ?? ""}`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -520,6 +656,22 @@ export const cellValidator = v.object({
   row: v.number(),
 });
 
+/**
+ * Rounding + border. The numeric fields are **required** and clamped by
+ * `sanitizeRounding` / `sanitizeBorder` on every write, so a document can
+ * never carry a radius, a mask bit or a width outside the model's range.
+ */
+export const roundingValidator = v.object({
+  radius: v.number(),
+  corners: v.number(),
+});
+
+export const borderValidator = v.object({
+  sides: v.number(),
+  width: v.number(),
+  color: v.optional(v.string()),
+});
+
 export const canvasItemValidator = v.union(
   v.object({
     type: v.literal("tile"),
@@ -529,6 +681,8 @@ export const canvasItemValidator = v.union(
     zone: zoneValidator,
     shape: v.optional(shapeValidator),
     rotation: v.optional(rotationValidator),
+    rounding: v.optional(roundingValidator),
+    border: v.optional(borderValidator),
     color: v.optional(v.string()),
   }),
   v.object({
@@ -536,6 +690,7 @@ export const canvasItemValidator = v.union(
     key: v.string(),
     from: cellValidator,
     to: cellValidator,
+    border: v.optional(borderValidator),
     color: v.optional(v.string()),
   }),
   v.object({
@@ -543,6 +698,7 @@ export const canvasItemValidator = v.union(
     key: v.string(),
     points: v.array(cellValidator),
     closed: v.optional(v.boolean()),
+    border: v.optional(borderValidator),
     color: v.optional(v.string()),
   }),
   v.object({
@@ -552,6 +708,7 @@ export const canvasItemValidator = v.union(
     to: cellValidator,
     direction: arcDirectionValidator,
     size: arcSizeValidator,
+    border: v.optional(borderValidator),
     color: v.optional(v.string()),
   }),
 );

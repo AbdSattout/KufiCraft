@@ -96,13 +96,27 @@ function renderSvgString(
     );
   }
   for (const item of items) {
-    const rendered = itemOf(item).render(config);
+    const rendered = itemOf(item).draw(config);
     const d =
       parts.precision === undefined
         ? rendered.path
         : roundPathNumbers(rendered.path, parts.precision);
     const color = escapeXml(itemOf(item).resolvedColor(config));
     const key = parts.includeKeys ? ` data-k="${escapeXml(item.key)}"` : "";
+    const outline = rendered.outline;
+    if (outline !== undefined) {
+      // The border is painted first: it is *outside* the item's box, so the ink
+      // always wins should the two ever meet.
+      const border =
+        parts.precision === undefined
+          ? outline.path
+          : roundPathNumbers(outline.path, parts.precision);
+      out.push(
+        `<path${key} d="${border}" fill="none" stroke="${escapeXml(outline.color)}"` +
+          ` stroke-width="${num(outline.width)}"` +
+          ` stroke-linecap="butt" stroke-linejoin="miter"/>`,
+      );
+    }
     if (rendered.mode === "stroke") {
       // Butt caps and mitre joins: a rib ends flush with the ink edge, exactly
       // like the reference app (no rounded heads).

@@ -148,6 +148,8 @@ and export.
 | `geometry.ts` | `Point`, `Rect`, frames (`baseFrame`, `quarterTurnFrame`, `composeFrames`, `mapCommands`), `zoneRect`, `cellRect`, `circularSlice`, `sectorPath`, `slicePath`, `inkUnit`, `arcCentre`, `distanceToSegment/Polyline/Arc`, rect helpers (`boundsOfPoints`, `expandRect`, `rectContains`, `rectsIntersect`, `unionRect`) |
 | `grid.ts` | `pointToCell`, `pointToAnchor` → `Anchor`, `anchorToCell`, `cellCentre`, `isSameAxis`, `runOf(cells)` → `Run`, `cellsBetween`, `gridPaths` → `{ cellBorders, inkLines }`, `anchorPath` |
 | `shapes.ts` | `KufiShape` + the ten shapes (`shapeById`, `shapeLabel`, `shapePath`, `shapeOrderIndex`, `SHAPE_ORDER`); the **same** renderer draws the canvas fragment and the toolbar icon (`tileIconPath`) |
+| `rounding.ts` | `roundingRadius`, `rotateCornerMask`, `hasRounding`, `roundCorners` (per-corner rounding generated from a shape's own commands) |
+| `border.ts` | `borderPath`, `borderOutline` (an outside border on the sides of an item's box) |
 | `items.ts` | the item classes and factories above, `itemRender`, `itemColor`, `itemBounds`, `itemContains`, `itemCellRange`, `tileIconPath`, `itemsBounds`, `itemIntersectsRect` |
 | `ops.ts` | `addItems`, `removeItems`, `paintItems`, `replaceItems`, `toOps(prev, next)` → backend batch, `penItems`, `lineItems` |
 | `render.ts` | `renderSvg(config, items, opts?)` → standalone SVG **string**, `renderThumbnail(config, items)` → compact string |
@@ -183,6 +185,14 @@ Every function is deterministic and side-effect free.
   * `mode: "stroke"` → `<path d fill="none" stroke={itemColor}
     stroke-width={width}>` (polylines, arcs, diagonal `line` fallbacks, circular
     arcs) with `width = inkUnit(config)`.
+* **Style is part of the item, not the renderer**: a tile may carry `rounding`
+  (radius as a fraction of the shorter side + a physical corner mask) and every
+  item may carry an outside `border` (side mask, width in viewBox units, optional
+  colour). `item.draw(config)` emits the border (`Rendered.outline`) **before**
+  `item.render(config)`, so the stroke sits outside the ink and can never cover
+  it; absent fields render exactly like a pre-style document. The geometry is
+  generated from the shape commands in `rounding.ts` / `border.ts` — never by
+  post-processing a path string.
 * **Butt caps and mitre joins** — a rib ends flush with the ink edge, exactly
   like the reference app. No `stroke-linecap="round"` anywhere in artwork.
 * `itemColor(config, item)` = `item.color ?? config.ink`.
@@ -386,8 +396,10 @@ The engine suite (`bun run test`) covers, file by file: `geometry.test.ts`
 (frames, zone rects, slices, arc centres), `grid.test.ts` (addressing,
 round-trips, two-family grid paths, the drawn-cell tiling, the space-less
 `1:1` case), `items.test.ts`
-(item classes, keys, geometry, hit-testing), `ops.test.ts` (add/remove/paint/
+(item classes, keys, geometry, hit-testing, rounding / border styling),
+`ops.test.ts` (add/remove/paint/
 replace, `toOps`, pen/line items), `model.test.ts` (presets, snapping, keys,
-signatures), `render.test.ts` (markup, thumbnail budget), `kuficraft-file.test.ts`
+signatures, style clamping), `render.test.ts` (markup, thumbnail budget),
+`rounding.test.ts` / `border.test.ts` (the style geometry), `kuficraft-file.test.ts`
 (v2 round-trip + v1 upgrade), plus the backend `convex/**/*.test.ts` suites and
 the editor's `tools.test.ts` / `interaction.test.ts`.

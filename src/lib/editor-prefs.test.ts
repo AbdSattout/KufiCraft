@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { RATIO_PRESETS } from "@/lib/canvas/model";
+import { MAX_COLOR_LENGTH, RATIO_PRESETS } from "@/lib/canvas/model";
 import {
   DEFAULT_EDITOR_PREFS,
   EDITOR_PREFS_KEY,
@@ -58,6 +58,8 @@ describe("editor preferences", () => {
       zoom: 1.25,
       showGrid: false,
       inkSwatches: ["#111827", "#7c2d12"],
+      rounding: { radius: 0.15, corners: 5 },
+      border: { sides: 3, width: 4, color: "#123456" },
     };
     saveEditorPrefs(prefs, storage);
     expect(loadEditorPrefs(storage)).toEqual(prefs);
@@ -75,6 +77,21 @@ describe("editor preferences", () => {
     const reopened = loadEditorPrefs(storage);
     expect(reopened.shape).toBe("curve");
     expect(reopened.rotation).toBe(3);
+  });
+
+  it("clamps rounding and border prefs and drops unknown mask bits", () => {
+    const prefs = loadEditorPrefs(
+      new MemoryStorage({
+        [EDITOR_PREFS_KEY]: JSON.stringify({
+          rounding: { radius: 9, corners: 15 | 16 },
+          border: { sides: 15 | 16, width: 0, color: "x".repeat(80) },
+        }),
+      }),
+    );
+    expect(prefs.rounding).toEqual({ radius: 0.5, corners: 15 });
+    expect(prefs.border.sides).toBe(15);
+    expect(prefs.border.width).toBe(1);
+    expect(prefs.border.color).toBe("x".repeat(MAX_COLOR_LENGTH));
   });
 
   it("remembers the hand tool — it is a rail tool like any other", () => {

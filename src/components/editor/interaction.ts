@@ -19,6 +19,8 @@
 
 import {
   CIRCULAR_SECTORS,
+  CORNER_ALL,
+  DEFAULT_BORDER_WIDTH,
   VIEWBOX_SIZE,
   cellSize,
   itemSignature as signatureOf,
@@ -32,6 +34,8 @@ import type {
   ArcSize,
   CanvasItem,
   Cell,
+  ItemBorder,
+  ItemRounding,
   ProjectConfig,
   Rotation,
   ShapeId,
@@ -53,6 +57,7 @@ import {
   moveItem,
   styleItem,
 } from "@/lib/canvas/items";
+import type { ItemStyle } from "@/lib/canvas/items";
 import type { Point, Rect } from "@/lib/canvas/geometry";
 import { SHAPE_ORDER as SHAPE_REGISTRY_ORDER, shapeLabel } from "@/lib/canvas/shapes";
 
@@ -87,15 +92,26 @@ export function nextRotation(rotation: Rotation): Rotation {
  * (`config.ink`), and every fragment stores the colour it was drawn with, so
  * picking a new ink never repaints what is already on the canvas
  * (docs/CANVAS.md §Items + §Editing).
+ *
+ * Rounding and the outside border are part of the style too, so a pen stroke
+ * is drawn exactly the way the panel shows it. `rounding.radius === 0` and
+ * `border.sides === 0` are the "off" ends and are what a fresh editor opens
+ * with — a document drawn with the defaults stores neither field, which is why
+ * an old board renders unchanged.
  */
 export interface DrawStyle {
   shape: ShapeId;
   rotation: Rotation;
+  rounding: ItemRounding;
+  border: ItemBorder;
 }
 
 export const DEFAULT_STYLE: DrawStyle = {
   shape: "square",
   rotation: 0,
+  // All four corners on: the switch a designer expects when first enabling it.
+  rounding: { radius: 0, corners: CORNER_ALL },
+  border: { sides: 0, width: DEFAULT_BORDER_WIDTH },
 };
 
 /** Style of the next arc (the old app's direction radios + the size option). */
@@ -412,17 +428,21 @@ export function recolourItems(
   });
 }
 
-/** Applies shape / rotation to the listed tiles (other items are ignored). */
+/**
+ * Applies a style patch to the listed items. Shape, rotation and rounding
+ * belong to tiles (other types ignore them); a border is a stroke outside any
+ * item type, so `{ border }` in a patch re-outlines a line, a polyline or a rib
+ * just as well as a tile.
+ */
 export function reshapeItems(
   items: readonly CanvasItem[],
   keys: readonly string[],
-  patch: { shape?: ShapeId; rotation?: Rotation },
+  patch: ItemStyle,
 ): CanvasItem[] {
   const wanted = new Set(keys);
-  return items.map((item) => {
-    if (item.type !== "tile" || !wanted.has(item.key)) return item;
-    return styleItem(item, patch);
-  });
+  return items.map((item) =>
+    wanted.has(item.key) ? styleItem(item, patch) : item,
+  );
 }
 
 /**

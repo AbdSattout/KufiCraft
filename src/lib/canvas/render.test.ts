@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  BORDER_LEFT,
+  BORDER_TOP,
+  CORNER_ALL,
   DEFAULT_PROJECT_CONFIG,
   MAX_THUMBNAIL_LENGTH,
   SHAPE_IDS,
@@ -15,6 +18,8 @@ import type {
   Zone,
 } from "@/lib/canvas/model";
 import { renderSvg, renderThumbnail } from "@/lib/canvas/render";
+import { itemBounds } from "@/lib/canvas/items";
+import { borderPath } from "@/lib/canvas/border";
 
 /* ------------------------------------------------------------------ */
 /* a tiny strict XML reader (node has no DOMParser)                    */
@@ -275,6 +280,100 @@ describe("renderSvg", () => {
       const root = rootOf(renderSvg(makeConfig({ gridType }), items));
       expect(find(root, "path")).toHaveLength(shapes.length);
     }
+  });
+});
+
+describe("style in the SVG renderer", () => {
+  const ROUNDING = { radius: 0.2, corners: CORNER_ALL };
+  const ROUNDED: CanvasItem = {
+    type: "tile",
+    key: tileKey(1, 2, 0),
+    column: 1,
+    row: 2,
+    zone: 0,
+    rounding: ROUNDING,
+  };
+  const BORDERED: CanvasItem = {
+    type: "tile",
+    key: tileKey(1, 2, 0),
+    column: 1,
+    row: 2,
+    zone: 0,
+    border: { sides: BORDER_TOP | BORDER_LEFT, width: 3, color: "#ff0000" },
+  };
+
+  it("renders a tile with and without rounding", () => {
+    const config = makeConfig();
+    const plain = find(rootOf(renderSvg(config, [TILE])), "path");
+    const rounded = find(rootOf(renderSvg(config, [ROUNDED])), "path");
+
+    expect(plain).toHaveLength(1);
+    expect(rounded).toHaveLength(1);
+    expect(plain[0].attrs.d).not.toContain(" C ");
+    expect(rounded[0].attrs.d).toContain(" C ");
+    expect(rounded[0].attrs.d).not.toBe(plain[0].attrs.d);
+    // Rounding changes the outline, never the item's colour or identity.
+    expect(rounded[0].attrs.fill).toBe(plain[0].attrs.fill);
+    expect(rounded[0].attrs["data-k"]).toBe(TILE.key);
+  });
+
+  it("paints the border before the ink, as a separate stroke path", () => {
+    const config = makeConfig({ ink: "#123456" });
+    const paths = find(rootOf(renderSvg(config, [BORDERED])), "path");
+    expect(paths).toHaveLength(2);
+
+    const [outline, ink] = paths;
+    expect(outline.attrs.fill).toBe("none");
+    expect(outline.attrs.stroke).toBe("#ff0000");
+    expect(outline.attrs["stroke-width"]).toBe("3");
+    expect(outline.attrs["stroke-linecap"]).toBe("butt");
+    expect(outline.attrs["stroke-linejoin"]).toBe("miter");
+    expect(outline.attrs["data-k"]).toBe(BORDERED.key);
+    expect(outline.attrs.d).toBe(
+      borderPath(
+        itemBounds(config, BORDERED),
+        BORDER_TOP | BORDER_LEFT,
+        3,
+      ),
+    );
+
+    expect(ink.attrs.fill).toBe("#123456");
+    expect(ink.attrs.stroke).toBeUndefined();
+    expect(ink.attrs.d).not.toBe(outline.attrs.d);
+  });
+
+  it("uses the item's resolved colour when the border has no colour", () => {
+    const config = makeConfig({ ink: "#123456" });
+    const item: CanvasItem = {
+      ...BORDERED,
+      color: "#abcdef",
+      border: { sides: BORDER_TOP, width: 2 },
+    };
+    const [outline] = find(rootOf(renderSvg(config, [item])), "path");
+    expect(outline.attrs.stroke).toBe("#abcdef");
+  });
+
+  it("escapes a hostile border colour", () => {
+    const hostile = '#fff" onload="alert(1)';
+    const item: CanvasItem = {
+      ...BORDERED,
+      border: { sides: BORDER_TOP, width: 2, color: hostile },
+    };
+    const source = renderSvg(makeConfig(), [item]);
+    expect(source).not.toContain("<script");
+    const [outline] = find(rootOf(source), "path");
+    expect(outline.attrs.stroke).toBe(hostile);
+  });
+
+  it("keeps rounding and borders in thumbnails", () => {
+    const items = [ROUNDED, BORDERED];
+    const root = rootOf(renderThumbnail(makeConfig(), items));
+    const paths = find(root, "path");
+    expect(paths).toHaveLength(3);
+    expect(paths[0].attrs.d).toContain(" C ");
+    // The bordered tile contributes its outline and its ink.
+    expect(paths[1].attrs.fill).toBe("none");
+    expect(paths[2].attrs.fill).not.toBe("none");
   });
 });
 

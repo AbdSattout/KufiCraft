@@ -20,7 +20,7 @@
  * clockwise about the box centre and shifts each arc's x-axis-rotation with it.
  */
 
-import type { Rotation, ShapeId } from "./model";
+import type { ItemRounding, Rotation, ShapeId } from "./model";
 import { SHAPE_IDS } from "./model";
 import {
   A,
@@ -35,6 +35,8 @@ import {
   rectPath,
 } from "./geometry";
 import type { Frame, PathCmd, Rect } from "./geometry";
+import { rotateCornerMask, roundCorners, roundingRadius } from "./rounding";
+import type { CornerRounding } from "./rounding";
 
 export abstract class KufiShape {
   abstract readonly id: ShapeId;
@@ -46,18 +48,31 @@ export abstract class KufiShape {
 
   /**
    * Filled path of this shape inside `box`, rotated `rotation` quarter turns
-   * clockwise around the box centre.
+   * clockwise around the box centre, with `rounding`'s corners rounded.
+   *
+   * The mask is stored physically (top right means top right on screen), while
+   * the shape is authored unrotated, so it is rotated **back** by the shape's
+   * rotation before the corners are chosen.
    */
-  path(box: Rect, rotation: Rotation = 0): string {
+  path(box: Rect, rotation: Rotation = 0, rounding?: ItemRounding): string {
     const turns = normalizeTurns(rotation);
-    // Hot path: most fragments are plain, unrotated ink rectangles.
-    if (this.id === "square" && turns === 0) return rectPath(box);
-    return this.inFrame(box.w, box.h, turns, baseFrame(box.x, box.y), 0);
+    const radius = roundingRadius(rounding, box.w, box.h);
+    if (radius <= 0) {
+      // Hot path: most fragments are plain, unrotated ink rectangles.
+      if (this.id === "square" && turns === 0) return rectPath(box);
+      return this.inFrame(box.w, box.h, turns, baseFrame(box.x, box.y), 0);
+    }
+    return this.inFrame(box.w, box.h, turns, baseFrame(box.x, box.y), 0, {
+      radius,
+      corners: rotateCornerMask(rounding?.corners ?? 0, 4 - turns),
+    });
   }
 
   /**
    * Filled path fitted into an arbitrary frame — used by the circular grid,
-   * where the fragment is radial/tangential rather than axis-aligned.
+   * where the fragment is radial/tangential rather than axis-aligned. There is
+   * no axis-aligned box on that grid, so a `rounding` mask is read in the
+   * shape's **own** frame (the fragment's radial/tangential box).
    */
   inFrame(
     w: number,
@@ -65,12 +80,21 @@ export abstract class KufiShape {
     rotation: Rotation,
     frame: Frame,
     rotDeg: number,
+    rounding?: CornerRounding,
   ): string {
     const turns = normalizeTurns(rotation);
     const turned = composeFrames(quarterTurnFrame(w / 2, h / 2, turns), frame);
-    return cmdsToPath(
-      mapCommands(this.commands(w, h), turned, rotDeg + turns * 90),
-    );
+    const authored = this.commands(w, h);
+    const cmds =
+      rounding === undefined
+        ? authored
+        : roundCorners(
+            authored,
+            { x: 0, y: 0, w, h },
+            rounding.radius,
+            rounding.corners,
+          );
+    return cmdsToPath(mapCommands(cmds, turned, rotDeg + turns * 90));
   }
 }
 
@@ -256,8 +280,9 @@ export function shapePath(
   shape: ShapeId | string | undefined,
   box: Rect,
   rotation: Rotation = 0,
+  rounding?: ItemRounding,
 ): string {
-  return shapeById(shape).path(box, rotation);
+  return shapeById(shape).path(box, rotation, rounding);
 }
 
 export function shapeOrderIndex(id: ShapeId): number {

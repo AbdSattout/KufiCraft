@@ -36,8 +36,9 @@ interface CanvasItemShapeProps {
 }
 
 /**
- * One item as one SVG element: the class decides the path and whether it is
- * stroked (lines, polylines and arcs) or filled (tiles).
+ * One item as SVG: the class decides the paths and whether the item is stroked
+ * (lines, polylines, arcs) or filled (tiles). An item with a border gets a
+ * second element, drawn first, so the ink always wins.
  */
 export const CanvasItemShape = memo(function CanvasItemShape({
   config,
@@ -45,34 +46,48 @@ export const CanvasItemShape = memo(function CanvasItemShape({
   className,
   opacity,
 }: CanvasItemShapeProps) {
-  const { path, mode, width } = useMemo(
-    () => itemOf(item).render(config),
+  const { path, mode, width, outline } = useMemo(
+    () => itemOf(item).draw(config),
     [config, item],
   );
   const color = useMemo(() => itemOf(item).resolvedColor(config), [config, item]);
-  if (mode === "stroke") {
-    return (
-      <path
-        data-key={item.key}
-        d={path}
-        fill="none"
-        stroke={color}
-        strokeWidth={width}
-        strokeLinecap="butt"
-        strokeLinejoin="miter"
-        className={className}
-        opacity={opacity}
-      />
-    );
-  }
   return (
-    <path
-      data-key={item.key}
-      d={path}
-      fill={color}
-      className={className}
-      opacity={opacity}
-    />
+    <>
+      {outline ? (
+        <path
+          data-key={`${item.key}:border`}
+          d={outline.path}
+          fill="none"
+          stroke={outline.color}
+          strokeWidth={outline.width}
+          strokeLinecap="butt"
+          strokeLinejoin="miter"
+          className={className}
+          opacity={opacity}
+        />
+      ) : null}
+      {mode === "stroke" ? (
+        <path
+          data-key={item.key}
+          d={path}
+          fill="none"
+          stroke={color}
+          strokeWidth={width}
+          strokeLinecap="butt"
+          strokeLinejoin="miter"
+          className={className}
+          opacity={opacity}
+        />
+      ) : (
+        <path
+          data-key={item.key}
+          d={path}
+          fill={color}
+          className={className}
+          opacity={opacity}
+        />
+      )}
+    </>
   );
 });
 

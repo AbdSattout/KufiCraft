@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  BORDER_TOP,
+  CORNER_ALL,
   DEFAULT_PROJECT_CONFIG,
   arcKey,
   lineKey,
@@ -311,6 +313,31 @@ describe("penItems", () => {
         shape: "circle",
         rotation: 3,
         color: "#ff0000",
+      },
+    ]);
+  });
+
+  it("paints with the rounding and border style, dropping their off states", () => {
+    const config = makeConfig({ ink: "#1a1a2e" });
+    const rounding = { radius: 0.2, corners: CORNER_ALL };
+    const border = { sides: BORDER_TOP, width: 3, color: "#ff0000" };
+    expect(
+      penItems(config, [{ column: 0, row: 0, zone: 0 }], { rounding, border }),
+    ).toMatchObject([{ rounding, border }]);
+
+    // `radius: 0` / `sides: 0` store nothing, exactly like a pre-style document.
+    const plain = penItems(config, [{ column: 0, row: 0, zone: 0 }], {
+      rounding: { radius: 0, corners: CORNER_ALL },
+      border: { sides: 0, width: 2 },
+    });
+    expect(plain).toEqual([
+      {
+        type: "tile",
+        key: tileKey(0, 0, 0),
+        column: 0,
+        row: 0,
+        zone: 0,
+        color: "#1a1a2e",
       },
     ]);
   });

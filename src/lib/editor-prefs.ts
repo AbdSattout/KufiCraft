@@ -4,8 +4,8 @@
  * Two keys, both private to the browser and never sent to the server:
  *
  *   • `kuficraft.editor-prefs.v1` — how the editor opens: tool, shape and
- *     rotation, the arc style (direction + size), zoom, the construction grid
- *     and the last few ink colours.
+ *     rotation, the arc style (direction + size), zoom, the construction grid,
+ *     the last few ink colours and the next stroke's style (rounding + border).
  *   • `kuficraft.last-config.v1` — the last committed project config, used as
  *     the default in the dashboard's «لوحة جديدة» dialog. The ratio, cell size,
  *     grid type, colours and line shape live here, not in the prefs: they are
@@ -21,8 +21,25 @@
  * or a full quota must never break the editor).
  */
 
-import type { ArcDirection, ArcSize, ProjectConfig, ShapeId } from "@/lib/canvas/model";
-import { ARC_DIRECTIONS, ARC_SIZES } from "@/lib/canvas/model";
+import type {
+  ArcDirection,
+  ArcSize,
+  ItemBorder,
+  ItemRounding,
+  ProjectConfig,
+  ShapeId,
+} from "@/lib/canvas/model";
+import {
+  ARC_DIRECTIONS,
+  ARC_SIZES,
+  BORDER_ALL,
+  CORNER_ALL,
+  DEFAULT_BORDER_WIDTH,
+  MAX_BORDER_WIDTH,
+  MAX_COLOR_LENGTH,
+  MAX_ROUNDING_RADIUS,
+  MIN_BORDER_WIDTH,
+} from "@/lib/canvas/model";
 import { SHAPE_ORDER } from "@/lib/canvas/shapes";
 import { TOOL_ORDER } from "@/components/editor/tools";
 import type { ArcStyle, Rotation, ToolId } from "@/components/editor/interaction";
@@ -52,6 +69,10 @@ export interface EditorPrefs {
   showGrid: boolean;
   /** Recent ink colours, most-recent-first, deduped case-insensitively. */
   inkSwatches: string[];
+  /** Corner rounding of the next drawn tiles (radius 0 = square corners). */
+  rounding: ItemRounding;
+  /** Outside border of the next drawn items (sides 0 = none). */
+  border: ItemBorder;
 }
 
 export const DEFAULT_EDITOR_PREFS: EditorPrefs = {
@@ -62,6 +83,8 @@ export const DEFAULT_EDITOR_PREFS: EditorPrefs = {
   zoom: DEFAULT_ZOOM,
   showGrid: true,
   inkSwatches: [],
+  rounding: { radius: 0, corners: CORNER_ALL },
+  border: { sides: 0, width: DEFAULT_BORDER_WIDTH },
 };
 
 /** The slice of the Web Storage API this module needs (easy to stub). */
@@ -147,6 +170,42 @@ function clampZoom(value: unknown): number {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
 }
 
+/**
+ * Rounding from prefs: the radius is clamped to the model's range (`0` stays
+ * `0` — the off state) and the corner mask to the four real corners. A missing
+ * or broken value is the default, which rounds nothing.
+ */
+function roundingPref(value: unknown): ItemRounding {
+  const record = isRecord(value) ? value : {};
+  const radius =
+    typeof record.radius === "number" && Number.isFinite(record.radius)
+      ? Math.min(MAX_ROUNDING_RADIUS, Math.max(0, record.radius))
+      : DEFAULT_EDITOR_PREFS.rounding.radius;
+  const corners =
+    typeof record.corners === "number" && Number.isFinite(record.corners)
+      ? Math.trunc(record.corners) & CORNER_ALL
+      : DEFAULT_EDITOR_PREFS.rounding.corners;
+  return { radius, corners };
+}
+
+/** Border from prefs: the side mask limited to the four sides, width clamped. */
+function borderPref(value: unknown): ItemBorder {
+  const record = isRecord(value) ? value : {};
+  const sides =
+    typeof record.sides === "number" && Number.isFinite(record.sides)
+      ? Math.trunc(record.sides) & BORDER_ALL
+      : DEFAULT_EDITOR_PREFS.border.sides;
+  const width =
+    typeof record.width === "number" && Number.isFinite(record.width)
+      ? Math.min(MAX_BORDER_WIDTH, Math.max(MIN_BORDER_WIDTH, record.width))
+      : DEFAULT_EDITOR_PREFS.border.width;
+  const border: ItemBorder = { sides, width };
+  if (typeof record.color === "string" && record.color.length > 0) {
+    border.color = record.color.slice(0, MAX_COLOR_LENGTH);
+  }
+  return border;
+}
+
 function normalizeSwatches(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   const seen = new Set<string>();
@@ -186,6 +245,8 @@ export function loadEditorPrefs(
         ? record.showGrid
         : DEFAULT_EDITOR_PREFS.showGrid,
     inkSwatches: normalizeSwatches(record.inkSwatches),
+    rounding: roundingPref(record.rounding),
+    border: borderPref(record.border),
   };
 }
 
