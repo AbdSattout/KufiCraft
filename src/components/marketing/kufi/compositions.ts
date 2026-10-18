@@ -35,9 +35,10 @@ export type Piece = {
 type Cell = { q: Quadrant; shape?: FragmentShape; turn?: Turn };
 
 /**
- * The narrowest ratio that still has space (`1:2`). The pieces below used to be
- * drawn half ink / half space; `1:1` is now the space-less mono cell, so their
- * ink/space split is `2/3` — on the tool's own axis either way.
+ * The pieces below are drawn at `1:2` — the narrowest preset *above* the equal
+ * half-ink `1:1`. They were authored half ink / half space, and the denser
+ * `2/3` split they were reviewed at since is kept; the tool's axis makes both
+ * readings legal.
  */
 const NARROW_RATIO = RATIO_PRESETS[1].ratio;
 

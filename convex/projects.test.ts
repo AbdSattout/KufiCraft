@@ -259,6 +259,10 @@ describe("create", () => {
     const asA = t.withIdentity(USER_A);
     const low = await createProject(t, USER_A, "منخفض", { ratio: 0.01 });
     const high = await createProject(t, USER_A, "مرتفع", { ratio: 9 });
+    // A board stored while `1:1` was still the space-less cell (`ratio: 1`)
+    // keeps loading: it lands on the densest preset, never back on a
+    // space-less one (`docs/CANVAS.md` §2).
+    const legacy = await createProject(t, USER_A, "قديم", { ratio: 1 });
     const lowDoc = required(
       await asA.query(api.projects.get, { projectId: low }),
       "project should exist",
@@ -267,8 +271,14 @@ describe("create", () => {
       await asA.query(api.projects.get, { projectId: high }),
       "project should exist",
     );
+    const legacyDoc = required(
+      await asA.query(api.projects.get, { projectId: legacy }),
+      "project should exist",
+    );
     expect(lowDoc.config.ratio).toBe(MIN_RATIO);
     expect(highDoc.config.ratio).toBe(MAX_RATIO);
+    expect(legacyDoc.config.ratio).toBe(MAX_RATIO);
+    expect(MAX_RATIO).toBeLessThan(1);
   });
 
   it("clamps the config base into [4, 100] and keeps valid values as-is", async () => {

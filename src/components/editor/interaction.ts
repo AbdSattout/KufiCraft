@@ -206,9 +206,12 @@ export function anchorAt(config: ProjectConfig, point: Point): Anchor {
 }
 
 /**
- * The ink-square anchor of the cell under `point`. The line and arc tools
- * snap to the cell's ink square — a deliberate, documented deviation from the
- * old app, which silently ignored any click outside it.
+ * The ink-square anchor of the cell under `point`: the line and arc tools snap
+ * to the cell's ink fragment whatever part of the cell was clicked — a
+ * deliberate, documented deviation from the old app, which silently ignored a
+ * click outside the ink square. This is also what keeps them usable at the
+ * equal `1:1`, where the ink and space halves are the same size and both must
+ * accept a line or an arc (docs/CANVAS.md §2).
  */
 export function inkAnchorAt(config: ProjectConfig, point: Point): Anchor {
   const cell = pointToCell(config, clampToCanvas(point));

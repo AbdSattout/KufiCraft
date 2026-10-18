@@ -102,7 +102,7 @@ export const MESSAGES = {
   arcThreeQuarterShort: "٣/٤",
   handDoubleClick: "نقرة مزدوجة: توسيط اللوحة",
   ratioHint: "نسبة الحبر إلى الفراغ داخل كل خلية.",
-  ratioFullCell: "1:1 يعني أن الحبر يملأ الخلية كاملة (شبكة بلا فراغ).",
+  ratioEqualCell: "1:1 يعني أن الحبر والفراغ متساويان، ولكل جزء ربع الخلية.",
   deleteKeyHint: "حذف",
   toolRailLabel: "شريط الأدوات",
   closePanel: "إغلاق",

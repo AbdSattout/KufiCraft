@@ -1214,8 +1214,8 @@ export function tileIconPath(
   const config: ProjectConfig = {
     ...DEFAULT_PROJECT_CONFIG,
     base: size,
-    // A ratio of 1 makes the ink fragment the whole cell, so the shape fills
-    // the icon box exactly.
+    // The icon box is not a board: `ratio: 1` (deliberately not a preset)
+    // makes the ink fragment the whole cell so the glyph fills it exactly.
     ratio: 1,
   };
   return new Tile({ column: 0, row: 0, zone: 0, shape, rotation }).render(config).path;

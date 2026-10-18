@@ -3,7 +3,9 @@ import {
   BORDER_TOP,
   CORNER_ALL,
   DEFAULT_PROJECT_CONFIG,
+  RATIO_PRESETS,
   arcKey,
+  cellSize,
   lineKey,
   strokeKey,
   tileKey,
@@ -802,12 +804,12 @@ describe("per-item colour", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/* ratio 1 (the space-less cell)                                       */
+/* the equal 1:1 cell                                                  */
 /* ------------------------------------------------------------------ */
 
-describe("ratio 1 (the space-less cell)", () => {
-  it("draws one whole-cell tile per anchor of a bent pen stroke", () => {
-    const config = makeConfig({ ratio: 1 });
+describe("the equal 1:1 cell", () => {
+  it("draws one half-cell tile per anchor of a bent pen stroke", () => {
+    const config = makeConfig({ ratio: RATIO_PRESETS[0].ratio });
     const anchors: Anchor[] = [
       { column: 0, row: 0, zone: 0 },
       { column: 1, row: 0, zone: 0 },
@@ -821,18 +823,22 @@ describe("ratio 1 (the space-less cell)", () => {
       tileKey(1, 0, 0),
       tileKey(1, 1, 0),
     ]);
-    // The ink fills the whole cell, so a fragment is one base × base square.
-    expect(inkUnit(config)).toBe(config.base);
+    // Half ink beside half space: a fragment is half a drawn cell on each axis…
+    expect(inkUnit(config)).toBe(cellSize(config) / 2);
     expect(zoneRect(config, 1, 1, 0)).toEqual({
-      x: 1 * config.base,
-      y: 1 * config.base,
+      x: 1 * cellSize(config),
+      y: 1 * cellSize(config),
       w: inkUnit(config),
       h: inkUnit(config),
     });
+    // …so a run of same-zone neighbours is *disconnected* here, exactly as it
+    // is at every denser preset — the ratio never changes what touches.
+    const first = zoneRect(config, 0, 0, 0);
+    expect(first.x + first.w).toBeLessThan(zoneRect(config, 1, 0, 0).x);
   });
 
   it("still resolves the document ink on the line tool", () => {
-    const config = makeConfig({ ratio: 1 });
+    const config = makeConfig({ ratio: RATIO_PRESETS[0].ratio });
     const items = lineItems(
       config,
       [

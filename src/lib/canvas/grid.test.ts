@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import {
   CIRCULAR_ANGULAR_UNIT,
   DEFAULT_PROJECT_CONFIG,
+  RATIO_PRESETS,
   VIEWBOX_SIZE,
   cellSize,
   gridCount,
@@ -47,9 +48,13 @@ function makeConfig(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
 }
 
 const SQUARE = makeConfig();
-const MONO = makeConfig({ ratio: 1 });
+/** The equal `1:1` cell: half ink beside half space, the lightest preset. */
+const EQUAL = makeConfig({ ratio: RATIO_PRESETS[0].ratio });
 const CIRCULAR = makeConfig({ gridType: "circular" });
-const CIRCULAR_MONO = makeConfig({ gridType: "circular", ratio: 1 });
+const CIRCULAR_EQUAL = makeConfig({
+  gridType: "circular",
+  ratio: RATIO_PRESETS[0].ratio,
+});
 
 /** A point on the polar grid: radius in viewBox units, angle in sectors. */
 function at(radius: number, sectors: number): { x: number; y: number } {
@@ -127,19 +132,17 @@ describe("pointToAnchor", () => {
     }
   });
 
-  it("collapses every point to zone 0 at ratio 1", () => {
-    for (const point of [
-      { x: 7.5, y: 7.5 },
-      { x: 9.999, y: 0 },
-      { x: 0, y: 9.999 },
-      { x: 25, y: 35 },
-    ]) {
-      expect(pointToAnchor(MONO, point).zone).toBe(0);
+  it("keeps the four zones distinct in the equal 1:1 cell", () => {
+    for (const zone of [0, 1, 2, 3] as Zone[]) {
+      const rect = zoneRect(EQUAL, 0, 0, zone);
+      const centre = { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 };
+      expect(pointToAnchor(EQUAL, centre)).toEqual({ column: 0, row: 0, zone });
     }
-    expect(pointToAnchor(MONO, { x: 9.999, y: 9.999 })).toEqual({
+    // The ink edge belongs to the space side (`>= ratio`), like every preset.
+    expect(pointToAnchor(EQUAL, { x: inkUnit(EQUAL), y: 0 })).toEqual({
       column: 0,
       row: 0,
-      zone: 0,
+      zone: 1,
     });
   });
 
@@ -154,10 +157,21 @@ describe("pointToAnchor", () => {
     expect(pointToAnchor(CIRCULAR, at(29, 0.9))).toEqual({ column: 2, row: 0, zone: 3 });
   });
 
-  it("makes the whole circular cell zone 0 at ratio 1", () => {
-    for (const point of [at(29, 0.3), at(25, 0.9), at(29, 0.9)]) {
-      expect(pointToAnchor(CIRCULAR_MONO, point).zone).toBe(0);
-    }
+  it("keeps all four circular zones reachable in the equal 1:1 cell", () => {
+    const zones = [
+      at(22, 0.2), // inner radius, leading half of the sector → ink / ink
+      at(28, 0.2), // outer radius → radial space
+      at(22, 0.7), // trailing half of the sector → angular space
+      at(28, 0.7), // both
+    ].map((point) => pointToAnchor(CIRCULAR_EQUAL, point).zone);
+    expect(zones).toEqual([0, 1, 2, 3]);
+    // Past the band's mid-radius the fragment is radial space at 1:1, and the
+    // trailing half of the sector is angular space.
+    expect(pointToAnchor(CIRCULAR_EQUAL, at(26, 0.3))).toEqual({
+      column: 2,
+      row: 0,
+      zone: 1,
+    });
   });
 });
 
@@ -184,9 +198,13 @@ describe("cellCentre", () => {
     });
   });
 
-  it("is the plain cell centre at ratio 1", () => {
-    expect(cellCentre(MONO, { column: 0, row: 0 })).toEqual({ x: 5, y: 5 });
-    expect(cellCentre(MONO, { column: 2, row: 3 })).toEqual({ x: 25, y: 35 });
+  it("is the ink-square centre in the equal 1:1 cell too", () => {
+    const half = inkUnit(EQUAL) / 2;
+    expect(cellCentre(EQUAL, { column: 0, row: 0 })).toEqual({ x: half, y: half });
+    expect(cellCentre(EQUAL, { column: 2, row: 3 })).toEqual({
+      x: 2 * cellSize(EQUAL) + half,
+      y: 3 * cellSize(EQUAL) + half,
+    });
   });
 
   it("uses the band mid-radius and the sector mid-angle on the polar grid", () => {
@@ -358,14 +376,18 @@ describe("gridPaths (square)", () => {
     expect(Math.max(...edges)).toBeCloseTo(VIEWBOX_SIZE, 6);
   });
 
-  it("drops the inner family — and only that — at ratio 1", () => {
-    const mono = gridPaths(MONO);
-    expect(mono.inkLines).toBe("");
-    // The space-less cell is complete, so its far edge is a border like any
-    // other — the only case where one lands on the viewBox edge.
-    const lines = offsets(mono.cellBorders);
-    expect(lines).toHaveLength((gridCount(MONO) + 1) * 2);
-    expect(Math.max(...lines)).toBeCloseTo(VIEWBOX_SIZE, 6);
+  it("draws the inner family in the equal 1:1 cell too — and only that changes", () => {
+    const equal = gridPaths(EQUAL);
+    const count = gridCount(EQUAL);
+    // One inner edge pair per drawn cell, the first at the ink thickness…
+    expect(equal.inkLines.match(/M /g) ?? []).toHaveLength(count * 2);
+    expect(equal.inkLines.startsWith(
+      `M ${inkUnit(EQUAL)} 0 L ${inkUnit(EQUAL)} 1000 M 0 ${inkUnit(EQUAL)} L 1000 ${inkUnit(EQUAL)}`,
+    )).toBe(true);
+    // …and the last on the viewBox edge: the board ends with ink at 1:1 too.
+    expect(Math.max(...offsets(equal.inkLines))).toBeCloseTo(VIEWBOX_SIZE, 6);
+    // The outer family keeps its one-pair-per-cell construction.
+    expect(equal.cellBorders.match(/M /g) ?? []).toHaveLength(count * 2);
   });
 });
 
@@ -385,7 +407,7 @@ describe("gridPaths (circular)", () => {
     )).toBe(true);
   });
 
-  it("adds the inner rings and spokes only when there is space", () => {
+  it("draws the inner rings and spokes at the ink offset of each band", () => {
     // Inner rings at 0.75·cell, 1.75·cell, … (50 of them) and 36 inner spokes.
     expect(inkLines.match(/ A /g) ?? []).toHaveLength(50 * 2);
     expect(inkLines.match(/L /g) ?? []).toHaveLength(36);
@@ -394,12 +416,15 @@ describe("gridPaths (circular)", () => {
     expect(inkLines).toContain("A 500 500 0 0 1");
   });
 
-  it("drops the inner family — and only that — at ratio 1", () => {
-    const mono = gridPaths(CIRCULAR_MONO);
-    expect(mono.inkLines).toBe("");
-    // 50 complete bands of 10: the far edge at radius 500 is a border too.
-    expect(mono.cellBorders.match(/ A /g) ?? []).toHaveLength(50 * 2);
-    expect(mono.cellBorders).toContain("A 500 500 0 0 1");
+  it("draws the inner family in the equal 1:1 cell too — and only that changes", () => {
+    const equal = gridPaths(CIRCULAR_EQUAL);
+    const equalInk = inkUnit(CIRCULAR_EQUAL);
+    // Inner rings at 0.5·cell, 1.5·cell, … (50 of them) and 36 inner spokes.
+    expect(equal.inkLines.match(/ A /g) ?? []).toHaveLength(50 * 2);
+    expect(equal.inkLines.match(/L /g) ?? []).toHaveLength(36);
+    expect(equal.inkLines).toContain(`A ${f(equalInk)} ${f(equalInk)} 0 0 1`);
+    // The last ring lands on the design circle: the board ends with ink too.
+    expect(equal.inkLines).toContain("A 500 500 0 0 1");
   });
 });
 
@@ -419,7 +444,7 @@ describe("gridPaths (circular)", () => {
     )).toBe(true);
   });
 
-  it("adds the inner rings and spokes only when there is space", () => {
+  it("draws the inner rings and spokes at the ink offset of each band", () => {
     // Inner rings at 0.75·cell, 1.75·cell, … (50 of them) and 36 inner spokes.
     expect(inkLines.match(/ A /g) ?? []).toHaveLength(50 * 2);
     expect(inkLines.match(/L /g) ?? []).toHaveLength(36);
@@ -428,12 +453,15 @@ describe("gridPaths (circular)", () => {
     expect(inkLines).toContain("A 500 500 0 0 1");
   });
 
-  it("drops the inner family — and only that — at ratio 1", () => {
-    const mono = gridPaths(CIRCULAR_MONO);
-    expect(mono.inkLines).toBe("");
-    // 50 complete bands of 10: the far edge at radius 500 is a border too.
-    expect(mono.cellBorders.match(/ A /g) ?? []).toHaveLength(50 * 2);
-    expect(mono.cellBorders).toContain("A 500 500 0 0 1");
+  it("draws the inner family in the equal 1:1 cell too — and only that changes", () => {
+    const equal = gridPaths(CIRCULAR_EQUAL);
+    const equalInk = inkUnit(CIRCULAR_EQUAL);
+    // Inner rings at 0.5·cell, 1.5·cell, … (50 of them) and 36 inner spokes.
+    expect(equal.inkLines.match(/ A /g) ?? []).toHaveLength(50 * 2);
+    expect(equal.inkLines.match(/L /g) ?? []).toHaveLength(36);
+    expect(equal.inkLines).toContain(`A ${f(equalInk)} ${f(equalInk)} 0 0 1`);
+    // The last ring lands on the design circle: the board ends with ink too.
+    expect(equal.inkLines).toContain("A 500 500 0 0 1");
   });
 });
 

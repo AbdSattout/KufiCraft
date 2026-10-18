@@ -92,7 +92,8 @@ that omits them renders **exactly** like a v2 file written before they existed.
   2. `version` must be known (`1` or `2`) → else `"إصدار الملف غير مدعوم"`;
   3. `config` is sanitized and clamped with the same semantics as the backend
      (`sanitizeConfig`: `ratio` snapped to the nearest `RATIO_PRESETS` value —
-     so a v1 `0.5` becomes `2/3` —, `base ∈ [4, 100]`,
+     so a v1 `0.5` stays the equal `1:1`, and a `ratio: 1` written back when
+     `1:1` was still the space-less cell becomes `5/6` —, `base ∈ [4, 100]`,
      `gridType ∈ {square, circular}`, unknown and legacy fields dropped — a file
      written before `straightLinesAsSquares` existed takes its default);
   4. `items` are structurally validated against the model (type discriminants
@@ -128,7 +129,7 @@ file cannot smuggle values past the v2 rules:
 | `line` `{t,i1,j1,i2,j2,c}` | `{type:"line", from:{column,row}, to:{column,row}, color}` |
 | `arch` `{t,i1,j1,i2,j2,d,c}` | `{type:"arc", from, to, direction, size:"half", color}` — v1’s `d` bulge flag becomes the sweep direction (`d === 1` → `counterclockwise`) |
 | shapes `semi-hexagone` / `arc` | renamed `pentagon` / `curve` (`docs/CANVAS.md` §7) |
-| `ratio: 0.5` (the old “متساوية” cell) | snaps to `2/3`; `1:1` is now the space-less mono cell |
+| `ratio: 0.5` (the old “متساوية” grid) | is a legal `1:1` — the equal cell, half ink and half space |
 
 ## Legacy (why there is no old JSON to import)
 

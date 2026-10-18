@@ -24,10 +24,11 @@
   `gridCount = round(extent / base)`, `cellSize = extent / (gridCount − 1 + ratio)`
 
   `base` 75 at `1:3` → 13 cells of `1000 / 12.75 = 78.431` (instead of 13 × 75
-  plus a 25-unit sliver). The space-less `1:1` cell has nothing to crop:
-  `cellSize = extent / gridCount`, so bases that divide the extent evenly are
-  unchanged. A non-finite or ≤ 0 `base`/`ratio` (never stored —
-  `sanitizeConfig` clamps them) falls back to the defaults.
+  plus a 25-unit sliver). No preset is space-less (`§2`), so every board is
+  cropped this way — even a `base` that divides the extent evenly: `base` 10 at
+  the default `1:3` gives 100 cells of `1000 / 99.75 = 10.025`. A non-finite or
+  ≤ 0 `base`/`ratio` (never stored — `sanitizeConfig` clamps them) falls back
+  to the defaults.
 * Square grid: cell `(column, row)` covers
   `x ∈ [column·cell, (column+1)·cell)`, `y ∈ [row·cell, (row+1)·cell)`.
 * Circular grid: centre `(500, 500)`; band `column` covers radius
@@ -43,26 +44,58 @@ fraction of that axis. The ink part comes **first** on both axes (top / left on
 the square grid, inner / counter-clockwise-start on the circular one), exactly
 like the reference app's `rectFromPoint`.
 
-`RATIO_PRESETS` (space:ink) are the only legal values:
+`RATIO_PRESETS` (space:ink) are the only legal values, and every entry is the
+honest `ink / (space + ink)` split of the cell:
 
 | preset | space | ink | `ratio` | meaning |
 | --- | --- | --- | --- | --- |
-| `1:1` | 0 | 1 | `1` | **space-less cell** — the ink fills the whole cell (the old app's «mono» grid) |
+| `1:1` | 1 | 1 | `1/2` | **equal cell** — half ink beside half space; the lightest cell |
 | `1:2` | 1 | 2 | `2/3` | |
 | `1:3` | 1 | 3 | `3/4` | **default** (`DEFAULT_RATIO`) |
 | `1:4` | 1 | 4 | `4/5` | |
-| `1:5` | 1 | 5 | `5/6` | |
+| `1:5` | 1 | 5 | `5/6` | the densest cell |
 
-* `MIN_RATIO` / `MAX_RATIO` are the numeric extremes of the presets (`2/3` /
-  `1`), not the first and last entries: the list is ordered by *label*, and the
-  space-less `1:1` is the densest cell.
+* `MIN_RATIO` / `MAX_RATIO` are the numeric extremes of the presets (`1/2` /
+  `5/6`), not the first and last entries: the list is ordered by *label*, so
+  `1:1` is the lightest cell and `1:5` the densest.
 * The backend snaps anything else with `snapRatio` (nearest preset; non-finite →
   `DEFAULT_RATIO`) and `ratioLabel` renders the preset the way designers write it.
-* At `ratio = 1` there is no inner edge: `zoneRect`/`circularSlice` give zone 0
-  the whole cell, `pointToAnchor` always returns zone 0, and `gridPaths` leaves
-  the inner (`inkLines`) family **empty** — it would land on the cell borders.
-* Ink is never the smaller part, so every legal ratio is `≥ 2/3`; a stored
-  `ratio: 0.5` (v1 files, old documents) snaps to `2/3` on read.
+* **No preset is space-less.** The v2 port inherited the old app's «mono» grid
+  as a `ratio = 1` preset, and that was the connectivity bug: at `ratio = 1` the
+  ink fragment is the whole cell and the three space fragments are zero-width,
+  so a tile's zone was invisible (`zoneRect` drew all four zones as the same
+  full cell) and two same-zone neighbours touched at `1:1` and at no other
+  ratio. With every legal ratio strictly below `1` both symptoms are gone —
+  structurally, without a special case in the switch.
+* The scale is *not* clamped to ink ≥ space as a rule: `1:1` is the equal cell
+  and `1:5` the densest, so every preset has `ratio ≥ 1/2` and a stored
+  `ratio: 0.5` (v1 files, the old «متساوية» grid) is a legal `1:1` — while a
+  stored `ratio: 1` (a board from before this fix) snaps to `5/6`, the nearest
+  preset, on read.
+
+### The invariant: the ratio never decides what touches
+
+For every legal preset the four zone fragments of a cell have a **positive**
+area and tile the cell exactly, and two fragments touch — share an edge of
+positive length — **iff** their cells and zones say so:
+
+* a fragment occupies, per axis, `[0, ratio)` (ink zone) or `[ratio, 1)` (space
+  zone) of its cell;
+* two fragments in neighbouring cells share an edge exactly when the sides
+  facing each other are at the shared boundary — one fragment's space side
+  against the other's ink side, i.e. `(zone & bit)` set against `(zone & bit)`
+  clear on the axis that points at the neighbour — and the zones of the other
+  axis are *equal*, or the fragments only meet at a corner;
+* two fragments of one cell share an edge when their zones differ in exactly
+  that one bit.
+
+Both conditions are written in zone bits and cell indices only, never in
+`ratio`: *changing the ratio changes how fat a fragment is, never what it
+touches*. A connected drawing stays connected, a separated one stays separated,
+and the four zones are pairwise distinct at every preset, so no two fragments
+can collapse onto the same rect. A same-zone run across neighbouring cells
+therefore never touches, at any preset — a continuous bar is a `line`/`stroke`
+item, or a space fragment beside an ink one, never a `ratio = 1` special case.
 
 ### Zone rule
 
@@ -71,9 +104,13 @@ like the reference app's `rectFromPoint`.
 * bit 0 (`1`) → the **x** (square) / **radial** (circular) axis is in the space zone
 * bit 1 (`2`) → the **y** (square) / **angular** (circular) axis is in the space zone
 
-So `zone = 0` is the main ink fragment (the old app's `isMainRect`), `zone = 3`
-is the small space-space fragment. A `TileItem` is one zone fragment; a `line`,
-`stroke` and `arc` always address **whole ink cells** (`Cell`, i.e. zone 0).
+So `zone = 0` is the ink square of the cell (the old app's `isMainRect`) and
+`zone = 3` the fragment in the space-space corner — congruent with `zone = 0` at
+the equal `1:1`, the small one at every denser preset. A `TileItem` is one zone
+fragment; a `line`, `stroke` and `arc` always address **whole ink cells**
+(`Cell`, i.e. zone 0), and their tools accept a click anywhere in the cell
+(`inkAnchorAt`), so at `1:1` both the ink and the space half start a line or an
+arc.
 
 ## 3. Items
 
@@ -238,7 +275,8 @@ Every function is deterministic and side-effect free.
   * `cellBorders` — whole-cell borders and the circular spokes/rings, opacity
     `0.28`;
   * `inkLines` — the inner edges that close each ink square (the ones that show
-    «قلم / فراغ»), opacity `0.55`, empty at `ratio = 1`.
+    «قلم / فراغ»), opacity `0.55`; always drawn, since every preset leaves real
+    space inside the cell.
 * Thumbnails: `renderThumbnail` renders at `viewBox="0 0 1000 1000"` without the
   grid, with a fixed light background, reduced precision and no key attributes;
   it must stay ≤ `MAX_THUMBNAIL_LENGTH` characters.
@@ -408,6 +446,15 @@ The hand tool pans, the wheel zooms. The maths is pure, lives in
   while the document keeps them (§3).
 * The pen paints **over** what is already there: same key → replaced in place,
   which is how recolouring a fragment works.
+* The ratio axis has **no space-less preset**. The port had made the old app's
+  «mono» grid a `ratio = 1` "1:1", which collapsed every zone onto the whole
+  cell and made same-zone neighbours touch only there — the switch then broke
+  the pattern's connectivity. `1:1` is the honest equal cell now (half ink,
+  half space); the invariant in §2 holds at all five presets. The two
+  alternatives were rejected: letting a zone mean "where the gap is" turns the
+  most common tile (zone 0) into a solid cell and rewrites how every existing
+  board looks; merging neighbouring fragments at render time makes drawing
+  depend on neighbours and fills the gaps the kufi pattern is made of.
 * The pen's gap fill is **back** (`anchorsAlongLine`, reversing the round that
   had removed it — a fast drag leaving scattered points was the live-testing
   complaint). It is a supercover walk, not a Bresenham line: both cells are
@@ -439,8 +486,10 @@ const full = renderSvg(config, items, { showGrid: config.showGrid });
 
 The engine suite (`bun run test`) covers, file by file: `geometry.test.ts`
 (frames, zone rects, slices, arc centres), `grid.test.ts` (addressing,
-round-trips, two-family grid paths, the drawn-cell tiling, the space-less
-`1:1` case), `items.test.ts`
+round-trips, two-family grid paths, the drawn-cell tiling), `ratio.test.ts` (the
+§2 invariant: the four fragments tile the cell and stay non-degenerate at every
+preset, and the touch relation is identical across all `5×5` ratio pairs),
+`items.test.ts`
 (item classes, keys, geometry, hit-testing, rounding / border styling, the
 stored shape against `canvasItemValidator`, the per-grid rules),
 `ops.test.ts` (add/remove/paint/

@@ -125,7 +125,7 @@ board link — it would point at the page you are already on.
   errors surface as Arabic toasts (`docs/FORMAT.md` defines the rules).
 * “لوحة جديدة” opens a dialog: الاسم, نوع الشبكة (مربعة/دائرية), نسبة الحبر
   (five preset buttons `1:1`…`1:5` with a live mini preview of one cell — `1:1`
-  is the space-less cell where the ink fills the whole cell), then
+  is the equal cell, half ink beside half space), then
   creates via
   `api.projects.create` and navigates to the editor.
 * Empty state: illustrated with a small SVG kufi motif + CTA.
@@ -188,8 +188,8 @@ selected they are absent, not disabled.
 
 Sidebar, top to bottom: الأشكال (palette + selection), لون الحبر, لون الورقة,
 then the board — نسبة الحبر as the five presets `1:1`…`1:5` (live re-render; the
-`1:1` hint explains that the ink fills the whole cell and the grid shows no inner
-edges), حجم الخلية (`base`), نوع الشبكة (square/circular — switching warns that
+`1:1` hint explains that ink and space are equal there, and every preset shows
+the inner edges of its ink squares), حجم الخلية (`base`), نوع الشبكة (square/circular — switching warns that
 existing items may look different, and that lines and arcs are hidden on a
 circular board while staying in the drawing; the hint explains what each type
 is), خيارات اللوحة (إظهار الشبكة and الخط المستقيم مربّعات) — and مسح الكل at

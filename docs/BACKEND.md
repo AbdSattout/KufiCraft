@@ -55,8 +55,8 @@ no user-profile query, because an account has no profile — it is its passkey
   `MAX_KEY_LENGTH = 64` (an item's `key` is **rejected** with the Arabic error
   when longer — truncating a key would silently merge distinct items; the
   longest generated key is an arc's, 48 characters),
-  `ratio` is one of `RATIO_PRESETS` (`1:1` … `1:5`, where `1:1` is the
-  space-less cell — `docs/CANVAS.md` §2), `base ∈ [4, 100]`.
+  `ratio` is one of `RATIO_PRESETS` (`1:1` … `1:5`, the equal half-ink cell
+  first, no space-less preset — `docs/CANVAS.md` §2), `base ∈ [4, 100]`.
 * `list` is a bounded scan: `.take(LIST_LIMIT)` with `LIST_LIMIT = 100`
   (newest first). `items` live in the same document as the summary, so Convex
   reads the full document — including every item — just to project the summary.

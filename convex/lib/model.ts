@@ -19,6 +19,9 @@
  *     yielding a fragment of (w, h) ∈ {ink, space}² — the classic square-kufi
  *     «قلم / فراغ» subdivision. The ink part is at the **start** (top-left) of
  *     the cell, exactly like the old app's `rectFromPoint`.
+ *   - Every preset keeps `0 < ratio < 1`, so the four fragments of a cell have
+ *     positive area and tile it exactly; the ratio never decides whether two
+ *     fragments touch (`docs/CANVAS.md` §2).
  *
  * Coordinate system (circular grid):
  *   - Same viewBox; the circle is centered at (500, 500).
@@ -51,7 +54,7 @@ export const DEFAULT_BASE = 10;
 
 /** One of the five ratios a square-kufi designer works in, as `space:ink`. */
 export interface RatioPreset {
-  /** Parts of space — `0` for the space-less `1:1` cell. */
+  /** Parts of space — never `0`: every preset has a real gap. */
   space: number;
   /** Parts of ink. */
   ink: number;
@@ -63,13 +66,15 @@ export interface RatioPreset {
 
 /**
  * The ratio axis is **not** continuous: kufi is drawn in `1:1 … 1:5`
- * (space:ink). `1:1` is the **space-less cell** — the ink fills the whole cell
- * (the old app's «mono» grid), so every square is a main rect and every tool
- * can start anywhere; `1:2 … 1:5` put 1 part of space beside N parts of ink.
- * `docs/CANVAS.md` §2.
+ * (space:ink), and every entry is the honest `ink / (space + ink)` split of a
+ * cell — `1:1` is half ink beside half space, `1:5` is five parts ink beside
+ * one. **No preset is space-less**: at a ratio of `1` the ink fragment became
+ * the whole cell and the three space fragments collapsed to zero width, so a
+ * tile's zone was invisible until the ratio moved and then reappeared as a
+ * different shape (`docs/CANVAS.md` §2 states the invariant that replaces it).
  */
 export const RATIO_PRESETS: readonly RatioPreset[] = [
-  { space: 0, ink: 1, ratio: 1, label: "1:1" },
+  { space: 1, ink: 1, ratio: 1 / 2, label: "1:1" },
   { space: 1, ink: 2, ratio: 2 / 3, label: "1:2" },
   { space: 1, ink: 3, ratio: 3 / 4, label: "1:3" },
   { space: 1, ink: 4, ratio: 4 / 5, label: "1:4" },
@@ -80,9 +85,11 @@ export const RATIO_PRESETS: readonly RatioPreset[] = [
 export const DEFAULT_RATIO = 3 / 4;
 
 /**
- * The ends of the axis as numbers. The presets are ordered by *label*, and the
- * space-less `1:1` is the densest cell, so the bounds are the numeric extremes
- * rather than the first and last entries. Every stored ratio is one of the five.
+ * The ends of the axis as numbers. The presets are ordered by *label*, so the
+ * bounds are the numeric extremes rather than the first and last entries:
+ * `1:1` is the lightest cell of the scale and `1:5` the densest, and no preset
+ * ever reaches the degenerate space-less cell. Every stored ratio is one of the
+ * five.
  */
 export const MIN_RATIO = Math.min(...RATIO_PRESETS.map((preset) => preset.ratio));
 export const MAX_RATIO = Math.max(...RATIO_PRESETS.map((preset) => preset.ratio));
@@ -293,8 +300,9 @@ export type GridType = "square" | "circular";
  * Zone quadrant of a cell / circular slice.
  * bit0 (1) → x (square) / radial (circular) axis is in the space zone.
  * bit1 (2) → y (square) / angular (circular) axis is in the space zone.
- * 0 = full ink fragment (the old app's `isMainRect`), 3 = the small fragment
- * in the space-space corner.
+ * 0 = the ink square of the cell (the old app's `isMainRect`), 3 = the
+ * fragment in the space-space corner. Every preset leaves all four fragments
+ * with a positive area, and at the equal `1:1` the four are congruent.
  */
 export type Zone = 0 | 1 | 2 | 3;
 
@@ -455,7 +463,10 @@ export type CanvasItemType = CanvasItem["type"];
 
 export interface ProjectConfig {
   gridType: GridType;
-  /** Ink fraction per cell — one of `RATIO_PRESETS` (`1:1` … `1:5`). */
+  /**
+   * Ink fraction per cell — one of `RATIO_PRESETS` (`1:1` … `1:5`), always
+   * below the space-less `1`; anything else is snapped by `snapRatio`.
+   */
   ratio: number;
   /** Cell size in viewBox units. */
   base: number;

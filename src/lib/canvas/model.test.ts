@@ -35,8 +35,8 @@ import type {
 } from "@/lib/canvas/model";
 
 const LAST = RATIO_PRESETS[RATIO_PRESETS.length - 1];
-/** The space-less cell: the ink fills the whole square (the old «mono»). */
-const MONO = RATIO_PRESETS[0];
+/** The equal cell: half ink beside half space — the lightest preset. */
+const EQUAL = RATIO_PRESETS[0];
 
 describe("the ratio axis", () => {
   it("is the five ratios kufi is drawn in, written space:ink", () => {
@@ -47,23 +47,24 @@ describe("the ratio axis", () => {
       "1:4",
       "1:5",
     ]);
-    expect(RATIO_PRESETS.slice(1).map((preset) => preset.ink / preset.space)).toEqual([
-      2, 3, 4, 5,
+    expect(RATIO_PRESETS.map((preset) => preset.ink / preset.space)).toEqual([
+      1, 2, 3, 4, 5,
     ]);
   });
 
-  it("opens with the space-less 1:1 cell — the ink covers the whole square", () => {
-    expect(MONO.label).toBe("1:1");
-    expect(MONO.space).toBe(0);
-    expect(MONO.ink).toBe(1);
-    expect(MONO.ratio).toBe(1);
+  it("opens with the equal 1:1 cell — half ink beside half space", () => {
+    expect(EQUAL.label).toBe("1:1");
+    expect(EQUAL.space).toBe(1);
+    expect(EQUAL.ink).toBe(1);
+    expect(EQUAL.ratio).toBe(1 / 2);
   });
 
-  it("never lets ink be the smaller part", () => {
+  it("keeps ink the larger part and the space real — no space-less preset", () => {
     for (const preset of RATIO_PRESETS) {
       expect(preset.ink).toBeGreaterThanOrEqual(preset.space);
-      expect(preset.ratio).toBeGreaterThan(1 / 2);
-      expect(preset.ratio).toBeLessThanOrEqual(1);
+      expect(preset.space).toBeGreaterThan(0);
+      expect(preset.ratio).toBeGreaterThanOrEqual(1 / 2);
+      expect(preset.ratio).toBeLessThan(1);
       // The fraction is exactly `ink / (space + ink)` — ink plus space.
       expect(preset.ratio).toBeCloseTo(
         preset.ink / (preset.space + preset.ink),
@@ -72,19 +73,19 @@ describe("the ratio axis", () => {
     }
   });
 
-  it("thins towards the end of the scale, in the order designers read it", () => {
-    for (let index = 2; index < RATIO_PRESETS.length; index += 1) {
+  it("fattens towards the end of the scale, in the order designers read it", () => {
+    for (let index = 1; index < RATIO_PRESETS.length; index += 1) {
       expect(RATIO_PRESETS[index].ratio).toBeGreaterThan(
         RATIO_PRESETS[index - 1].ratio,
       );
     }
-    // The space-less 1:1 is the densest cell of the whole scale.
-    expect(MONO.ratio).toBeGreaterThan(RATIO_PRESETS[1].ratio);
+    // The equal 1:1 is the lightest cell of the whole scale.
+    expect(EQUAL.ratio).toBeLessThan(RATIO_PRESETS[1].ratio);
   });
 
   it("bounds the scale at its ends, defaulting to 1:3", () => {
-    expect(MIN_RATIO).toBe(2 / 3);
-    expect(MAX_RATIO).toBe(MONO.ratio);
+    expect(MIN_RATIO).toBe(EQUAL.ratio);
+    expect(MAX_RATIO).toBe(LAST.ratio);
     expect(DEFAULT_RATIO).toBe(3 / 4);
     expect(RATIO_PRESETS.some((preset) => preset.ratio === DEFAULT_RATIO)).toBe(
       true,
@@ -102,9 +103,10 @@ describe("snapRatio", () => {
   it("moves a value between two presets to the nearer one", () => {
     // 0.6 is 0.1 from 1:1 and 0.066… from 1:2.
     expect(snapRatio(0.6)).toBe(2 / 3);
-    expect(snapRatio(0.52)).toBe(2 / 3);
+    // 0.52 is 0.02 from the equal 1:1 and 0.14… from 1:2.
+    expect(snapRatio(0.52)).toBe(1 / 2);
     expect(snapRatio(0.79)).toBe(4 / 5);
-    expect(snapRatio(0.97)).toBe(1);
+    expect(snapRatio(0.97)).toBe(5 / 6);
   });
 
   it("resolves a value exactly between two presets to the earlier entry", () => {
@@ -130,14 +132,14 @@ describe("snapRatio", () => {
 
 describe("ratioLabel", () => {
   it("names every preset the way a designer writes it", () => {
-    expect(ratioLabel(1)).toBe("1:1");
+    expect(ratioLabel(1 / 2)).toBe("1:1");
     expect(ratioLabel(3 / 4)).toBe("1:3");
     expect(ratioLabel(LAST.ratio)).toBe("1:5");
   });
 
   it("names the preset a stray value snaps to", () => {
     expect(ratioLabel(0.79)).toBe("1:4");
-    expect(ratioLabel(0)).toBe("1:2");
+    expect(ratioLabel(0)).toBe("1:1");
     expect(ratioLabel(Number.NaN)).toBe("1:3");
   });
 });

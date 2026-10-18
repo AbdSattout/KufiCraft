@@ -32,7 +32,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { RATIO_PRESETS, VIEWBOX_SIZE, ratioLabel } from "@/lib/canvas/model";
+import { MIN_RATIO, RATIO_PRESETS, VIEWBOX_SIZE, ratioLabel } from "@/lib/canvas/model";
 import type { GridType, ProjectConfig } from "@/lib/canvas/model";
 import { MESSAGES } from "./messages";
 import { INK_SWATCHES, PAPER_SWATCHES, formatCount, mergedSwatches, swatchLabel } from "./editor-palette";
@@ -164,7 +164,9 @@ export function SettingsPanel({
           ))}
         </ToggleGroup>
         <p className="text-xs text-muted-foreground/80">
-          {config.ratio >= 1 ? MESSAGES.ratioFullCell : MESSAGES.ratioHint}
+          {config.ratio <= MIN_RATIO
+            ? MESSAGES.ratioEqualCell
+            : MESSAGES.ratioHint}
         </p>
       </PanelSection>
 

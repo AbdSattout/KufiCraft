@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_PROJECT_CONFIG,
+  RATIO_PRESETS,
   arcKey,
   cellSize,
   lineKey,
@@ -62,8 +63,8 @@ import type { ScrollLike, ToolContext, WheelGesture } from "./interaction";
 
 const square: ProjectConfig = { ...DEFAULT_PROJECT_CONFIG };
 const circular: ProjectConfig = { ...square, gridType: "circular" };
-/** The space-less `1:1` cell: the ink fills the whole cell. */
-const mono: ProjectConfig = { ...square, ratio: 1 };
+/** The equal `1:1` cell: half ink beside half space, the lightest preset. */
+const equal: ProjectConfig = { ...square, ratio: RATIO_PRESETS[0].ratio };
 
 type TileExtra = Partial<Pick<TileItem, "shape" | "rotation" | "color">>;
 
@@ -546,24 +547,50 @@ describe("arcBetween + linePreview", () => {
   });
 });
 
-describe("ratio 1 (the space-less cell)", () => {
-  it("always anchors in zone 0 — there is no space strip", () => {
-    expect(anchorAt(mono, { x: 8, y: 8 })).toEqual({
+describe("the equal 1:1 cell", () => {
+  it("reads the zone of the half the click is in", () => {
+    expect(anchorAt(equal, { x: 2, y: 2 })).toEqual({
       column: 0,
       row: 0,
       zone: 0,
     });
-    expect(inkAnchorAt(mono, { x: 8, y: 8 })).toEqual({
+    expect(anchorAt(equal, { x: 8, y: 2 })).toEqual({
+      column: 0,
+      row: 0,
+      zone: 1,
+    });
+    expect(anchorAt(equal, { x: 2, y: 8 })).toEqual({
+      column: 0,
+      row: 0,
+      zone: 2,
+    });
+    expect(anchorAt(equal, { x: 8, y: 8 })).toEqual({
+      column: 0,
+      row: 0,
+      zone: 3,
+    });
+  });
+
+  it("anchors the ink tools from either half — the two look alike there", () => {
+    expect(inkAnchorAt(equal, { x: 2, y: 2 })).toEqual({
+      column: 0,
+      row: 0,
+      zone: 0,
+    });
+    expect(inkAnchorAt(equal, { x: 8, y: 8 })).toEqual({
       column: 0,
       row: 0,
       zone: 0,
     });
   });
 
-  it("hits a full-ink tile across the whole cell", () => {
-    const items = [tile(0, 0, 0)];
-    expect(hitTest(mono, items, { x: 2, y: 2 })?.key).toBe(tileKey(0, 0, 0));
-    expect(hitTest(mono, items, { x: 8, y: 8 })?.key).toBe(tileKey(0, 0, 0));
+  it("hits only the quadrant a tile actually covers", () => {
+    const ink = [tile(0, 0, 0)];
+    const space = [tile(0, 0, 3)];
+    expect(hitTest(equal, ink, { x: 2, y: 2 })?.key).toBe(tileKey(0, 0, 0));
+    expect(hitTest(equal, ink, { x: 8, y: 8 })).toBeNull();
+    expect(hitTest(equal, space, { x: 8, y: 8 })?.key).toBe(tileKey(0, 0, 3));
+    expect(hitTest(equal, space, { x: 2, y: 2 })).toBeNull();
   });
 });
 

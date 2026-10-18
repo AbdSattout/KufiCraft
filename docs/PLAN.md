@@ -93,10 +93,20 @@ backend) · Better Auth (passkeys, local-install component) · Bun · vitest.
   “إعادة الشكل”), the selection actions appear only with a selection instead of
   a disabled block, and the panels read top-to-bottom as drawing → colours →
   board → wipe (`docs/UI.md`).
-* The ink ratio now reads `1:1 … 1:5` where **`1:1` is the space-less mono cell**
-  (ink fills the whole cell); `MIN_RATIO`/`MAX_RATIO` are the numeric extremes.
-  The construction grid is two families: whole-cell borders (0.28) plus the
-  stronger inner ink edges (0.55), the latter empty at `1:1`.
+* The ink ratio now reads `1:1 … 1:5`; `MIN_RATIO`/`MAX_RATIO` are the numeric
+  extremes. The construction grid is two families: whole-cell borders (0.28)
+  plus the stronger inner ink edges (0.55).
+* **Follow-up (live testing): the ratio axis has no space-less preset.** `1:1`
+  used to be the old «mono» grid ported as `ratio = 1`: the ink fragment was the
+  whole cell and the space fragments were zero-width, so a tile's zone was
+  invisible until the ratio moved and then reappeared as a different shape, and
+  two same-zone neighbours touched at `1:1` and nowhere else — switching the
+  ratio broke the pattern's connectivity. `1:1` is the honest equal cell now
+  (half ink, half space, the lightest of the five) and the invariant in
+  `docs/CANVAS.md` §2 holds at every preset: the four fragments of a cell tile
+  it with positive area, and what touches depends only on cells and zones. A
+  stored `ratio: 1` snaps to `5/6` on read; the inner grid family is now drawn at
+  every preset.
 * `.kuficraft` is **format v2** (still reads v1; `docs/FORMAT.md`), the backend
   validators/sanitisers follow (`docs/BACKEND.md`), and the docs were rewritten
   in the same branch.
@@ -213,8 +223,8 @@ backend) · Better Auth (passkeys, local-install component) · Bun · vitest.
   cells between its last anchor and the new one with `anchorsAlongLine` — a
   *supercover* rasterisation of the segment between the two cell centres
   (one cell per gridline crossed, **both** cells at an exact corner crossing, so
-  a diagonal stroke stays edge-connected and is never dotted at a ratio below
-  `1:1`). There is no `MAX_PEN_GAP` teleport rule and no maximum gap this time,
+  a diagonal stroke stays edge-connected and is never dotted at any preset —
+  every one of them has real space). There is no `MAX_PEN_GAP` teleport rule and no maximum gap this time,
   the fill is bounded by the grid's own cell count, and the pen still never
   merges a run. The eraser sweeps the same way (each cell the drag flew over is
   hit-tested at its centre), so a quick erase no longer skips what it passed.
@@ -225,7 +235,7 @@ backend) · Better Auth (passkeys, local-install component) · Bun · vitest.
 | 2 | E editor (needs B+A merged) · C backend tests (convex-test) | merged ✅ |
 | 2.5 | editor prefs (browser storage) · `.kuficraft` export/import (`docs/FORMAT.md`) · ratio presets | merged ✅ |
 | 3 | backend + auth reviews and their fixes · write-path QA · prod deploy | done ✅ |
-| 4 | model v2 (item classes · tool registry · pen/line/arc gestures · per-item colour · space-less 1:1 · grid families · file format v2 · docs) | this branch |
+| 4 | model v2 (item classes · tool registry · pen/line/arc gestures · per-item colour · equal 1:1 cell · grid families · file format v2 · docs) | this branch |
 
 ## File ownership (avoid collisions)
 

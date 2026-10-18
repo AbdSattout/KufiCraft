@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import {
   CIRCULAR_ANGULAR_UNIT,
   DEFAULT_PROJECT_CONFIG,
+  RATIO_PRESETS,
   cellSize,
 } from "@/lib/canvas/model";
 import type { ProjectConfig, Zone } from "@/lib/canvas/model";
@@ -56,11 +57,14 @@ function makeConfig(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
 /** The default cell: ratio 3/4, base 10 → 100 drawn cells (the last cell's
  * space cropped), so the drawn cell is 1000 / 99.75 units. */
 const CANONICAL = makeConfig();
-/** The space-less `1:1` cell: the ink fills the whole square. */
-const MONO = makeConfig({ ratio: 1 });
+/** The equal `1:1` cell: half ink beside half space → 5 units of ink. */
+const EQUAL = makeConfig({ ratio: RATIO_PRESETS[0].ratio });
 /** The same two, on the polar grid. */
 const CANONICAL_CIRCULAR = makeConfig({ gridType: "circular" });
-const MONO_CIRCULAR = makeConfig({ gridType: "circular", ratio: 1 });
+const EQUAL_CIRCULAR = makeConfig({
+  gridType: "circular",
+  ratio: RATIO_PRESETS[0].ratio,
+});
 
 const QUADRANTS: readonly Zone[] = [0, 1, 2, 3];
 
@@ -81,7 +85,7 @@ function expectSlice(slice: CircularSlice, expected: CircularSlice): void {
 describe("inkUnit", () => {
   it("is the ratio · drawn-cell thickness of one cell", () => {
     expect(inkUnit(CANONICAL)).toBe(0.75 * cellSize(CANONICAL));
-    expect(inkUnit(MONO)).toBe(cellSize(MONO));
+    expect(inkUnit(EQUAL)).toBe(0.5 * cellSize(EQUAL));
     const thin = makeConfig({ ratio: 0.5, base: 20 });
     expect(inkUnit(thin)).toBe(0.5 * cellSize(thin));
     const fifths = makeConfig({ ratio: 5 / 6, base: 30 });
@@ -118,13 +122,16 @@ describe("zoneRect", () => {
     });
   });
 
-  it("makes zone 0 the whole cell at ratio 1 and the rest zero-area", () => {
-    // The space-less cell has no space strip: the ink fragment *is* the cell,
-    // and the three space quadrants collapse onto its far edges.
-    expect(zoneRect(MONO, 2, 3, 0)).toEqual({ x: 20, y: 30, w: 10, h: 10 });
-    expect(zoneRect(MONO, 2, 3, 1)).toEqual({ x: 30, y: 30, w: 0, h: 10 });
-    expect(zoneRect(MONO, 2, 3, 2)).toEqual({ x: 20, y: 40, w: 10, h: 0 });
-    expect(zoneRect(MONO, 2, 3, 3)).toEqual({ x: 30, y: 40, w: 0, h: 0 });
+  it("splits the equal 1:1 cell into four congruent quadrants", () => {
+    // Half ink beside half space: every fragment has the same positive area,
+    // and the four of them tile the drawn cell.
+    const equalCell = cellSize(EQUAL);
+    const half = inkUnit(EQUAL);
+    expect(half).toBe(equalCell / 2);
+    expect(zoneRect(EQUAL, 2, 3, 0)).toEqual({ x: 2 * equalCell, y: 3 * equalCell, w: half, h: half });
+    expect(zoneRect(EQUAL, 2, 3, 1)).toEqual({ x: 2 * equalCell + half, y: 3 * equalCell, w: half, h: half });
+    expect(zoneRect(EQUAL, 2, 3, 2)).toEqual({ x: 2 * equalCell, y: 3 * equalCell + half, w: half, h: half });
+    expect(zoneRect(EQUAL, 2, 3, 3)).toEqual({ x: 2 * equalCell + half, y: 3 * equalCell + half, w: half, h: half });
   });
 
   it("honours a ratio thinner than the default", () => {
@@ -172,10 +179,13 @@ describe("circularSlice", () => {
     slice(CANONICAL_CIRCULAR, 2, 35, 0, 2 * cell, 2 * cell + ink, 35 * U, 35.75 * U);
   });
 
-  it("collapses the space zones to zero width at ratio 1", () => {
-    slice(MONO_CIRCULAR, 1, 0, 0, 10, 20, 0, U);
-    slice(MONO_CIRCULAR, 1, 0, 1, 20, 20, 0, U);
-    slice(MONO_CIRCULAR, 1, 0, 2, 10, 20, U, U);
+  it("splits the equal 1:1 slice into four congruent quadrants", () => {
+    const equalCell = cellSize(EQUAL_CIRCULAR);
+    const half = inkUnit(EQUAL_CIRCULAR);
+    slice(EQUAL_CIRCULAR, 1, 0, 0, equalCell, equalCell + half, 0, 0.5 * U);
+    slice(EQUAL_CIRCULAR, 1, 0, 1, equalCell + half, 2 * equalCell, 0, 0.5 * U);
+    slice(EQUAL_CIRCULAR, 1, 0, 2, equalCell, equalCell + half, 0.5 * U, U);
+    slice(EQUAL_CIRCULAR, 1, 0, 3, equalCell + half, 2 * equalCell, 0.5 * U, U);
   });
 });
 

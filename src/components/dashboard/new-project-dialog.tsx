@@ -174,8 +174,8 @@ export function NewProjectDialog({
               <InkRatioPreview ratio={ratio} />
               <p className="text-xs leading-relaxed text-muted-foreground">
                 يوضّح الرسم نسبة القلم إلى الفراغ داخل الخلية عند{" "}
-                {ratioLabel(ratio)}: النسبة 1:1 تعني أن الحبر يملأ الخلية
-                كاملة، وكلما كبر الرقم الثاني قلّ الفراغ.
+                {ratioLabel(ratio)}: في 1:1 يتساوى الحبر والفراغ، وكلما كبر
+                الرقم الثاني قلّ الفراغ.
               </p>
             </div>
           </div>
