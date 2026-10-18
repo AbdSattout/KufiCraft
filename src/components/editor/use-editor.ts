@@ -866,7 +866,11 @@ export function useEditor(
   // clobber the remembered config with model defaults).
   useEffect(() => {
     saveEditorPrefs({
-      tool,
+      // The **preference**, never the derived active tool: a circular board
+      // substitutes `fallbackTool` at render time, and storing that would
+      // erase a square-board preference (line/arc) the moment a circular
+      // board opens (docs/CANVAS.md §3).
+      tool: toolPref,
       shape: style.shape,
       rotation: style.rotation,
       arc,
@@ -884,7 +888,7 @@ export function useEditor(
     style.rotation,
     style.rounding,
     style.shape,
-    tool,
+    toolPref,
     zoom,
   ]);
 
