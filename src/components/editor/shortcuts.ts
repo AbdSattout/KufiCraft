@@ -4,11 +4,14 @@
  * The editor listens on `window`, so `shortcutFor` takes a minimal event
  * shape and refuses to fire while the user is typing in a field. The global
  * shortcuts are exactly the ones documented in docs/UI.md §Editor plus
- * `Ctrl+D` (duplicate), `R` (rotate the current shape) and the arrange keys
- * `Ctrl+[` / `Ctrl+]` (add Shift for the extremes).
+ * `Ctrl+D` (duplicate), `Ctrl+A` (select all), `R` (rotate the current shape),
+ * the view keys `+` / `-` / `0` (zoom) and `G` (the grid guide), and the
+ * arrange keys `Ctrl+[` / `Ctrl+]` (add Shift for the extremes).
  *
  * Tool keys come from the tool classes (`TOOL_SHORTCUTS`) and shape digits from
  * the shape registry (`SHAPE_ORDER`), so this map cannot drift from the UI.
+ * `shortcut-hints.ts` is the one place that writes these keys down again for
+ * the UI to show, and its test walks both directions.
  */
 
 import type { GridType, ShapeId } from "@/lib/canvas/model";
@@ -26,7 +29,12 @@ export type EditorShortcut =
   | { kind: "redo" }
   | { kind: "duplicate" }
   | { kind: "rotate" }
-  | { kind: "cancel" };
+  | { kind: "cancel" }
+  | { kind: "selectAll" }
+  | { kind: "zoomIn" }
+  | { kind: "zoomOut" }
+  | { kind: "zoomReset" }
+  | { kind: "toggleGrid" };
 
 /** The event fields the map reads — `KeyboardEvent` satisfies this. */
 export interface ShortcutEvent {
@@ -76,18 +84,28 @@ export function shortcutFor(
         return { kind: "redo" };
       case "d":
         return { kind: "duplicate" };
+      case "a":
+        return { kind: "selectAll" };
       // Illustrator / Figma: `Ctrl+]` brings forward, `Shift` sends to the
       // extreme; the brackets mirror themselves (`Ctrl+[` sends backward).
+      // The brace spellings are the same physical keys: browsers report the
+      // **shifted character** for a Shift combo that produces no control
+      // character (`}` for Ctrl+Shift+`]`), and layouts that put the brackets
+      // on the Shift or AltGr layer produce `{` / `}` for them too.
       case "]":
         return {
           kind: "arrange",
           action: event.shiftKey ? "front" : "forward",
         };
+      case "}":
+        return { kind: "arrange", action: "front" };
       case "[":
         return {
           kind: "arrange",
           action: event.shiftKey ? "back" : "backward",
         };
+      case "{":
+        return { kind: "arrange", action: "back" };
       default:
         return null;
     }
@@ -97,12 +115,19 @@ export function shortcutFor(
   if (key === "Escape") return { kind: "cancel" };
   if (key === "Enter") return { kind: "cancel" };
 
+  // View keys, plain: a primary modifier here would fight the browser's own
+  // page zoom (`Ctrl` + `+` / `-` / `0`).
+  if (key === "+" || key === "=") return { kind: "zoomIn" };
+  if (key === "-") return { kind: "zoomOut" };
+  if (key === "0") return { kind: "zoomReset" };
+
   if (/^[1-9]$/.test(key)) {
     const shape = SHAPE_ORDER[Number(key) - 1];
     return shape ? { kind: "shape", shape } : null;
   }
 
   if (key.toLowerCase() === "r") return { kind: "rotate" };
+  if (key.toLowerCase() === "g") return { kind: "toggleGrid" };
 
   const tool = toolForShortcut(key, gridType);
   return tool ? { kind: "tool", tool } : null;

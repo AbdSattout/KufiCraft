@@ -30,6 +30,8 @@ import {
 import { cn } from "@/lib/utils";
 import type { SaveState } from "@/lib/save-state";
 import { MESSAGES } from "./messages";
+import { shortcutAriaLabel, shortcutLabel } from "./shortcut-hints";
+import { usePrimaryModifier } from "./use-primary-modifier";
 
 /** Dot, label and tone for each save state — the two warnings are the only loud ones. */
 const SAVE_INDICATORS: Record<
@@ -128,6 +130,8 @@ export function EditorTopBar({
   onOpenSettings,
 }: EditorTopBarProps) {
   const indicator = SAVE_INDICATORS[save];
+  // The platform only names the primary modifier; the map accepts both.
+  const primary = usePrimaryModifier();
 
   return (
     <header className="flex h-14 shrink-0 items-center gap-1 border-b border-border/70 bg-background px-2 sm:px-3">
@@ -162,6 +166,8 @@ export function EditorTopBar({
           variant="ghost"
           size="icon-sm"
           aria-label={MESSAGES.undo}
+          aria-keyshortcuts={shortcutAriaLabel({ kind: "undo" }, primary)}
+          title={`${MESSAGES.undo} (${shortcutLabel({ kind: "undo" }, primary)})`}
           disabled={!canUndo}
           onClick={undo}
         >
@@ -171,6 +177,8 @@ export function EditorTopBar({
           variant="ghost"
           size="icon-sm"
           aria-label={MESSAGES.redo}
+          aria-keyshortcuts={shortcutAriaLabel({ kind: "redo" }, primary)}
+          title={`${MESSAGES.redo} (${shortcutLabel({ kind: "redo" }, primary)})`}
           disabled={!canRedo}
           onClick={redo}
         >

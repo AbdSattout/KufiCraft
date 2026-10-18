@@ -36,6 +36,8 @@ import { CanvasOverlay } from "./canvas-overlay";
 import { toolOf } from "./tools";
 import { nextZoom, zoomPercent } from "./interaction";
 import type { ToolId } from "./interaction";
+import { shortcutAriaLabel, shortcutLabel } from "./shortcut-hints";
+import { usePrimaryModifier } from "./use-primary-modifier";
 
 export interface CanvasStageProps {
   config: ProjectConfig;
@@ -91,6 +93,7 @@ export function CanvasStage({
   // The cursor, the hint and the pan flag all come from the tool class, so a
   // new tool cannot forget them.
   const active = toolOf(tool);
+  const primary = usePrimaryModifier();
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -168,6 +171,8 @@ export function CanvasStage({
             variant="ghost"
             size="icon-xs"
             aria-label={MESSAGES.zoomOut}
+            aria-keyshortcuts={shortcutAriaLabel({ kind: "zoomOut" }, primary)}
+            title={`${MESSAGES.zoomOut} (${shortcutLabel({ kind: "zoomOut" }, primary)})`}
             disabled={zoom <= MIN_ZOOM}
             onClick={() => setZoom(nextZoom(zoom, -1, MIN_ZOOM, MAX_ZOOM))}
           >
@@ -177,6 +182,8 @@ export function CanvasStage({
             type="button"
             aria-describedby="editor-zoom-label"
             aria-label={MESSAGES.zoomReset}
+            aria-keyshortcuts={shortcutAriaLabel({ kind: "zoomReset" }, primary)}
+            title={`${MESSAGES.zoomReset} (${shortcutLabel({ kind: "zoomReset" }, primary)})`}
             onClick={() => setZoom(1)}
             className="min-w-10 rounded text-center tabular-nums text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           >
@@ -186,6 +193,8 @@ export function CanvasStage({
             variant="ghost"
             size="icon-xs"
             aria-label={MESSAGES.zoomIn}
+            aria-keyshortcuts={shortcutAriaLabel({ kind: "zoomIn" }, primary)}
+            title={`${MESSAGES.zoomIn} (${shortcutLabel({ kind: "zoomIn" }, primary)})`}
             disabled={zoom >= MAX_ZOOM}
             onClick={() => setZoom(nextZoom(zoom, 1, MIN_ZOOM, MAX_ZOOM))}
           >

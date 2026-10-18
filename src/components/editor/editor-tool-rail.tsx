@@ -102,6 +102,7 @@ export function ToolRail({
             variant={active ? "secondary" : "ghost"}
             aria-pressed={active}
             aria-label={hint}
+            aria-keyshortcuts={entry.shortcut}
             title={hint}
             onClick={() => setTool(entry.id)}
             onDoubleClick={entry.pans ? onCentreView : undefined}

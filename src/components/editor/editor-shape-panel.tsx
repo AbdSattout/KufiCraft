@@ -72,6 +72,8 @@ import { INK_SWATCHES, formatCount, mergedSwatches, swatchLabel } from "./editor
 import { ColourField, PanelSection, SliderField } from "./editor-controls";
 import { SHAPE_LABELS, SHAPE_ORDER } from "./interaction";
 import type { DrawStyle } from "./interaction";
+import { shapeDigit, shortcutAriaLabel, shortcutLabel } from "./shortcut-hints";
+import { usePrimaryModifier } from "./use-primary-modifier";
 
 /**
  * The palette glyph is the pen's own path — `tileIconPath` runs the very same
@@ -197,30 +199,26 @@ export interface ShapePanelProps {
   canArrange: (action: ArrangeAction) => boolean;
 }
 
-/** The arrange commands in Illustrator/Figma order, with their key hints. */
+/** The arrange commands in Illustrator/Figma order; the keys come from the hint layer. */
 const ARRANGE_ITEMS = [
   {
     action: "front",
     label: MESSAGES.bringToFront,
-    hint: "Ctrl+Shift+]",
     Icon: BringToFront,
   },
   {
     action: "forward",
     label: MESSAGES.bringForward,
-    hint: "Ctrl+]",
     Icon: ChevronUp,
   },
   {
     action: "backward",
     label: MESSAGES.sendBackward,
-    hint: "Ctrl+[",
     Icon: ChevronDown,
   },
   {
     action: "back",
     label: MESSAGES.sendToBack,
-    hint: "Ctrl+Shift+[",
     Icon: SendToBack,
   },
 ] as const;
@@ -259,22 +257,34 @@ export function ShapePanel({
     setRounding({ ...style.rounding, corners: corners ^ corner });
   };
 
+  // The platform only names the primary modifier; the map accepts both.
+  const primary = usePrimaryModifier();
+
   return (
     <PanelSection title={MESSAGES.shapes}>
       <div className="grid grid-cols-5 gap-1">
-        {SHAPE_ORDER.map((shape, index) => (
-          <Button
-            key={shape}
-            variant={style.shape === shape ? "secondary" : "outline"}
-            size="icon"
-            aria-pressed={style.shape === shape}
-            aria-label={`${SHAPE_LABELS[shape]} (${index + 1})`}
-            title={`${SHAPE_LABELS[shape]} (${index + 1})`}
-            onClick={() => selectShape(shape)}
-          >
-            <ShapeGlyph shape={shape} rotation={style.rotation} />
-          </Button>
-        ))}
+        {SHAPE_ORDER.map((shape) => {
+          // The tenth glyph has no digit (only `1…9` are mapped), so it gets
+          // no hint at all — the surface never promises a dead key.
+          const digit = shapeDigit(shape);
+          const hint = digit
+            ? `${SHAPE_LABELS[shape]} (${digit})`
+            : SHAPE_LABELS[shape];
+          return (
+            <Button
+              key={shape}
+              variant={style.shape === shape ? "secondary" : "outline"}
+              size="icon"
+              aria-pressed={style.shape === shape}
+              aria-label={hint}
+              aria-keyshortcuts={digit ?? undefined}
+              title={hint}
+              onClick={() => selectShape(shape)}
+            >
+              <ShapeGlyph shape={shape} rotation={style.rotation} />
+            </Button>
+          );
+        })}
       </div>
 
       <Button
@@ -282,6 +292,8 @@ export function ShapePanel({
         size="sm"
         className="w-full"
         aria-label={`${MESSAGES.rotate} ${style.rotation * 90}°`}
+        aria-keyshortcuts={shortcutAriaLabel({ kind: "rotate" }, primary)}
+        title={`${MESSAGES.rotate} (${shortcutLabel({ kind: "rotate" }, primary)})`}
         onClick={rotateShape}
       >
         <RotateCw />
@@ -431,7 +443,13 @@ export function ShapePanel({
               <PaintBucket />
               {MESSAGES.recolourSelection}
             </Button>
-            <Button variant="outline" size="sm" onClick={duplicateSelection}>
+            <Button
+              variant="outline"
+              size="sm"
+              aria-keyshortcuts={shortcutAriaLabel({ kind: "duplicate" }, primary)}
+              title={`${MESSAGES.duplicateSelection} (${shortcutLabel({ kind: "duplicate" }, primary)})`}
+              onClick={duplicateSelection}
+            >
               <Copy />
               {MESSAGES.duplicateSelection}
             </Button>
@@ -457,24 +475,36 @@ export function ShapePanel({
                 align="start"
                 className="w-auto max-w-(--available-width)"
               >
-                {ARRANGE_ITEMS.map(({ action, label, hint, Icon }) => (
+                {ARRANGE_ITEMS.map(({ action, label, Icon }) => (
                   <DropdownMenuItem
                     key={action}
                     disabled={!canArrange(action)}
+                    aria-keyshortcuts={shortcutAriaLabel(
+                      { kind: "arrange", action },
+                      primary,
+                    )}
                     onClick={() => arrange(action)}
                   >
                     <Icon />
                     {label}
-                    <DropdownMenuShortcut dir="ltr">{hint}</DropdownMenuShortcut>
+                    <DropdownMenuShortcut dir="ltr">
+                      {shortcutLabel({ kind: "arrange", action }, primary)}
+                    </DropdownMenuShortcut>
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>
-            <Button variant="outline" size="sm" onClick={deleteSelection}>
+            <Button
+              variant="outline"
+              size="sm"
+              aria-keyshortcuts={shortcutAriaLabel({ kind: "delete" }, primary)}
+              title={`${MESSAGES.deleteSelection} (${shortcutLabel({ kind: "delete" }, primary)})`}
+              onClick={deleteSelection}
+            >
               <Trash2 />
               {MESSAGES.deleteSelection}
               <kbd className="ms-1 rounded border border-border/70 px-1 text-[0.65rem] text-muted-foreground">
-                Del
+                {shortcutLabel({ kind: "delete" }, primary)}
               </kbd>
             </Button>
           </div>

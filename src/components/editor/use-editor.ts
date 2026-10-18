@@ -47,6 +47,7 @@ import {
   saveLastConfig,
 } from "@/lib/editor-prefs";
 import { downloadProjectFile } from "@/lib/kuficraft-file";
+import { visibleItems } from "@/lib/canvas/items";
 import { arrangeItems } from "@/lib/canvas/ops";
 import type { ArrangeAction } from "@/lib/canvas/ops";
 import {
@@ -425,6 +426,17 @@ export function useEditor(
   }, []);
 
   const clearSelection = useCallback(() => setSelectionState([]), []);
+
+  /** `Ctrl+A` — every visible item becomes the selection (no commit, no history). */
+  const selectAll = useCallback(() => {
+    const keys = visibleItems(config.gridType, items).map((item) => item.key);
+    const wanted = new Set(keys);
+    setSelectionState((previous) =>
+      previous.length === keys.length && previous.every((key) => wanted.has(key))
+        ? previous
+        : keys,
+    );
+  }, [config.gridType, items]);
 
   /** Commits a new item list with one history entry (no-op when identical). */
   const applyCommit = useCallback(
@@ -814,105 +826,8 @@ export function useEditor(
   }, [commitItems, history, items, selection]);
 
   /* ---------------------------------------------------------------- */
-  /* Keyboard                                                          */
+  /* View zoom                                                         */
   /* ---------------------------------------------------------------- */
-
-  useEffect(() => {
-    if (!enabled) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      const target = event.target;
-      if (
-        target instanceof Element &&
-        target.closest('[role="dialog"], [role="alertdialog"], [data-slot="sheet-content"]')
-      ) {
-        return;
-      }
-      const shortcut = shortcutFor(
-        {
-          key: event.key,
-          ctrlKey: event.ctrlKey,
-          metaKey: event.metaKey,
-          shiftKey: event.shiftKey,
-          altKey: event.altKey,
-          // `shortcutFor` stays DOM-free: hand it only the two fields it reads.
-          target: target instanceof HTMLElement ? target : null,
-        },
-        config.gridType,
-      );
-      if (!shortcut) return;
-      event.preventDefault();
-      switch (shortcut.kind) {
-        case "tool":
-          setToolStateAndReset(shortcut.tool);
-          break;
-        case "shape":
-          selectShape(shortcut.shape);
-          break;
-        case "rotate":
-          rotateShape();
-          break;
-        case "delete":
-          deleteSelection();
-          break;
-        case "duplicate":
-          duplicateSelection();
-          break;
-        case "arrange":
-          arrange(shortcut.action);
-          break;
-        case "undo":
-          undo();
-          break;
-        case "redo":
-          redo();
-          break;
-        case "cancel":
-          stateRef.current = NO_STATE;
-          setState(NO_STATE);
-          break;
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [
-    arrange,
-    config.gridType,
-    deleteSelection,
-    duplicateSelection,
-    enabled,
-    redo,
-    rotateShape,
-    selectShape,
-    setToolStateAndReset,
-    undo,
-  ]);
-
-  /* ---------------------------------------------------------------- */
-  /* Overlay previews                                                  */
-  /* ---------------------------------------------------------------- */
-
-  const preview = useMemo(
-    () => previewTool(tool, context, state),
-    [context, state, tool],
-  );
-
-  /* ---------------------------------------------------------------- */
-  /* Exports                                                           */
-  /* ---------------------------------------------------------------- */
-
-  const exportSvg = useCallback(() => {
-    downloadSvg(config, items, document.name);
-  }, [config, document.name, items]);
-
-  const exportPng = useCallback(() => {
-    downloadPng(config, items, document.name).catch((error: unknown) => {
-      toast.error(errorMessage(error));
-    });
-  }, [config, document.name, items]);
-
-  const exportFile = useCallback(() => {
-    downloadProjectFile({ name: document.name, config, items });
-  }, [config, document.name, items]);
 
   const setZoom = useCallback(
     (next: number, focus?: Point) => {
@@ -1025,6 +940,127 @@ export function useEditor(
     view.addEventListener("wheel", onWheel, { passive: false });
     return () => view.removeEventListener("wheel", onWheel);
   }, [document.status, enabled, setZoom]);
+
+  /* ---------------------------------------------------------------- */
+  /* Keyboard                                                          */
+  /* ---------------------------------------------------------------- */
+
+  useEffect(() => {
+    if (!enabled) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest('[role="dialog"], [role="alertdialog"], [data-slot="sheet-content"]')
+      ) {
+        return;
+      }
+      const shortcut = shortcutFor(
+        {
+          key: event.key,
+          ctrlKey: event.ctrlKey,
+          metaKey: event.metaKey,
+          shiftKey: event.shiftKey,
+          altKey: event.altKey,
+          // `shortcutFor` stays DOM-free: hand it only the two fields it reads.
+          target: target instanceof HTMLElement ? target : null,
+        },
+        config.gridType,
+      );
+      if (!shortcut) return;
+      event.preventDefault();
+      switch (shortcut.kind) {
+        case "tool":
+          setToolStateAndReset(shortcut.tool);
+          break;
+        case "shape":
+          selectShape(shortcut.shape);
+          break;
+        case "rotate":
+          rotateShape();
+          break;
+        case "delete":
+          deleteSelection();
+          break;
+        case "duplicate":
+          duplicateSelection();
+          break;
+        case "arrange":
+          arrange(shortcut.action);
+          break;
+        case "selectAll":
+          selectAll();
+          break;
+        case "zoomIn":
+          setZoom(nextZoom(zoom, 1, MIN_ZOOM, MAX_ZOOM));
+          break;
+        case "zoomOut":
+          setZoom(nextZoom(zoom, -1, MIN_ZOOM, MAX_ZOOM));
+          break;
+        case "zoomReset":
+          setZoom(1);
+          break;
+        case "toggleGrid":
+          setShowGrid(!showGrid);
+          break;
+        case "undo":
+          undo();
+          break;
+        case "redo":
+          redo();
+          break;
+        case "cancel":
+          stateRef.current = NO_STATE;
+          setState(NO_STATE);
+          break;
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [
+    arrange,
+    config.gridType,
+    deleteSelection,
+    duplicateSelection,
+    enabled,
+    redo,
+    rotateShape,
+    selectAll,
+    selectShape,
+    setShowGrid,
+    setToolStateAndReset,
+    setZoom,
+    showGrid,
+    undo,
+    zoom,
+  ]);
+
+  /* ---------------------------------------------------------------- */
+  /* Overlay previews                                                  */
+  /* ---------------------------------------------------------------- */
+
+  const preview = useMemo(
+    () => previewTool(tool, context, state),
+    [context, state, tool],
+  );
+
+  /* ---------------------------------------------------------------- */
+  /* Exports                                                           */
+  /* ---------------------------------------------------------------- */
+
+  const exportSvg = useCallback(() => {
+    downloadSvg(config, items, document.name);
+  }, [config, document.name, items]);
+
+  const exportPng = useCallback(() => {
+    downloadPng(config, items, document.name).catch((error: unknown) => {
+      toast.error(errorMessage(error));
+    });
+  }, [config, document.name, items]);
+
+  const exportFile = useCallback(() => {
+    downloadProjectFile({ name: document.name, config, items });
+  }, [config, document.name, items]);
 
   /* ---------------------------------------------------------------- */
   /* Preferences (localStorage, best-effort)                           */

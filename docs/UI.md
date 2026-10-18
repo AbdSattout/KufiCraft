@@ -288,13 +288,29 @@ line it draws between the **user** and the **board**:
 * Both keys are versioned and validated on read (corrupt/stale values fall back
   to model defaults, never throw).
 
-Keyboard: `Delete`/`Backspace` remove, `Ctrl+Z` / `Ctrl+Shift+Z` (`Ctrl+Y`)
-undo/redo, `Ctrl+D` duplicate, `R` rotate the active shape, `Escape`/`Enter`
-cancel a click sequence, digits `1…9` pick a shape, `V` select, `P` pen, `L`
-line, `E` eraser, `A` arc, `H` hand. The tool keys come from the tool classes
-and the shape digits from the shape registry (`SHAPE_ORDER`), so the map cannot
-drift from the UI; the grid decides which of them exist, so `L` and `A` do
-nothing on a circular board.
+Keyboard — the labels follow the platform: `Ctrl` on Windows/Linux, `Cmd` on
+macOS, and the map's `hasPrimary` accepts either. `Delete`/`Backspace` remove
+the selection, `Ctrl+Z` / `Ctrl+Shift+Z` (`Ctrl+Y`) undo/redo, `Ctrl+D`
+duplicate, `Ctrl+A` select all, `R` rotate the active shape,
+`Escape`/`Enter` cancel a click sequence, digits `1…9` pick a shape, `V`
+select, `P` pen, `L` line, `E` eraser, `A` arc, `H` hand, `Ctrl+[` / `Ctrl+]`
+arrange the selection (`Shift` for the extremes — the map also takes the `{` /
+`}` that a shifted or AltGr-typed bracket arrives as), `+` / `-` / `0` zoom in
+/ out / back to 100 %, and `G` toggles the grid guide. The tool keys come from
+the tool classes and the shape digits from the shape registry (`SHAPE_ORDER`,
+whose tenth glyph has no digit), so the map cannot drift from the UI; the grid
+decides which of them exist, so `L` and `A` do nothing on a circular board.
+
+Every hint sits on the control it belongs to, and none promises a key the map
+would not fire: the tool rail and the shape buttons already print their key,
+undo/redo, rotate, duplicate and delete say theirs on hover (with
+`aria-keyshortcuts` for assistive tech), the arrange menu prints a key per
+item, and the zoom and grid-guide controls name theirs. The export menu has no
+shortcut and therefore no hint. Because the map reads `event.key`, these
+shortcuts follow the **active keyboard layout**: on a non-Latin layout (Arabic
+101, for example) the letter keys type their own letters and do not fire, and
+the brackets are typed with `Shift`/AltGr — a layout-aware rebinding is a
+separate decision, deliberately not taken here.
 
 ## Landing (`/welcome`, served at `/`)
 
