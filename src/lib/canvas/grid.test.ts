@@ -16,6 +16,7 @@ import {
   RATIO_PRESETS,
   VIEWBOX_SIZE,
   cellSize,
+  circularAngularUnit,
   gridCount,
   linePoint,
 } from "@/lib/canvas/model";
@@ -59,6 +60,8 @@ const CIRCULAR_EQUAL = makeConfig({
   gridType: "circular",
   ratio: RATIO_PRESETS[0].ratio,
 });
+/** A board that divides the circle into 12 sectors of 30° instead of 36 of 10°. */
+const TWELVE = makeConfig({ gridType: "circular", circularSectors: 12 });
 
 /** A point on the polar grid: radius in viewBox units, angle in sectors. */
 function at(radius: number, sectors: number): { x: number; y: number } {
@@ -68,6 +71,15 @@ function at(radius: number, sectors: number): { x: number; y: number } {
 /** The `fmt` in geometry.ts rounds to 1e-6; mirror it for path assertions. */
 function f(value: number): string {
   return String(Math.round(value * 1e6) / 1e6);
+}
+
+/** The same, on a board whose sector count is not the default 36. */
+function atSectors(
+  config: ProjectConfig,
+  radius: number,
+  sectors: number,
+): { x: number; y: number } {
+  return polar(CENTER, CENTER, radius, sectors * circularAngularUnit(config));
 }
 
 /* ------------------------------------------------------------------ */
@@ -104,6 +116,30 @@ describe("pointToCell", () => {
     });
     // …and just after it, in the first.
     expect(pointToCell(CIRCULAR, at(15, 0.01 / CIRCULAR_ANGULAR_UNIT))).toEqual({
+      column: 1,
+      row: 0,
+    });
+  });
+
+  it("divides the circle by the board's own sector count", () => {
+    // Mid-sector 3 (105°) is sector 3 of a 12-sector ring; the fixed 10°
+    // division would have called the very same point sector 10.
+    expect(pointToCell(TWELVE, atSectors(TWELVE, 15, 3.5))).toEqual({
+      column: 1,
+      row: 3,
+    });
+    expect(pointToCell(CIRCULAR, atSectors(TWELVE, 15, 3.5))).toEqual({
+      column: 1,
+      row: 10,
+    });
+  });
+
+  it("wraps the seam of a shorter ring", () => {
+    expect(pointToCell(TWELVE, polar(CENTER, CENTER, 15, 2 * Math.PI - 0.001))).toEqual({
+      column: 1,
+      row: 11,
+    });
+    expect(pointToCell(TWELVE, polar(CENTER, CENTER, 15, 0.001))).toEqual({
       column: 1,
       row: 0,
     });
@@ -175,6 +211,31 @@ describe("pointToAnchor", () => {
       column: 2,
       row: 0,
       zone: 1,
+    });
+  });
+
+  it("splits the band and sector of the board's own ring", () => {
+    // The ink / space rule is angle-independent, so the zones land the same
+    // way on a 12-sector ring — only the sector index follows the board.
+    expect(pointToAnchor(TWELVE, atSectors(TWELVE, 25, 3.3))).toEqual({
+      column: 2,
+      row: 3,
+      zone: 0,
+    });
+    expect(pointToAnchor(TWELVE, atSectors(TWELVE, 29, 3.3))).toEqual({
+      column: 2,
+      row: 3,
+      zone: 1,
+    });
+    expect(pointToAnchor(TWELVE, atSectors(TWELVE, 25, 3.9))).toEqual({
+      column: 2,
+      row: 3,
+      zone: 2,
+    });
+    expect(pointToAnchor(TWELVE, atSectors(TWELVE, 29, 3.9))).toEqual({
+      column: 2,
+      row: 3,
+      zone: 3,
     });
   });
 });
@@ -399,6 +460,18 @@ describe("pointToLinePoint", () => {
       anchor: { x: 0.5, y: 1 },
     });
   });
+
+  it("takes the mid-angle from the board's own sector count", () => {
+    const config = makeConfig({ gridType: "circular", base: 20, circularSectors: 8 });
+    const centre = cellCentre(config, { column: 3, row: 2 });
+    const expected = atSectors(
+      config,
+      3 * cellSize(config) + inkUnit(config) / 2,
+      2.5,
+    );
+    expect(centre.x).toBeCloseTo(expected.x, 9);
+    expect(centre.y).toBeCloseTo(expected.y, 9);
+  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -506,6 +579,10 @@ describe("anchorPath", () => {
     for (const zone of [0, 3] as Zone[]) {
       expect(anchorPath(CIRCULAR, { column: 2, row: 1, zone })).not.toBe("");
     }
+    // The slice follows the board's own ring, last sector included.
+    expect(anchorPath(TWELVE, { column: 2, row: 11, zone: 0 })).toBe(
+      slicePath(circularSlice(TWELVE, 2, 11, 0)),
+    );
   });
 });
 
@@ -643,6 +720,19 @@ describe("gridPaths (circular)", () => {
     expect(equal.inkLines).toContain(`A ${f(equalInk)} ${f(equalInk)} 0 0 1`);
     // The last ring lands on the design circle: the board ends with ink too.
     expect(equal.inkLines).toContain("A 500 500 0 0 1");
+  });
+
+  it("draws one spoke per sector of the board", () => {
+    for (const sectors of [8, 12, 72]) {
+      const config = makeConfig({ gridType: "circular", circularSectors: sectors });
+      const paths = gridPaths(config);
+      // The rings never change with the angular division (49 bands, two arcs
+      // each); only the spoke counts follow the board.
+      expect((paths.cellBorders.match(/ A /g) ?? []).length).toBe(49 * 2);
+      expect((paths.cellBorders.match(/L /g) ?? []).length).toBe(sectors);
+      expect((paths.inkLines.match(/ A /g) ?? []).length).toBe(50 * 2);
+      expect((paths.inkLines.match(/L /g) ?? []).length).toBe(sectors);
+    }
   });
 });
 

@@ -27,7 +27,8 @@
  *   - Same viewBox; the circle is centered at (500, 500).
  *   - Radially divided into `gridCount` bands of `cellSize` units from the
  *     center — the same crop, so the design circle ends on the last band's ink.
- *   - Angularly divided into 36 sectors of 10° (2π/36) each.
+ *   - Angularly divided into `config.circularSectors` sectors (default 36 →
+ *     10°), bounded by `MIN_CIRCULAR_SECTORS`…`MAX_CIRCULAR_SECTORS`.
  *   - The same zone logic applies per axis: radial zone and angular zone.
  *
  * Field names are spelled out (`column`, not `i`): the JSON is read by people
@@ -117,9 +118,31 @@ export function ratioLabel(value: number): string {
   return RATIO_PRESETS[0].label;
 }
 
-/** Angular divisions of the circular grid (10° sectors). */
+/** Default angular divisions of the circular grid — 36 sectors of 10°. */
 export const CIRCULAR_SECTORS = 36;
+/** The default sector in radians (the angular unit of a board that sets none). */
 export const CIRCULAR_ANGULAR_UNIT = (2 * Math.PI) / CIRCULAR_SECTORS;
+
+/**
+ * Bounds of the per-board angular division, in sectors. Below 6 (60°) the
+ * sectors are wider than the board's own bands so the ring stops reading as a
+ * division; above 72 (5°) the spokes crowd the bands they cut.
+ */
+export const MIN_CIRCULAR_SECTORS = 6;
+export const MAX_CIRCULAR_SECTORS = 72;
+
+/**
+ * Angular divisions of the board. A document written before the field existed
+ * — or a config object that skipped sanitising — stays at 36 (10°).
+ */
+export function circularSectors(config: ProjectConfig): number {
+  return config.circularSectors ?? CIRCULAR_SECTORS;
+}
+
+/** One sector of the board in radians — the circular grid's angular unit. */
+export function circularAngularUnit(config: ProjectConfig): number {
+  return (2 * Math.PI) / circularSectors(config);
+}
 
 /**
  * Hard limits enforced by the backend.
@@ -514,6 +537,12 @@ export interface ProjectConfig {
   ratio: number;
   /** Cell size in viewBox units. */
   base: number;
+  /**
+   * Angular divisions of the circular grid, in sectors. Sanitisers fill
+   * `CIRCULAR_SECTORS` (36 → 10°) when absent, so documents written before the
+   * field existed keep their exact old geometry.
+   */
+  circularSectors: number;
   /** Default ink color. */
   ink: string;
   /** Canvas background (hex or "transparent"). */
@@ -535,6 +564,7 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
   gridType: "square",
   ratio: DEFAULT_RATIO,
   base: DEFAULT_BASE,
+  circularSectors: CIRCULAR_SECTORS,
   ink: DEFAULT_INK,
   background: DEFAULT_BACKGROUND,
   showGrid: false,
@@ -866,6 +896,13 @@ export const projectConfigValidator = v.object({
   gridType: gridTypeValidator,
   ratio: v.number(),
   base: v.number(),
+  /**
+   * Optional so a document written before the field was introduced — or a
+   * client tab that predates it — still validates; `sanitizeConfig` fills
+   * `CIRCULAR_SECTORS` (36) and clamps it into
+   * `[MIN_CIRCULAR_SECTORS, MAX_CIRCULAR_SECTORS]`.
+   */
+  circularSectors: v.optional(v.number()),
   ink: v.string(),
   background: v.string(),
   showGrid: v.boolean(),

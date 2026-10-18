@@ -28,11 +28,13 @@ import {
   DEFAULT_INK,
   DEFAULT_PROJECT_CONFIG,
   DEFAULT_RATIO,
+  MAX_CIRCULAR_SECTORS,
   MAX_COLOR_LENGTH,
   MAX_ITEMS,
   MAX_NAME_LENGTH,
-  CIRCULAR_SECTORS,
+  MIN_CIRCULAR_SECTORS,
   arcKey,
+  circularSectors,
   lineKey,
   linePoint,
   maxGridIndex,
@@ -189,7 +191,8 @@ function cellOf(value: unknown, maxColumn: number, maxRow: number): Cell | null 
 
 /**
  * Same semantics as the backend's `sanitizeConfig`: `ratio` snapped to the
- * nearest `RATIO_PRESETS` value, `base ∈ [4, 100]`, colours truncated,
+ * nearest `RATIO_PRESETS` value, `base ∈ [4, 100]`, `circularSectors` rounded
+ * into `[MIN_CIRCULAR_SECTORS, MAX_CIRCULAR_SECTORS]`, colours truncated,
  * `gridType` restricted, unknown fields dropped, missing fields defaulted.
  */
 export function sanitizeProjectConfig(value: unknown): ProjectConfig {
@@ -200,6 +203,16 @@ export function sanitizeProjectConfig(value: unknown): ProjectConfig {
     ratio:
       typeof record.ratio === "number" ? snapRatio(record.ratio) : DEFAULT_RATIO,
     base: clampNumber(record.base, MIN_BASE, MAX_BASE, DEFAULT_BASE),
+    // A sector count is a whole number of divisions: a fraction rounds to the
+    // nearest sector, and absent / unusable input takes the default (36).
+    circularSectors: Math.round(
+      clampNumber(
+        record.circularSectors,
+        MIN_CIRCULAR_SECTORS,
+        MAX_CIRCULAR_SECTORS,
+        DEFAULT_PROJECT_CONFIG.circularSectors,
+      ),
+    ),
     ink: sanitizeColour(record.ink, DEFAULT_INK),
     background: sanitizeColour(record.background, DEFAULT_BACKGROUND),
     showGrid:
@@ -262,7 +275,7 @@ export function normalizeItem(
   if (!isRecord(value)) return null;
   const maxColumn = maxGridIndex(config.base);
   const maxRow =
-    config.gridType === "circular" ? CIRCULAR_SECTORS - 1 : maxColumn;
+    config.gridType === "circular" ? circularSectors(config) - 1 : maxColumn;
   const colour = itemColour(value.color);
   const border = itemBorder(value.border);
 

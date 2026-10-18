@@ -56,7 +56,9 @@ no user-profile query, because an account has no profile — it is its passkey
   when longer — truncating a key would silently merge distinct items; the
   longest generated key is an arc's, 48 characters),
   `ratio` is one of `RATIO_PRESETS` (`1:1` … `1:5`, the equal half-ink cell
-  first, no space-less preset — `docs/CANVAS.md` §2), `base ∈ [4, 100]`.
+  first, no space-less preset — `docs/CANVAS.md` §2), `base ∈ [4, 100]`, and the
+  circular board's `circularSectors ∈ [MIN_CIRCULAR_SECTORS,
+  MAX_CIRCULAR_SECTORS]` (rounded to a whole number of divisions).
 * `list` is a bounded scan: `.take(LIST_LIMIT)` with `LIST_LIMIT = 100`
   (newest first). `items` live in the same document as the summary, so Convex
   reads the full document — including every item — just to project the summary.
@@ -75,7 +77,8 @@ no user-profile query, because an account has no profile — it is its passkey
     (`= floor(VIEWBOX_SIZE / base)`, at most `VIEWBOX_SIZE / 4 = 250` for
     `base = 4`). On a circular grid the sector axis
     (tile `row`, line/arc `to.row`, stroke point `row`) is capped at
-    `CIRCULAR_SECTORS - 1 = 35`. `NaN` → `0`, `+Infinity` → the bound it points
+    `circularSectors(config) - 1` (the board's own count — default
+    `CIRCULAR_SECTORS - 1 = 35`). `NaN` → `0`, `+Infinity` → the bound it points
     at (a bare `Math.min/max` propagates `NaN` and would store a non-value).
   * an item colour is sliced to `MAX_COLOR_LENGTH`.
   * an item that does not match a v2 type is **dropped** (never stored): an

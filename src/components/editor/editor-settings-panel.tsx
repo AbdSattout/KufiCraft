@@ -6,9 +6,10 @@
  * Ordered the way the sidebar reads: the two colours first (لون الحبر is the
  * pen's colour, so it sits right under the shape palette; لون الورقة is the
  * board's background), then the ink ratio as the five presets `1:1`…`1:5`
- * (live re-render), the cell size, the grid-type switch (warned, because
- * existing items are re-interpreted), the board options, and finally “مسح الكل”
- * behind a confirm dialog.
+ * (live re-render), the cell size, the circular sector count (circular boards
+ * only — it is the board's angular division), the grid-type switch (warned,
+ * because existing items are re-interpreted), the board options, and finally
+ * “مسح الكل” behind a confirm dialog.
  *
  * إظهار الشبكة is the one view guide in here: the construction grid follows
  * the *user* (it is a preference, drawn the same on every board), while every
@@ -32,7 +33,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { MIN_RATIO, RATIO_PRESETS, VIEWBOX_SIZE, ratioLabel } from "@/lib/canvas/model";
+import {
+  MAX_CIRCULAR_SECTORS,
+  MIN_CIRCULAR_SECTORS,
+  MIN_RATIO,
+  RATIO_PRESETS,
+  VIEWBOX_SIZE,
+  circularSectors,
+  ratioLabel,
+} from "@/lib/canvas/model";
 import type { GridType, ProjectConfig } from "@/lib/canvas/model";
 import { MESSAGES } from "./messages";
 import { INK_SWATCHES, PAPER_SWATCHES, formatCount, mergedSwatches, swatchLabel } from "./editor-palette";
@@ -40,6 +49,11 @@ import { ColourField, PanelSection, SliderField } from "./editor-controls";
 
 const MIN_BASE = 4;
 const MAX_BASE = 100;
+
+/** Caption angle: 360° over the sectors, rounded so 51.428… reads 51.4. */
+function sectorAngleDegrees(sectors: number): number {
+  return Math.round((360 / sectors) * 10) / 10;
+}
 
 export interface SettingsPanelProps {
   config: ProjectConfig;
@@ -183,6 +197,29 @@ export function SettingsPanel({
           {`${formatCount(cellsPerAxis)} × ${formatCount(cellsPerAxis)}`}
         </p>
       </PanelSection>
+
+      {/* The angular division only exists on a circular board, so the control
+          follows the grid type rather than showing a dead slider. */}
+      {config.gridType === "circular" && (
+        <PanelSection title={MESSAGES.circularSectors}>
+          <SliderField
+            label={MESSAGES.circularSectors}
+            value={circularSectors(config)}
+            min={MIN_CIRCULAR_SECTORS}
+            max={MAX_CIRCULAR_SECTORS}
+            onPreview={(value) => previewConfig({ circularSectors: value })}
+            onCommit={(value) => patchConfig({ circularSectors: value })}
+          />
+          <p className="text-xs text-muted-foreground/80">
+            {`${MESSAGES.circularSectorsAngle} ${formatCount(
+              sectorAngleDegrees(circularSectors(config)),
+            )}°`}
+          </p>
+          <p className="text-xs text-muted-foreground/80">
+            {MESSAGES.circularSectorsHint}
+          </p>
+        </PanelSection>
+      )}
 
       <PanelSection title={MESSAGES.gridType}>
         <div className="flex gap-1.5">

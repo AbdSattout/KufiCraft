@@ -187,6 +187,30 @@ describe("circularSlice", () => {
     slice(EQUAL_CIRCULAR, 1, 0, 2, equalCell, equalCell + half, 0.5 * U, U);
     slice(EQUAL_CIRCULAR, 1, 0, 3, equalCell + half, 2 * equalCell, 0.5 * U, U);
   });
+
+  it("takes the angular unit from the board's own sector count", () => {
+    const twelve = makeConfig({ gridType: "circular", circularSectors: 12 });
+    const eight = makeConfig({ gridType: "circular", circularSectors: 8 });
+    const seventyTwo = makeConfig({ gridType: "circular", circularSectors: 72 });
+    const u12 = (2 * Math.PI) / 12;
+    const u8 = (2 * Math.PI) / 8;
+    const u72 = (2 * Math.PI) / 72;
+    const cell12 = cellSize(twelve);
+    const cell72 = cellSize(seventyTwo);
+    slice(twelve, 1, 3, 0, cell12, cell12 + inkUnit(twelve), 3 * u12, 3.75 * u12);
+    slice(twelve, 1, 11, 2, cell12, cell12 + inkUnit(twelve), 11.75 * u12, 12 * u12);
+    slice(eight, 0, 5, 0, 0, inkUnit(eight), 5 * u8, 5.75 * u8);
+    slice(
+      seventyTwo,
+      2,
+      71,
+      3,
+      2 * cell72 + inkUnit(seventyTwo),
+      3 * cell72,
+      71.75 * u72,
+      72 * u72,
+    );
+  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -207,34 +231,53 @@ describe("polar", () => {
 
 describe("shortestSectorDelta / sectorSpan", () => {
   it("measures the shortest signed run", () => {
-    expect(shortestSectorDelta(0, 0)).toBe(0);
-    expect(shortestSectorDelta(0, 1)).toBe(1);
-    expect(shortestSectorDelta(1, 0)).toBe(-1);
-    expect(shortestSectorDelta(10, 4)).toBe(-6);
+    expect(shortestSectorDelta(CANONICAL_CIRCULAR, 0, 0)).toBe(0);
+    expect(shortestSectorDelta(CANONICAL_CIRCULAR, 0, 1)).toBe(1);
+    expect(shortestSectorDelta(CANONICAL_CIRCULAR, 1, 0)).toBe(-1);
+    expect(shortestSectorDelta(CANONICAL_CIRCULAR, 10, 4)).toBe(-6);
     // 35 and 0 are adjacent *through the seam*, so the delta is ±1.
-    expect(shortestSectorDelta(0, 35)).toBe(-1);
-    expect(shortestSectorDelta(35, 0)).toBe(1);
+    expect(shortestSectorDelta(CANONICAL_CIRCULAR, 0, 35)).toBe(-1);
+    expect(shortestSectorDelta(CANONICAL_CIRCULAR, 35, 0)).toBe(1);
     // A negative index is normalised into the 36-sector ring.
-    expect(shortestSectorDelta(0, -1)).toBe(-1);
+    expect(shortestSectorDelta(CANONICAL_CIRCULAR, 0, -1)).toBe(-1);
   });
 
   it("wraps both ways through the seam", () => {
-    expect(shortestSectorDelta(34, 1)).toBe(3);
-    expect(shortestSectorDelta(1, 34)).toBe(-3);
+    expect(shortestSectorDelta(CANONICAL_CIRCULAR, 34, 1)).toBe(3);
+    expect(shortestSectorDelta(CANONICAL_CIRCULAR, 1, 34)).toBe(-3);
     // Exactly half the ring stays positive (the code uses a strict `>`).
-    expect(shortestSectorDelta(0, 18)).toBe(18);
-    expect(shortestSectorDelta(0, 19)).toBe(-17);
+    expect(shortestSectorDelta(CANONICAL_CIRCULAR, 0, 18)).toBe(18);
+    expect(shortestSectorDelta(CANONICAL_CIRCULAR, 0, 19)).toBe(-17);
+  });
+
+  it("wraps around the seam of a shorter ring", () => {
+    const twelve = makeConfig({ gridType: "circular", circularSectors: 12 });
+    expect(shortestSectorDelta(twelve, 0, 11)).toBe(-1);
+    expect(shortestSectorDelta(twelve, 11, 0)).toBe(1);
+    // Half of 12 is 6, and the tie stays positive.
+    expect(shortestSectorDelta(twelve, 0, 6)).toBe(6);
+    expect(shortestSectorDelta(twelve, 0, 7)).toBe(-5);
   });
 
   it("counts the sectors the run covers, signed", () => {
-    expect(sectorSpan(0, 0)).toBe(1);
-    expect(sectorSpan(0, 1)).toBe(2);
-    expect(sectorSpan(1, 0)).toBe(-2);
-    expect(sectorSpan(0, 35)).toBe(-2);
-    expect(sectorSpan(35, 0)).toBe(2);
-    expect(sectorSpan(10, 4)).toBe(-7);
-    expect(sectorSpan(0, 17)).toBe(18);
-    expect(sectorSpan(0, 19)).toBe(-18);
+    expect(sectorSpan(CANONICAL_CIRCULAR, 0, 0)).toBe(1);
+    expect(sectorSpan(CANONICAL_CIRCULAR, 0, 1)).toBe(2);
+    expect(sectorSpan(CANONICAL_CIRCULAR, 1, 0)).toBe(-2);
+    expect(sectorSpan(CANONICAL_CIRCULAR, 0, 35)).toBe(-2);
+    expect(sectorSpan(CANONICAL_CIRCULAR, 35, 0)).toBe(2);
+    expect(sectorSpan(CANONICAL_CIRCULAR, 10, 4)).toBe(-7);
+    expect(sectorSpan(CANONICAL_CIRCULAR, 0, 17)).toBe(18);
+    expect(sectorSpan(CANONICAL_CIRCULAR, 0, 19)).toBe(-18);
+  });
+
+  it("spans the board's own sector count", () => {
+    const twelve = makeConfig({ gridType: "circular", circularSectors: 12 });
+    // 0°→11 is one step backwards through the seam of a 12-sector ring.
+    expect(sectorSpan(twelve, 0, 11)).toBe(-2);
+    expect(sectorSpan(twelve, 11, 0)).toBe(2);
+    // On a 36-sector ring the same pair is a longer trip.
+    expect(sectorSpan(CANONICAL_CIRCULAR, 0, 11)).toBe(12);
+    expect(sectorSpan(CANONICAL_CIRCULAR, 11, 0)).toBe(-12);
   });
 });
 
@@ -268,6 +311,17 @@ describe("sectorPath / slicePath", () => {
     const slice = circularSlice(CANONICAL_CIRCULAR, 2, 5, 1);
     expect(slicePath(slice)).toBe(sectorPath(slice.cx, slice.cy, slice.r1, slice.r2, slice.a1, slice.a2));
     expect(slicePath(slice)).not.toBe("");
+  });
+
+  it("draws the slices of any board sector count", () => {
+    const eight = makeConfig({ gridType: "circular", circularSectors: 8 });
+    const last = circularSlice(eight, 1, 7, 0);
+    const u8 = (2 * Math.PI) / 8;
+    expect(last.a1).toBeCloseTo(7 * u8, 12);
+    expect(last.a2).toBeCloseTo(7.75 * u8, 12);
+    expect(slicePath(last)).toBe(
+      sectorPath(500, 500, last.r1, last.r2, last.a1, last.a2),
+    );
   });
 });
 

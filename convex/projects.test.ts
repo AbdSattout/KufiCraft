@@ -17,12 +17,14 @@ import {
   DEFAULT_PROJECT_CONFIG,
   DEFAULT_RATIO,
   MAX_BORDER_WIDTH,
+  MAX_CIRCULAR_SECTORS,
   MAX_COLOR_LENGTH,
   MAX_ITEMS,
   MAX_KEY_LENGTH,
   MAX_NAME_LENGTH,
   MAX_RATIO,
   MAX_THUMBNAIL_LENGTH,
+  MIN_CIRCULAR_SECTORS,
   MIN_RATIO,
   RATIO_PRESETS,
   arcKey,
@@ -306,6 +308,44 @@ describe("create", () => {
     expect(lowDoc.config.base).toBe(4);
     expect(highDoc.config.base).toBe(100);
     expect(validDoc.config).toEqual(config({ ratio: 2 / 3, base: 7, gridType: "circular" }));
+  });
+
+  it("clamps the sector count into [MIN_CIRCULAR_SECTORS, MAX_CIRCULAR_SECTORS]", async () => {
+    const t = newTest();
+    const asA = t.withIdentity(USER_A);
+    const low = await createProject(t, USER_A, "قليلة", {
+      gridType: "circular",
+      circularSectors: 1,
+    });
+    const high = await createProject(t, USER_A, "كثيرة", {
+      gridType: "circular",
+      circularSectors: 500,
+    });
+    const valid = await createProject(t, USER_A, "صالح", {
+      gridType: "circular",
+      circularSectors: 12,
+    });
+    const docs = await Promise.all(
+      [low, high, valid].map(async (projectId) =>
+        required(
+          await asA.query(api.projects.get, { projectId }),
+          "project should exist",
+        ),
+      ),
+    );
+    expect(docs[0].config.circularSectors).toBe(MIN_CIRCULAR_SECTORS);
+    expect(docs[1].config.circularSectors).toBe(MAX_CIRCULAR_SECTORS);
+    expect(docs[2].config.circularSectors).toBe(12);
+    // A count is a whole number of divisions, so a fraction rounds.
+    const rounded = await createProject(t, USER_A, "مقرّبة", {
+      gridType: "circular",
+      circularSectors: 12.4,
+    });
+    const roundedDoc = required(
+      await asA.query(api.projects.get, { projectId: rounded }),
+      "project should exist",
+    );
+    expect(roundedDoc.config.circularSectors).toBe(12);
   });
 
   it("truncates ink and background to MAX_COLOR_LENGTH characters", async () => {
@@ -659,9 +699,35 @@ describe("updateConfig", () => {
     expect(doc.config.straightLinesAsSquares).toBe(false);
   });
 
-  it("repairs a config written before the field existed", async () => {
+  it("patches the circular sector count and clamps the patch", async () => {
+    const t = newTest();
+    const asA = t.withIdentity(USER_A);
+    const projectId = await createProject(t, USER_A);
+
+    await asA.mutation(api.projects.updateConfig, {
+      projectId,
+      patch: { gridType: "circular", circularSectors: 12 },
+    });
+    const patched = required(
+      await asA.query(api.projects.get, { projectId }),
+      "project should exist",
+    );
+    expect(patched.config.circularSectors).toBe(12);
+
+    await asA.mutation(api.projects.updateConfig, {
+      projectId,
+      patch: { circularSectors: 500 },
+    });
+    const clamped = required(
+      await asA.query(api.projects.get, { projectId }),
+      "project should exist",
+    );
+    expect(clamped.config.circularSectors).toBe(MAX_CIRCULAR_SECTORS);
+  });
+
+  it("repairs a config written before the new fields existed", async () => {
     // A stored document from an older deployment: no `straightLinesAsSquares`
-    // and the legacy `mergeLines` flag still present.
+    // or `circularSectors`, and the legacy `mergeLines` flag still present.
     const t = newTest();
     const asA = t.withIdentity(USER_A);
     const projectId = await createProject(t, USER_A);
@@ -689,6 +755,7 @@ describe("updateConfig", () => {
     expect(doc.config.straightLinesAsSquares).toBe(
       DEFAULT_PROJECT_CONFIG.straightLinesAsSquares,
     );
+    expect(doc.config.circularSectors).toBe(DEFAULT_PROJECT_CONFIG.circularSectors);
     expect(doc.config).not.toHaveProperty("mergeLines");
 
     // …and the next write stores the repaired config.
@@ -701,6 +768,7 @@ describe("updateConfig", () => {
       return project?.config ?? null;
     });
     expect(stored?.straightLinesAsSquares).toBe(true);
+    expect(stored?.circularSectors).toBe(DEFAULT_PROJECT_CONFIG.circularSectors);
     expect(stored).not.toHaveProperty("mergeLines");
   });
 });
@@ -1350,13 +1418,32 @@ describe("item sanitisation", () => {
       "project should exist",
     );
     // On the circular grid the radial axis is capped by the base and the
-    // angular axis by CIRCULAR_SECTORS (36 sectors, indices 0…35).
+    // angular axis by the board's own sector count (the default 36, 0…35).
     expect(doc.items[0]).toMatchObject({
       column: 100,
       row: CIRCULAR_SECTORS - 1,
       zone: 1,
     });
     expect(doc.items[0]?.key).toBe(tileKey(100, CIRCULAR_SECTORS - 1, 1));
+  });
+
+  it("caps the applied sector index by the board's own sector count", async () => {
+    const t = newTest();
+    const asA = t.withIdentity(USER_A);
+    const projectId = await createProject(t, USER_A, "دائري قصير", {
+      gridType: "circular",
+      circularSectors: 8,
+    });
+    await asA.mutation(api.projects.applyOps, {
+      projectId,
+      ops: [{ type: "add", items: [tile(500, 99, 1)] }],
+    });
+    const doc = required(
+      await asA.query(api.projects.get, { projectId }),
+      "project should exist",
+    );
+    expect(doc.items[0]).toMatchObject({ column: 100, row: 7, zone: 1 });
+    expect(doc.items[0]?.key).toBe(tileKey(100, 7, 1));
   });
 
   it("drops a stroke with fewer than two points and a degenerate arc", async () => {

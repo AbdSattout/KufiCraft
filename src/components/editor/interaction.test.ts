@@ -67,6 +67,8 @@ const square: ProjectConfig = { ...DEFAULT_PROJECT_CONFIG };
 const circular: ProjectConfig = { ...square, gridType: "circular" };
 /** The equal `1:1` cell: half ink beside half space, the lightest preset. */
 const equal: ProjectConfig = { ...square, ratio: RATIO_PRESETS[0].ratio };
+/** A ring with 12 sectors of 30° instead of the default 36 of 10°. */
+const circular12: ProjectConfig = { ...circular, circularSectors: 12 };
 
 type TileExtra = Partial<Pick<TileItem, "shape" | "rotation" | "color">>;
 
@@ -135,8 +137,9 @@ describe("clampToCanvas + grid limits", () => {
   it("counts the cells of both grid types", () => {
     // 1000 / 10 = 100 cells, so indices run 0…99.
     expect(cellLimits(square)).toEqual({ maxColumn: 99, maxRow: 99 });
-    // Circular: radius 500 → bands 0…49, and 36 sectors 0…35.
+    // Circular: radius 500 → bands 0…49, and one row per sector of the board.
     expect(cellLimits(circular)).toEqual({ maxColumn: 49, maxRow: 35 });
+    expect(cellLimits(circular12)).toEqual({ maxColumn: 49, maxRow: 11 });
   });
 });
 
@@ -399,6 +402,10 @@ describe("selection operations", () => {
     const items2 = [tile(2, 35, 0)];
     const moved = moveItems(circular, items2, [tileKey(2, 35, 0)], 1, 2);
     expect(moved[0].key).toBe(tileKey(3, 1, 0));
+    // On a 12-sector ring the same relative move leaves 11 and lands on 1.
+    const shorter = [tile(2, 11, 0)];
+    const wrapped = moveItems(circular12, shorter, [tileKey(2, 11, 0)], 1, 2);
+    expect(wrapped[0].key).toBe(tileKey(3, 1, 0));
   });
 
   it("recolours to a concrete colour and never clears it back to undefined", () => {
@@ -675,6 +682,7 @@ describe("comparison helpers", () => {
   it("compares configs field by field", () => {
     expect(configsEqual(square, { ...square })).toBe(true);
     expect(configsEqual(square, { ...square, ratio: 0.5 })).toBe(false);
+    expect(configsEqual(circular, { ...circular, circularSectors: 12 })).toBe(false);
   });
 
   it("guards project ids from the URL", () => {
@@ -773,6 +781,11 @@ describe("anchorsAlongLine", () => {
 
   it("wraps the sectors the short way round on the circular grid", () => {
     expect(anchorsAlongLine(circular, at(0, 35), at(0, 1))).toEqual([
+      at(0, 0),
+      at(0, 1),
+    ]);
+    // 11 → 1 is two sectors forwards on a 12-sector ring (11, 0, 1).
+    expect(anchorsAlongLine(circular12, at(0, 11), at(0, 1))).toEqual([
       at(0, 0),
       at(0, 1),
     ]);

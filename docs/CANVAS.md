@@ -34,8 +34,15 @@
 * Circular grid: centre `(500, 500)`; band `column` covers radius
   `[column·cell, (column+1)·cell)` — the outermost band's ink ends on the
   design circle (`500`) —; sector `row` covers angle
-  `[row·10°, (row+1)·10°)` with `atan2(dy, dx)` normalised to `[0, 2π)`
-  (36 sectors, `CIRCULAR_SECTORS`).
+  `[row·unit, (row+1)·unit)` with `atan2(dy, dx)` normalised to `[0, 2π)`,
+  where `unit = 360° / config.circularSectors`. The **board's own** sector count
+  drives every angular computation (default `CIRCULAR_SECTORS` = 36 → 10°,
+  bounded by `MIN_CIRCULAR_SECTORS` … `MAX_CIRCULAR_SECTORS`) through the two
+  helpers `circularSectors(config)` and `circularAngularUnit(config)`: addressing
+  (`pointToCell` / `pointToAnchor` / `cellCentre`), the construction grid's
+  spokes, the slice paths and the shortest angular run (`shortestSectorDelta` /
+  `sectorSpan`). Changing the count re-interprets existing items exactly like
+  changing `base` does — the sector index keeps its meaning, not the artwork.
 
 ## 2. The ratio axis (ink : space)
 

@@ -45,9 +45,11 @@ import type {
 } from "@/lib/canvas/model";
 import {
   CENTER,
+  circularSlice,
   inkUnit,
   polar,
   rectPath,
+  slicePath,
   zoneRect,
 } from "@/lib/canvas/geometry";
 import type { Point } from "@/lib/canvas/geometry";
@@ -349,6 +351,32 @@ describe("render", () => {
     expectPointNear(end, geometry.end, 1e-4);
     // Clockwise springs off the bottom ink edge of the row.
     expect(start.y).toBeCloseTo(6 * cellSize(SQUARE) + inkUnit(SQUARE), 6);
+  });
+
+  it("fills a circular tile's slice at the board's own sector angle", () => {
+    const twelve = makeConfig({ gridType: "circular", circularSectors: 12 });
+    // The last sector of the ring, one 30° step short of the seam.
+    expect(itemRender(twelve, tile(2, 11, 0))).toEqual({
+      path: slicePath(circularSlice(twelve, 2, 11, 0)),
+      mode: "fill",
+      width: 0,
+    });
+  });
+
+  it("draws a circular stroke through the board's own sector angles", () => {
+    const twelve = makeConfig({ gridType: "circular", circularSectors: 12 });
+    const unit = (2 * Math.PI) / 12;
+    const radius = 2 * cellSize(twelve) + inkUnit(twelve);
+    // Anchored ends are drawn exactly where they were placed (no nudge), so the
+    // points sit at the board's own angles: 0° and 11 · 30° = 330°, where the
+    // default 36-sector ring would have put the second point at 110°.
+    const subject = stroke([
+      { column: 2, row: 0, anchor: { x: 1, y: 0 } },
+      { column: 2, row: 11, anchor: { x: 1, y: 0 } },
+    ]);
+    const { start, end } = endpoints(itemRender(twelve, subject).path);
+    expectPointNear(start, polar(CENTER, CENTER, radius, 0), 1e-6);
+    expectPointNear(end, polar(CENTER, CENTER, radius, 11 * unit), 1e-6);
   });
 });
 

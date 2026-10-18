@@ -99,6 +99,8 @@ that omits them renders **exactly** like a v2 file written before they existed.
      (`sanitizeConfig`: `ratio` snapped to the nearest `RATIO_PRESETS` value —
      so a v1 `0.5` stays the equal `1:1`, and a `ratio: 1` written back when
      `1:1` was still the space-less cell becomes `5/6` —, `base ∈ [4, 100]`,
+     `circularSectors` rounded into `[MIN_CIRCULAR_SECTORS,
+     MAX_CIRCULAR_SECTORS]` (default 36),
      `gridType ∈ {square, circular}`, unknown and legacy fields dropped — a file
      written before `straightLinesAsSquares` existed takes its default);
   4. `items` are structurally validated against the model (type discriminants

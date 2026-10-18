@@ -6,8 +6,10 @@ import {
   BORDER_TOP,
   CORNER_ALL,
   DEFAULT_PROJECT_CONFIG,
+  MAX_CIRCULAR_SECTORS,
   MAX_ITEMS,
   MAX_NAME_LENGTH,
+  MIN_CIRCULAR_SECTORS,
   RATIO_PRESETS,
   arcKey,
   lineKey,
@@ -88,6 +90,7 @@ function sampleConfig(): ProjectConfig {
     gridType: "circular",
     ratio: RATIO_PRESETS[3].ratio,
     base: 25,
+    circularSectors: 24,
     ink: "#0f172a",
     background: "transparent",
     showGrid: true,
@@ -226,11 +229,26 @@ describe("parseProjectFile — config and name", () => {
       gridType: "square",
       ratio: RATIO_PRESETS[3].ratio,
       base: 100,
+      circularSectors: DEFAULT_PROJECT_CONFIG.circularSectors,
       ink: "#abcdef",
       background: "transparent",
       showGrid: DEFAULT_PROJECT_CONFIG.showGrid,
       straightLinesAsSquares: false,
     });
+  });
+
+  it("rounds and clamps the circular sector count", () => {
+    const sectors = (value: unknown) =>
+      parseProjectFile(
+        rawFile({ config: { ...sampleConfig(), circularSectors: value } }),
+      ).config.circularSectors;
+    // An absent or unusable count falls back to the 36-sector default…
+    expect(sectors(undefined)).toBe(DEFAULT_PROJECT_CONFIG.circularSectors);
+    expect(sectors("12")).toBe(DEFAULT_PROJECT_CONFIG.circularSectors);
+    // …a fraction rounds to the nearest sector, and the range clamps.
+    expect(sectors(12.4)).toBe(12);
+    expect(sectors(3)).toBe(MIN_CIRCULAR_SECTORS);
+    expect(sectors(1000)).toBe(MAX_CIRCULAR_SECTORS);
   });
 
   it("drops the legacy mergeLines flag and fills the new one", () => {
@@ -564,6 +582,16 @@ describe("normalizeItem", () => {
         config,
       ),
     ).toBeNull();
+  });
+
+  it("bounds the sector index by the board's own sector count", () => {
+    const eight = { ...sampleConfig(), circularSectors: 8 };
+    const tileAt = (row: number) => ({ type: "tile", column: 0, row, zone: 0 });
+    expect(normalizeItem(tileAt(7), eight)).toMatchObject({ row: 7 });
+    // Sector 8 is one past the last sector of an 8-sector ring…
+    expect(normalizeItem(tileAt(8), eight)).toBeNull();
+    // …but inside the ring of the sample board (24 sectors).
+    expect(normalizeItem(tileAt(8), sampleConfig())).toMatchObject({ row: 8 });
   });
 });
 

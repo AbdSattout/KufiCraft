@@ -3,9 +3,16 @@ import { mutation, query, type MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { ConvexError } from "convex/values";
 import {
-  CIRCULAR_SECTORS,
   DEFAULT_PROJECT_CONFIG,
+  MAX_CIRCULAR_SECTORS,
+  MAX_COLOR_LENGTH,
+  MAX_ITEMS,
+  MAX_KEY_LENGTH,
+  MAX_NAME_LENGTH,
+  MAX_THUMBNAIL_LENGTH,
+  MIN_CIRCULAR_SECTORS,
   canvasItemValidator,
+  circularSectors,
   maxGridIndex,
   projectConfigValidator,
   sanitizeBorder,
@@ -17,11 +24,6 @@ import {
   normalizeAnchor,
   strokeKey,
   tileKey,
-  MAX_COLOR_LENGTH,
-  MAX_ITEMS,
-  MAX_KEY_LENGTH,
-  MAX_NAME_LENGTH,
-  MAX_THUMBNAIL_LENGTH,
 } from "./lib/model";
 import type {
   ArcDirection,
@@ -91,7 +93,7 @@ function requireKey(key: string): string {
 function sanitizeItem(item: CanvasItem, config: ProjectConfig): CanvasItem | null {
   const maxColumn = maxGridIndex(config.base);
   const maxRow =
-    config.gridType === "circular" ? CIRCULAR_SECTORS - 1 : maxColumn;
+    config.gridType === "circular" ? circularSectors(config) - 1 : maxColumn;
   const column = (value: number) => sanitizeIndex(value, maxColumn);
   const row = (value: number) => sanitizeIndex(value, maxRow);
   const cell = (value: Cell): Cell => ({
@@ -219,8 +221,13 @@ function sanitizeName(raw: string): string {
  * Stored config: the live fields, with the ones that may be missing on an
  * older document optional so the sanitiser can default them.
  */
-type StoredConfig = Omit<ProjectConfig, "straightLinesAsSquares"> & {
+type StoredConfig = Omit<
+  ProjectConfig,
+  "straightLinesAsSquares" | "circularSectors"
+> & {
   straightLinesAsSquares?: boolean;
+  /** Absent on documents written before the per-board sector count existed. */
+  circularSectors?: number;
   /** Legacy flag (≤ model v2): merged a straight pen stroke into a `line`. */
   mergeLines?: boolean;
 };
@@ -230,6 +237,15 @@ function sanitizeConfig(config: StoredConfig): ProjectConfig {
     gridType: config.gridType,
     ratio: snapRatio(config.ratio),
     base: clamp(config.base, 4, 100),
+    // A sector count is a whole number of divisions: a fraction rounds to the
+    // nearest sector, and anything outside the range clamps into it.
+    circularSectors: Math.round(
+      clamp(
+        config.circularSectors ?? DEFAULT_PROJECT_CONFIG.circularSectors,
+        MIN_CIRCULAR_SECTORS,
+        MAX_CIRCULAR_SECTORS,
+      ),
+    ),
     ink: config.ink.slice(0, MAX_COLOR_LENGTH),
     background: config.background.slice(0, MAX_COLOR_LENGTH),
     showGrid: config.showGrid,
@@ -267,6 +283,7 @@ const configPatchValidator = v.object({
   gridType: v.optional(v.union(v.literal("square"), v.literal("circular"))),
   ratio: v.optional(v.number()),
   base: v.optional(v.number()),
+  circularSectors: v.optional(v.number()),
   ink: v.optional(v.string()),
   background: v.optional(v.string()),
   showGrid: v.optional(v.boolean()),

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { MAX_COLOR_LENGTH, RATIO_PRESETS } from "@/lib/canvas/model";
+import {
+  DEFAULT_PROJECT_CONFIG,
+  MAX_COLOR_LENGTH,
+  RATIO_PRESETS,
+} from "@/lib/canvas/model";
 import {
   DEFAULT_EDITOR_PREFS,
   EDITOR_PREFS_KEY,
@@ -239,6 +243,8 @@ describe("editor preferences", () => {
       gridType: "circular",
       ratio: RATIO_PRESETS[3].ratio,
       base: 100,
+      // A stored blob written before the sector count existed defaults to 36.
+      circularSectors: DEFAULT_PROJECT_CONFIG.circularSectors,
       ink: "#abcdef",
       background: "transparent",
       showGrid: true,

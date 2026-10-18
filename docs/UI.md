@@ -189,11 +189,19 @@ selected they are absent, not disabled.
 Sidebar, top to bottom: الأشكال (palette + selection), لون الحبر, لون الورقة,
 then the board — نسبة الحبر as the five presets `1:1`…`1:5` (live re-render; the
 `1:1` hint explains that ink and space are equal there, and every preset shows
-the inner edges of its ink squares), حجم الخلية (`base`), نوع الشبكة (square/circular — switching warns that
-existing items may look different, and that lines and arcs are hidden on a
-circular board while staying in the drawing; the hint explains what each type
-is), خيارات اللوحة (إظهار الشبكة and الخط المستقيم مربّعات) — and مسح الكل at
-the end (confirm).
+the inner edges of its ink squares), حجم الخلية (`base`), قطاعات الدائرة
+(circular boards only: the angular division, its caption reading out the
+resulting sector angle — ٣٦ قطاعًا is ١٠°), نوع الشبكة (square/circular —
+switching warns that existing items may look different, and that lines and arcs
+are hidden on a circular board while staying in the drawing; the hint explains
+what each type is), خيارات اللوحة (إظهار الشبكة and الخط المستقيم مربّعات) — and
+مسح الكل at the end (confirm).
+
+قطاعات الدائرة is the document's own setting, not a preference: it is the
+circular board's angular division (default 36 sectors of 10°, the historical
+value). The control only appears while the grid is circular, and changing the
+count **re-interprets** what is already drawn — like حجم الخلية, a sector keeps
+its index, so the artwork rotates/stretches around the ring; the hint says so.
 
 إظهار الشبكة is a **view guide, not artwork**: the construction grid's two
 families (cell borders plus the stronger inner ink edges) are what you draw
@@ -243,10 +251,10 @@ line it draws between the **user** and the **board**:
   and a dense one (a `base` = 4 cell is ~3 px at 1×) is workable up close.
 * `kuficraft.last-config.v1` — the last committed project config, used as the
   default in the dashboard’s «لوحة جديدة» dialog and for new projects. The
-  artwork settings — ink ratio, cell size, grid type, ink and paper colour, the
-  straight-lines-as-squares flag — are remembered here rather than in the prefs,
-  because they belong to the project and stay the open project's while it is
-  open (`config` is authoritative for rendering).
+  artwork settings — ink ratio, cell size, grid type, circular sector count, ink
+  and paper colour, the straight-lines-as-squares flag — are remembered here
+  rather than in the prefs, because they belong to the project and stay the open
+  project's while it is open (`config` is authoritative for rendering).
 * The grid guide is the one **view** setting in the prefs: the editor draws the
   canvas from the preference even when a document carries its own
   `config.showGrid`. That document field is still written, exported and

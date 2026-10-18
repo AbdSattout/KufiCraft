@@ -21,11 +21,11 @@
  */
 
 import {
-  CIRCULAR_SECTORS,
   CORNER_ALL,
   DEFAULT_BORDER_WIDTH,
   VIEWBOX_SIZE,
   cellSize,
+  circularSectors,
   itemSignature as signatureOf,
   linePoint,
   maxGridIndex,
@@ -204,7 +204,7 @@ export function cellLimits(config: ProjectConfig): {
   if (config.gridType === "circular") {
     return {
       maxColumn: Math.max(0, Math.ceil(VIEWBOX_SIZE / 2 / base) - 1),
-      maxRow: CIRCULAR_SECTORS - 1,
+      maxRow: circularSectors(config) - 1,
     };
   }
   const count = Math.max(0, Math.ceil(VIEWBOX_SIZE / base) - 1);
@@ -247,8 +247,10 @@ function anchorKey(anchor: Anchor): string {
   return tileKey(anchor.column, anchor.row, anchor.zone);
 }
 
-function wrapSector(row: number): number {
-  return ((row % CIRCULAR_SECTORS) + CIRCULAR_SECTORS) % CIRCULAR_SECTORS;
+/** Sector indices wrap on the circular grid, so a move cannot escape the ring. */
+function wrapSector(config: ProjectConfig, row: number): number {
+  const sectors = circularSectors(config);
+  return ((row % sectors) + sectors) % sectors;
 }
 
 /* ------------------------------------------------------------------ */
@@ -373,27 +375,27 @@ export function clampDelta(
   return { dColumn: clampedColumn, dRow: clampedRow };
 }
 
-/** Sector indices wrap on the circular grid, so a move cannot escape [0, 36). */
-function wrapRows(item: CanvasItem): CanvasItem {
+/** Sector indices wrap on the circular grid, so a move cannot escape the ring. */
+function wrapRows(config: ProjectConfig, item: CanvasItem): CanvasItem {
   switch (item.type) {
     case "tile":
-      return makeTile({ ...item, row: wrapSector(item.row) });
+      return makeTile({ ...item, row: wrapSector(config, item.row) });
     case "line":
       return makeLine(
-        { column: item.from.column, row: wrapSector(item.from.row) },
-        { column: item.to.column, row: wrapSector(item.to.row) },
+        { column: item.from.column, row: wrapSector(config, item.from.row) },
+        { column: item.to.column, row: wrapSector(config, item.to.row) },
         item.color,
       );
     case "arc":
       return makeArc({
         ...item,
-        from: { column: item.from.column, row: wrapSector(item.from.row) },
-        to: { column: item.to.column, row: wrapSector(item.to.row) },
+        from: { column: item.from.column, row: wrapSector(config, item.from.row) },
+        to: { column: item.to.column, row: wrapSector(config, item.to.row) },
       });
     case "stroke":
       return makeStroke(
         item.points.map((point) =>
-          linePoint(point.column, wrapSector(point.row), point.anchor),
+          linePoint(point.column, wrapSector(config, point.row), point.anchor),
         ),
         item.closed ?? false,
         item.color,
@@ -408,7 +410,7 @@ function shiftedItem(
   dRow: number,
 ): CanvasItem {
   const moved = moveItem(item, dColumn, dRow);
-  return config.gridType === "circular" ? wrapRows(moved) : moved;
+  return config.gridType === "circular" ? wrapRows(config, moved) : moved;
 }
 
 /**
@@ -644,10 +646,10 @@ function integerCell(anchor: Anchor): Cell | null {
  * would read as dotted at any `ratio < 1`.
  *
  * Identical cells yield nothing. On the circular grid the walk takes the
- * shortest way round the sectors and folds every row back into
- * `[0, CIRCULAR_SECTORS)`. The walk is capped at the grid's own cell count, so
- * degenerate input (non-finite coordinates, or cells far outside the board)
- * terminates without NaN instead of running away.
+ * shortest way round the sectors and folds every row back into the ring. The
+ * walk is capped at the grid's own cell count, so degenerate input
+ * (non-finite coordinates, or cells far outside the board) terminates without
+ * NaN instead of running away.
  */
 export function anchorsAlongLine(
   config: ProjectConfig,
@@ -660,7 +662,7 @@ export function anchorsAlongLine(
   const deltaColumn = end.column - start.column;
   const deltaRow =
     config.gridType === "circular"
-      ? shortestSectorDelta(start.row, end.row)
+      ? shortestSectorDelta(config, start.row, end.row)
       : end.row - start.row;
   if (deltaColumn === 0 && deltaRow === 0) return [];
 
@@ -720,7 +722,7 @@ export function anchorsAlongLine(
   for (const cell of cells) {
     const anchor: Anchor = {
       column: cell.column,
-      row: config.gridType === "circular" ? wrapSector(cell.row) : cell.row,
+      row: config.gridType === "circular" ? wrapSector(config, cell.row) : cell.row,
       zone: to.zone,
     };
     // Identity is the anchor's key: a fragment is never listed twice, and the
@@ -1023,6 +1025,7 @@ export function configsEqual(a: ProjectConfig, b: ProjectConfig): boolean {
     a.gridType === b.gridType &&
     a.ratio === b.ratio &&
     a.base === b.base &&
+    a.circularSectors === b.circularSectors &&
     a.ink === b.ink &&
     a.background === b.background &&
     a.showGrid === b.showGrid &&

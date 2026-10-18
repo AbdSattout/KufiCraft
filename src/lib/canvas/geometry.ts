@@ -14,10 +14,10 @@
  */
 
 import {
-  CIRCULAR_ANGULAR_UNIT,
-  CIRCULAR_SECTORS,
   VIEWBOX_SIZE,
   cellSize,
+  circularAngularUnit,
+  circularSectors,
 } from "./model";
 import type { ProjectConfig, Zone } from "./model";
 
@@ -288,7 +288,7 @@ export function circularSlice(
 ): CircularSlice {
   const base = cellSize(config);
   const ink = inkUnit(config);
-  const unit = CIRCULAR_ANGULAR_UNIT;
+  const unit = circularAngularUnit(config);
   const r1 = band * base + (zone & 1 ? ink : 0);
   const a1 = sector * unit + (zone & 2 ? config.ratio * unit : 0);
   return {
@@ -366,16 +366,20 @@ export function sliceCentre(slice: CircularSlice): Point {
 /* ------------------------------------------------------------------ */
 
 /** Signed number of sectors from `j1` to `j2` along the shortest path. */
-export function shortestSectorDelta(j1: number, j2: number): number {
-  let delta =
-    (((j2 - j1) % CIRCULAR_SECTORS) + CIRCULAR_SECTORS) % CIRCULAR_SECTORS;
-  if (delta > CIRCULAR_SECTORS / 2) delta -= CIRCULAR_SECTORS;
+export function shortestSectorDelta(
+  config: ProjectConfig,
+  j1: number,
+  j2: number,
+): number {
+  const sectors = circularSectors(config);
+  let delta = (((j2 - j1) % sectors) + sectors) % sectors;
+  if (delta > sectors / 2) delta -= sectors;
   return delta;
 }
 
 /** Number of sectors covered by the run `j1 → j2` along the shortest path. */
-export function sectorSpan(j1: number, j2: number): number {
-  const delta = shortestSectorDelta(j1, j2);
+export function sectorSpan(config: ProjectConfig, j1: number, j2: number): number {
+  const delta = shortestSectorDelta(config, j1, j2);
   return delta >= 0 ? delta + 1 : delta - 1;
 }
 

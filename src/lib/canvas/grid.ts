@@ -5,7 +5,8 @@
  * (snap and position), straight runs. Square grid: cell `(column, row)` covers
  * `x ∈ [column·base, (column+1)·base)` and the same on `y`; circular grid:
  * band `column` covers radius `[column·base, (column+1)·base)`, sector `row`
- * covers `[row·10°, (row+1)·10°)` with `atan2(dy, dx)` normalised to `[0, 2π)`.
+ * covers `[row·unit, (row+1)·unit)` with `unit = 2π / config.circularSectors`
+ * and `atan2(dy, dx)` normalised to `[0, 2π)`.
  *
  * The construction grid draws **two** families of lines, exactly like the old
  * app's CSS grid (`style.css:51‑72`): the cell borders, and the inner lines
@@ -18,10 +19,10 @@
  */
 
 import {
-  CIRCULAR_ANGULAR_UNIT,
-  CIRCULAR_SECTORS,
   VIEWBOX_SIZE,
   cellSize,
+  circularAngularUnit,
+  circularSectors,
   linePoint,
 } from "./model";
 import type { Anchor, Cell, LinePoint, ProjectConfig, Zone } from "./model";
@@ -64,8 +65,8 @@ export function pointToCell(config: ProjectConfig, point: Point): Cell {
     const radius = Math.hypot(dx, dy);
     const column = Math.floor(radius / base);
     const row = Math.min(
-      Math.floor(normalizeAngle(Math.atan2(dy, dx)) / CIRCULAR_ANGULAR_UNIT),
-      CIRCULAR_SECTORS - 1,
+      Math.floor(normalizeAngle(Math.atan2(dy, dx)) / circularAngularUnit(config)),
+      circularSectors(config) - 1,
     );
     return { column, row };
   }
@@ -89,8 +90,8 @@ export function pointToAnchor(config: ProjectConfig, point: Point): Anchor {
     const radius = Math.hypot(dx, dy) / base;
     const column = Math.floor(radius);
     const radial = radius - column;
-    const angle = normalizeAngle(Math.atan2(dy, dx)) / CIRCULAR_ANGULAR_UNIT;
-    const row = Math.min(Math.floor(angle), CIRCULAR_SECTORS - 1);
+    const angle = normalizeAngle(Math.atan2(dy, dx)) / circularAngularUnit(config);
+    const row = Math.min(Math.floor(angle), circularSectors(config) - 1);
     const angular = angle - row;
     const zone = ((radial >= ratio ? 1 : 0) | (angular >= ratio ? 2 : 0)) as Zone;
     return { column, row, zone };
@@ -118,7 +119,7 @@ export function cellCentre(config: ProjectConfig, cell: Cell): Point {
   const ink = inkUnit(config);
   if (config.gridType === "circular") {
     const radius = cell.column * base + ink / 2;
-    const angle = (cell.row + 0.5) * CIRCULAR_ANGULAR_UNIT;
+    const angle = (cell.row + 0.5) * circularAngularUnit(config);
     return polar(CENTER, CENTER, radius, angle);
   }
   return {
@@ -155,7 +156,7 @@ export function linePointPosition(config: ProjectConfig, point: LinePoint): Poin
   const ink = inkUnit(config);
   if (config.gridType === "circular") {
     const radius = point.column * base + anchor.x * ink;
-    const angle = (point.row + anchor.y) * CIRCULAR_ANGULAR_UNIT;
+    const angle = (point.row + anchor.y) * circularAngularUnit(config);
     return polar(CENTER, CENTER, radius, angle);
   }
   return {
@@ -181,13 +182,11 @@ export function pointToLinePoint(config: ProjectConfig, point: Point): LinePoint
     const radius = Math.hypot(dx, dy);
     const column = Math.floor(radius / base);
     const angle = normalizeAngle(Math.atan2(dy, dx));
-    const row = Math.min(
-      Math.floor(angle / CIRCULAR_ANGULAR_UNIT),
-      CIRCULAR_SECTORS - 1,
-    );
+    const unit = circularAngularUnit(config);
+    const row = Math.min(Math.floor(angle / unit), circularSectors(config) - 1);
     return linePoint(column, row, {
       x: anchorFraction(radius - column * base, ink),
-      y: anchorFraction(angle - row * CIRCULAR_ANGULAR_UNIT, CIRCULAR_ANGULAR_UNIT),
+      y: anchorFraction(angle - row * unit, unit),
     });
   }
   const column = Math.floor(point.x / base);
@@ -309,6 +308,8 @@ function spokePath(angle: number): string {
 function radialGrid(config: ProjectConfig): GridPaths {
   const base = cellSize(config);
   const ink = inkUnit(config);
+  const unit = circularAngularUnit(config);
+  const sectors = circularSectors(config);
   const borders: string[] = [];
   const inner: string[] = [];
   const maxRadius = VIEWBOX_SIZE / 2;
@@ -318,8 +319,8 @@ function radialGrid(config: ProjectConfig): GridPaths {
   for (let index = 1; index * base <= maxRadius + 1e-6; index++) {
     borders.push(circlePath(index * base));
   }
-  for (let sector = 0; sector < CIRCULAR_SECTORS; sector++) {
-    const angle = sector * CIRCULAR_ANGULAR_UNIT;
+  for (let sector = 0; sector < sectors; sector++) {
+    const angle = sector * unit;
     borders.push(spokePath(angle));
   }
   // Both families are drawn unconditionally: every preset has real space, so
@@ -329,9 +330,9 @@ function radialGrid(config: ProjectConfig): GridPaths {
   for (let index = 0; index * base + ink <= maxRadius + 1e-6; index++) {
     inner.push(circlePath(index * base + ink));
   }
-  for (let sector = 0; sector < CIRCULAR_SECTORS; sector++) {
-    const angle = sector * CIRCULAR_ANGULAR_UNIT;
-    inner.push(spokePath(angle + config.ratio * CIRCULAR_ANGULAR_UNIT));
+  for (let sector = 0; sector < sectors; sector++) {
+    const angle = sector * unit;
+    inner.push(spokePath(angle + config.ratio * unit));
   }
   return { cellBorders: borders.join(" "), inkLines: inner.join(" ") };
 }
