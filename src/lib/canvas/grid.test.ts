@@ -12,11 +12,15 @@ import { describe, expect, it } from "vitest";
 import {
   CIRCULAR_ANGULAR_UNIT,
   DEFAULT_PROJECT_CONFIG,
+  VIEWBOX_SIZE,
+  cellSize,
+  gridCount,
 } from "@/lib/canvas/model";
 import type { Anchor, Cell, ProjectConfig, Zone } from "@/lib/canvas/model";
 import {
   CENTER,
   circularSlice,
+  inkUnit,
   polar,
   rectPath,
   slicePath,
@@ -52,17 +56,23 @@ function at(radius: number, sectors: number): { x: number; y: number } {
   return polar(CENTER, CENTER, radius, sectors * CIRCULAR_ANGULAR_UNIT);
 }
 
+/** The `fmt` in geometry.ts rounds to 1e-6; mirror it for path assertions. */
+function f(value: number): string {
+  return String(Math.round(value * 1e6) / 1e6);
+}
+
 /* ------------------------------------------------------------------ */
 /* pointToCell                                                         */
 /* ------------------------------------------------------------------ */
 
 describe("pointToCell", () => {
   it("floors each axis on the square grid", () => {
-    expect(pointToCell(SQUARE, { x: 15, y: 25 })).toEqual({ column: 1, row: 2 });
+    const cell = cellSize(SQUARE);
+    expect(pointToCell(SQUARE, { x: 1.5 * cell, y: 2.5 * cell })).toEqual({ column: 1, row: 2 });
     expect(pointToCell(SQUARE, { x: 0, y: 0 })).toEqual({ column: 0, row: 0 });
-    // The right / bottom edge belongs to the next cell.
-    expect(pointToCell(SQUARE, { x: 10, y: 10 })).toEqual({ column: 1, row: 1 });
-    expect(pointToCell(SQUARE, { x: 9.999, y: 9.999 })).toEqual({ column: 0, row: 0 });
+    // The right / bottom edge of a cell belongs to the next cell.
+    expect(pointToCell(SQUARE, { x: cell, y: cell })).toEqual({ column: 1, row: 1 });
+    expect(pointToCell(SQUARE, { x: cell - 1e-6, y: cell - 1e-6 })).toEqual({ column: 0, row: 0 });
   });
 
   it("keeps negative coordinates on the same floor rule", () => {
@@ -97,14 +107,15 @@ describe("pointToCell", () => {
 
 describe("pointToAnchor", () => {
   it("reads the ink / space split of each axis (>= ratio is space)", () => {
-    expect(pointToAnchor(SQUARE, { x: 7.49, y: 7.49 })).toEqual({
+    const ink = inkUnit(SQUARE);
+    expect(pointToAnchor(SQUARE, { x: ink - 0.01, y: ink - 0.01 })).toEqual({
       column: 0,
       row: 0,
       zone: 0,
     });
-    expect(pointToAnchor(SQUARE, { x: 7.5, y: 0 })).toEqual({ column: 0, row: 0, zone: 1 });
-    expect(pointToAnchor(SQUARE, { x: 0, y: 7.5 })).toEqual({ column: 0, row: 0, zone: 2 });
-    expect(pointToAnchor(SQUARE, { x: 7.5, y: 7.5 })).toEqual({ column: 0, row: 0, zone: 3 });
+    expect(pointToAnchor(SQUARE, { x: ink, y: 0 })).toEqual({ column: 0, row: 0, zone: 1 });
+    expect(pointToAnchor(SQUARE, { x: 0, y: ink })).toEqual({ column: 0, row: 0, zone: 2 });
+    expect(pointToAnchor(SQUARE, { x: ink, y: ink })).toEqual({ column: 0, row: 0, zone: 3 });
   });
 
   it("tags all four zones with their cell", () => {
@@ -162,9 +173,15 @@ describe("anchorToCell", () => {
 });
 
 describe("cellCentre", () => {
+  const cell = cellSize(SQUARE);
+  const ink = inkUnit(SQUARE);
+
   it("sits at the centre of the ink square", () => {
-    expect(cellCentre(SQUARE, { column: 0, row: 0 })).toEqual({ x: 3.75, y: 3.75 });
-    expect(cellCentre(SQUARE, { column: 2, row: 3 })).toEqual({ x: 23.75, y: 33.75 });
+    expect(cellCentre(SQUARE, { column: 0, row: 0 })).toEqual({ x: ink / 2, y: ink / 2 });
+    expect(cellCentre(SQUARE, { column: 2, row: 3 })).toEqual({
+      x: 2 * cell + ink / 2,
+      y: 3 * cell + ink / 2,
+    });
   });
 
   it("is the plain cell centre at ratio 1", () => {
@@ -174,12 +191,14 @@ describe("cellCentre", () => {
 
   it("uses the band mid-radius and the sector mid-angle on the polar grid", () => {
     const config = makeConfig({ gridType: "circular", base: 20 });
+    const band = cellSize(config);
+    const bandInk = inkUnit(config);
     const centre = cellCentre(config, { column: 3, row: 6 });
-    const expected = polar(CENTER, CENTER, 3 * 20 + 7.5, 6.5 * CIRCULAR_ANGULAR_UNIT);
+    const radius = 3 * band + bandInk / 2;
+    const expected = polar(CENTER, CENTER, radius, 6.5 * CIRCULAR_ANGULAR_UNIT);
     expect(centre.x).toBeCloseTo(expected.x, 9);
     expect(centre.y).toBeCloseTo(expected.y, 9);
-    // Mid-ink radius: 3·20 + 15/2 = 67.5.
-    expect(Math.hypot(centre.x - CENTER, centre.y - CENTER)).toBeCloseTo(67.5, 6);
+    expect(Math.hypot(centre.x - CENTER, centre.y - CENTER)).toBeCloseTo(radius, 6);
   });
 });
 
@@ -269,7 +288,11 @@ describe("anchorPath", () => {
   it("draws the zone rect of a square anchor", () => {
     const ink: Anchor = { column: 1, row: 2, zone: 0 };
     expect(anchorPath(SQUARE, ink)).toBe(rectPath(zoneRect(SQUARE, 1, 2, 0)));
-    expect(anchorPath(SQUARE, ink)).toBe("M 10 20 L 17.5 20 L 17.5 27.5 L 10 27.5 Z");
+    // base 10 → 100 drawn cells, so the cell is 1000/99.75 = 10.025063 and
+    // the ink square 7.518797.
+    expect(anchorPath(SQUARE, ink)).toBe(
+      "M 10.025063 20.050125 L 17.54386 20.050125 L 17.54386 27.568922 L 10.025063 27.568922 Z",
+    );
     const corner: Anchor = { column: 1, row: 2, zone: 3 };
     expect(anchorPath(SQUARE, corner)).toBe(rectPath(zoneRect(SQUARE, 1, 2, 3)));
     expect(anchorPath(SQUARE, corner)).not.toBe(anchorPath(SQUARE, ink));
@@ -291,59 +314,126 @@ describe("anchorPath", () => {
 /* gridPaths                                                           */
 /* ------------------------------------------------------------------ */
 
+/** The axis positions of a square-family path string (every line offset). */
+function offsets(path: string): number[] {
+  const out: number[] = [];
+  for (const match of path.matchAll(/M ([\d.]+) 0 L [\d.]+ 1000/g)) {
+    out.push(Number(match[1]));
+  }
+  for (const match of path.matchAll(/M 0 ([\d.]+) L 1000 [\d.]+/g)) {
+    out.push(Number(match[1]));
+  }
+  return out;
+}
+
 describe("gridPaths (square)", () => {
+  const cell = cellSize(SQUARE);
+  const ink = inkUnit(SQUARE);
+  const count = gridCount(SQUARE);
   const { cellBorders, inkLines } = gridPaths(SQUARE);
 
-  it("draws a vertical and a horizontal border per cell edge", () => {
-    // 101 edges on each axis, each as two lines.
-    expect((cellBorders.match(/M /g) ?? []).length).toBe(101 * 2);
+  it("draws a vertical and a horizontal border per cell start", () => {
+    // `count` starts: the last cell's space is cropped, so nothing is clamped
+    // onto the viewBox edge any more.
+    expect(cellBorders.match(/M /g) ?? []).toHaveLength(count * 2);
     expect(cellBorders.startsWith(
-      "M 0 0 L 0 1000 M 0 0 L 1000 0 M 10 0 L 10 1000 M 0 10 L 1000 10",
+      `M 0 0 L 0 1000 M 0 0 L 1000 0 M ${cell} 0 L ${cell} 1000 M 0 ${cell} L 1000 ${cell}`,
     )).toBe(true);
     expect(cellBorders.endsWith(
-      "M 1000 0 L 1000 1000 M 0 1000 L 1000 1000",
+      `M ${(count - 1) * cell} 0 L ${(count - 1) * cell} 1000 M 0 ${(count - 1) * cell} L 1000 ${(count - 1) * cell}`,
     )).toBe(true);
+    const lines = offsets(cellBorders);
+    expect(lines).toHaveLength(count * 2);
+    expect(Math.max(...lines)).toBeCloseTo((count - 1) * cell, 6);
   });
 
-  it("draws the inner family at index · base + ratio · base on both axes", () => {
-    expect((inkLines.match(/M /g) ?? []).length).toBe(100 * 2);
-    expect(inkLines.startsWith("M 7.5 0 L 7.5 1000 M 0 7.5 L 1000 7.5")).toBe(true);
-    // The 2nd and 100th inner lines land on 17.5 and 997.5.
-    expect(inkLines).toContain("M 17.5 0 L 17.5 1000");
-    expect(inkLines).toContain("M 997.5 0 L 997.5 1000");
+  it("closes every ink square, the last on the viewBox edge", () => {
+    expect(inkLines.match(/M /g) ?? []).toHaveLength(count * 2);
+    expect(inkLines.startsWith(
+      `M ${ink} 0 L ${ink} 1000 M 0 ${ink} L 1000 ${ink}`,
+    )).toBe(true);
+    // The last inner line is the canvas edge: the canvas ends with ink.
+    const edges = offsets(inkLines);
+    expect(edges).toHaveLength(count * 2);
+    expect(Math.max(...edges)).toBeCloseTo(VIEWBOX_SIZE, 6);
   });
 
   it("drops the inner family — and only that — at ratio 1", () => {
     const mono = gridPaths(MONO);
     expect(mono.inkLines).toBe("");
-    expect(mono.cellBorders).toBe(cellBorders);
+    // The space-less cell is complete, so its far edge is a border like any
+    // other — the only case where one lands on the viewBox edge.
+    const lines = offsets(mono.cellBorders);
+    expect(lines).toHaveLength((gridCount(MONO) + 1) * 2);
+    expect(Math.max(...lines)).toBeCloseTo(VIEWBOX_SIZE, 6);
   });
 });
 
 describe("gridPaths (circular)", () => {
+  const cell = cellSize(CIRCULAR);
+  const ink = inkUnit(CIRCULAR);
   const { cellBorders, inkLines } = gridPaths(CIRCULAR);
 
   it("draws a ring per band edge plus 36 spokes", () => {
-    // Ring radii 10…490 (49 rings, two arcs each) and 36 spokes.
-    expect((cellBorders.match(/ A /g) ?? []).length).toBe(49 * 2);
-    expect((cellBorders.match(/L /g) ?? []).length).toBe(36);
-    expect(cellBorders).toContain("A 10 10 0 0 1");
-    expect(cellBorders).toContain("A 490 490 0 0 1");
-    expect(cellBorders.startsWith("M 510 500 A 10 10 0 0 1 490 500 A 10 10 0 0 1 510 500")).toBe(true);
+    // Ring radii 1…49 drawn bands (two arcs each) and 36 spokes.
+    expect(cellBorders.match(/ A /g) ?? []).toHaveLength(49 * 2);
+    expect(cellBorders.match(/L /g) ?? []).toHaveLength(36);
+    expect(cellBorders).toContain(`A ${f(cell)} ${f(cell)} 0 0 1`);
+    expect(cellBorders).toContain(`A ${f(49 * cell)} ${f(49 * cell)} 0 0 1`);
+    expect(cellBorders.startsWith(
+      `M ${f(CENTER + cell)} 500 A ${f(cell)} ${f(cell)} 0 0 1 ${f(CENTER - cell)} 500 A ${f(cell)} ${f(cell)} 0 0 1 ${f(CENTER + cell)} 500`,
+    )).toBe(true);
   });
 
   it("adds the inner rings and spokes only when there is space", () => {
-    // Inner rings at 7.5, 17.5, … (50 of them) and 36 inner spokes.
-    expect((inkLines.match(/ A /g) ?? []).length).toBe(50 * 2);
-    expect((inkLines.match(/L /g) ?? []).length).toBe(36);
-    expect(inkLines).toContain("A 7.5 7.5 0 0 1");
-    expect(inkLines).toContain("A 497.5 497.5 0 0 1");
+    // Inner rings at 0.75·cell, 1.75·cell, … (50 of them) and 36 inner spokes.
+    expect(inkLines.match(/ A /g) ?? []).toHaveLength(50 * 2);
+    expect(inkLines.match(/L /g) ?? []).toHaveLength(36);
+    expect(inkLines).toContain(`A ${f(ink)} ${f(ink)} 0 0 1`);
+    // The last ring closes the design on radius 500 exactly.
+    expect(inkLines).toContain("A 500 500 0 0 1");
   });
 
   it("drops the inner family — and only that — at ratio 1", () => {
     const mono = gridPaths(CIRCULAR_MONO);
     expect(mono.inkLines).toBe("");
-    expect(mono.cellBorders).toBe(cellBorders);
+    // 50 complete bands of 10: the far edge at radius 500 is a border too.
+    expect(mono.cellBorders.match(/ A /g) ?? []).toHaveLength(50 * 2);
+    expect(mono.cellBorders).toContain("A 500 500 0 0 1");
+  });
+});
+
+describe("gridPaths (circular)", () => {
+  const cell = cellSize(CIRCULAR);
+  const ink = inkUnit(CIRCULAR);
+  const { cellBorders, inkLines } = gridPaths(CIRCULAR);
+
+  it("draws a ring per band edge plus 36 spokes", () => {
+    // Ring radii 1…49 drawn bands (two arcs each) and 36 spokes.
+    expect(cellBorders.match(/ A /g) ?? []).toHaveLength(49 * 2);
+    expect(cellBorders.match(/L /g) ?? []).toHaveLength(36);
+    expect(cellBorders).toContain(`A ${f(cell)} ${f(cell)} 0 0 1`);
+    expect(cellBorders).toContain(`A ${f(49 * cell)} ${f(49 * cell)} 0 0 1`);
+    expect(cellBorders.startsWith(
+      `M ${f(CENTER + cell)} 500 A ${f(cell)} ${f(cell)} 0 0 1 ${f(CENTER - cell)} 500 A ${f(cell)} ${f(cell)} 0 0 1 ${f(CENTER + cell)} 500`,
+    )).toBe(true);
+  });
+
+  it("adds the inner rings and spokes only when there is space", () => {
+    // Inner rings at 0.75·cell, 1.75·cell, … (50 of them) and 36 inner spokes.
+    expect(inkLines.match(/ A /g) ?? []).toHaveLength(50 * 2);
+    expect(inkLines.match(/L /g) ?? []).toHaveLength(36);
+    expect(inkLines).toContain(`A ${f(ink)} ${f(ink)} 0 0 1`);
+    // The last ring closes the design on radius 500 exactly.
+    expect(inkLines).toContain("A 500 500 0 0 1");
+  });
+
+  it("drops the inner family — and only that — at ratio 1", () => {
+    const mono = gridPaths(CIRCULAR_MONO);
+    expect(mono.inkLines).toBe("");
+    // 50 complete bands of 10: the far edge at radius 500 is a border too.
+    expect(mono.cellBorders.match(/ A /g) ?? []).toHaveLength(50 * 2);
+    expect(mono.cellBorders).toContain("A 500 500 0 0 1");
   });
 });
 
@@ -360,6 +450,82 @@ describe("addressing round trip", () => {
     ];
     for (const cell of cells) {
       expect(pointToCell(SQUARE, cellCentre(SQUARE, cell))).toEqual(cell);
+    }
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* the drawn grid fills its extent                                     */
+/* ------------------------------------------------------------------ */
+
+describe("the drawn grid fills the board", () => {
+  it("tiles the viewBox with `gridCount` cells for every stored base", () => {
+    for (let base = 4; base <= 100; base++) {
+      const config = makeConfig({ base });
+      const count = gridCount(config);
+      expect(count).toBe(Math.round(VIEWBOX_SIZE / base));
+      // `count − 1` complete cells plus the last cell's ink cover the whole
+      // viewBox, and the space-less cell is exact.
+      expect(cellSize(config) * (count - 1 + config.ratio)).toBeCloseTo(
+        VIEWBOX_SIZE,
+        9,
+      );
+      expect((count - 1) * cellSize(config)).toBeLessThan(VIEWBOX_SIZE);
+      if (config.ratio === 1) expect(cellSize(config) * count).toBeCloseTo(VIEWBOX_SIZE, 9);
+    }
+  });
+
+  it("keeps the base-1:1 cell on bases that divide 1000", () => {
+    for (const base of [4, 5, 8, 10, 20, 25, 40, 50, 100]) {
+      expect(cellSize(makeConfig({ base, ratio: 1 }))).toBe(base);
+    }
+  });
+
+  it("round-trips the first, a middle and the last cell of a cropped base", () => {
+    const config = makeConfig({ base: 75 });
+    const count = gridCount(config);
+    expect(count).toBe(13);
+    const last = count - 1;
+    for (const index of [0, Math.floor(count / 2), last]) {
+      const cell: Cell = { column: index, row: index };
+      expect(pointToCell(config, cellCentre(config, cell))).toEqual(cell);
+    }
+    // A click on the last pixel of the board is the last cell, in its ink.
+    expect(pointToAnchor(config, { x: VIEWBOX_SIZE - 1e-6, y: VIEWBOX_SIZE - 1e-6 })).toEqual({
+      column: last,
+      row: last,
+      zone: 0,
+    });
+  });
+
+  it("ends the construction walk on the viewBox edge — no sliver", () => {
+    // The reported bug: base 75 drew 14 clamped borders and stopped the inner
+    // family at 956.25, leaving a 25-unit space strip at the edge.
+    const config = makeConfig({ base: 75 });
+    const cell = cellSize(config);
+    const { cellBorders, inkLines } = gridPaths(config);
+    // No clamped sliver: the last border is the start of the last cell …
+    const borders = offsets(cellBorders);
+    expect(borders).toHaveLength(13 * 2);
+    expect(Math.max(...borders)).toBeCloseTo(12 * cell, 6);
+    expect(Math.max(...borders)).toBeLessThan(VIEWBOX_SIZE);
+    // … and the ink family ends on the viewBox edge.
+    const edges = offsets(inkLines);
+    expect(edges).toHaveLength(13 * 2);
+    expect(Math.max(...edges)).toBeCloseTo(VIEWBOX_SIZE, 6);
+  });
+
+  it("keeps a degenerate config finite", () => {
+    for (const base of [0, -5, NaN, Infinity, -Infinity]) {
+      const config = makeConfig({ base });
+      expect(Number.isFinite(cellSize(config))).toBe(true);
+      expect(cellSize(config)).toBeGreaterThan(0);
+      expect(gridCount(config)).toBeGreaterThanOrEqual(1);
+    }
+    for (const ratio of [0, -1, NaN, Infinity]) {
+      const config = makeConfig({ ratio });
+      expect(Number.isFinite(cellSize(config))).toBe(true);
+      expect(cellSize(config)).toBeGreaterThan(0);
     }
   });
 });

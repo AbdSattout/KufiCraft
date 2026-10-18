@@ -17,7 +17,12 @@
  * not clamped: callers clip the pointer to the canvas first.
  */
 
-import { CIRCULAR_ANGULAR_UNIT, CIRCULAR_SECTORS, VIEWBOX_SIZE } from "./model";
+import {
+  CIRCULAR_ANGULAR_UNIT,
+  CIRCULAR_SECTORS,
+  VIEWBOX_SIZE,
+  cellSize,
+} from "./model";
 import type { Anchor, Cell, ProjectConfig, Zone } from "./model";
 import {
   A,
@@ -51,11 +56,12 @@ function normalizeAngle(angle: number): number {
 
 /** Cell / slice indices containing `point`. */
 export function pointToCell(config: ProjectConfig, point: Point): Cell {
+  const base = cellSize(config);
   if (config.gridType === "circular") {
     const dx = point.x - CENTER;
     const dy = point.y - CENTER;
     const radius = Math.hypot(dx, dy);
-    const column = Math.floor(radius / config.base);
+    const column = Math.floor(radius / base);
     const row = Math.min(
       Math.floor(normalizeAngle(Math.atan2(dy, dx)) / CIRCULAR_ANGULAR_UNIT),
       CIRCULAR_SECTORS - 1,
@@ -63,8 +69,8 @@ export function pointToCell(config: ProjectConfig, point: Point): Cell {
     return { column, row };
   }
   return {
-    column: Math.floor(point.x / config.base),
-    row: Math.floor(point.y / config.base),
+    column: Math.floor(point.x / base),
+    row: Math.floor(point.y / base),
   };
 }
 
@@ -74,7 +80,7 @@ export function pointToCell(config: ProjectConfig, point: Point): Cell {
  * cell on each axis (the old app's parity test in `point()`).
  */
 export function pointToAnchor(config: ProjectConfig, point: Point): Anchor {
-  const base = config.base;
+  const base = cellSize(config);
   const ratio = config.ratio;
   if (config.gridType === "circular") {
     const dx = point.x - CENTER;
@@ -107,15 +113,16 @@ export function anchorToCell(anchor: Anchor): Cell {
  * `rectFromPoint(...) + 0.5 · size`).
  */
 export function cellCentre(config: ProjectConfig, cell: Cell): Point {
+  const base = cellSize(config);
   const ink = inkUnit(config);
   if (config.gridType === "circular") {
-    const radius = cell.column * config.base + ink / 2;
+    const radius = cell.column * base + ink / 2;
     const angle = (cell.row + 0.5) * CIRCULAR_ANGULAR_UNIT;
     return polar(CENTER, CENTER, radius, angle);
   }
   return {
-    x: cell.column * config.base + ink / 2,
-    y: cell.row * config.base + ink / 2,
+    x: cell.column * base + ink / 2,
+    y: cell.row * base + ink / 2,
   };
 }
 
@@ -180,22 +187,29 @@ export interface GridPaths {
 }
 
 function squareGrid(config: ProjectConfig): GridPaths {
-  const base = config.base;
+  const base = cellSize(config);
   const ink = inkUnit(config);
   const borders: string[] = [];
   const inner: string[] = [];
   const count = Math.max(1, Math.ceil(VIEWBOX_SIZE / base));
+  // Cell starts, up to the viewBox edge. The board is laid out so the last
+  // cell's space is cropped: its start is the last border, and nothing is
+  // clamped onto the edge (the space-less `1:1` cell is complete, so its far
+  // edge — exactly the viewBox edge — is a border like any other).
   for (let index = 0; index <= count; index++) {
-    const at = Math.min(index * base, VIEWBOX_SIZE);
+    const at = index * base;
+    if (at > VIEWBOX_SIZE + 1e-6) break;
     borders.push(`M ${at} 0 L ${at} ${VIEWBOX_SIZE}`);
     borders.push(`M 0 ${at} L ${VIEWBOX_SIZE} ${at}`);
   }
   // The space-less `1:1` cell has no inner edge: the ink family would land on
   // the borders themselves, so it is left empty (docs/CANVAS.md §2).
   if (ink < base - 1e-6) {
+    // The ink edges close each ink square; the last one lands exactly on the
+    // viewBox edge — the canvas ends with ink, never with a space strip.
     for (let index = 0; index < count; index++) {
       const at = index * base + ink;
-      if (at >= VIEWBOX_SIZE - 1e-6) break;
+      if (at > VIEWBOX_SIZE + 1e-6) break;
       inner.push(`M ${at} 0 L ${at} ${VIEWBOX_SIZE}`);
       inner.push(`M 0 ${at} L ${VIEWBOX_SIZE} ${at}`);
     }
@@ -218,12 +232,14 @@ function spokePath(angle: number): string {
 }
 
 function radialGrid(config: ProjectConfig): GridPaths {
-  const base = config.base;
+  const base = cellSize(config);
   const ink = inkUnit(config);
   const borders: string[] = [];
   const inner: string[] = [];
   const maxRadius = VIEWBOX_SIZE / 2;
-  for (let index = 1; index * base < maxRadius; index++) {
+  // Ring edges, up to and including the radius when the last band is complete
+  // (the space-less `1:1` case) — the same rule as the square grid's borders.
+  for (let index = 1; index * base <= maxRadius + 1e-6; index++) {
     borders.push(circlePath(index * base));
   }
   for (let sector = 0; sector < CIRCULAR_SECTORS; sector++) {
@@ -233,7 +249,9 @@ function radialGrid(config: ProjectConfig): GridPaths {
   // In the space-less `1:1` cell the inner family would land exactly on the
   // next border ring / spoke, so it is only drawn when there is space.
   if (ink < base - 1e-6) {
-    for (let index = 0; index * base + ink < maxRadius; index++) {
+    // The inner rings close each ink ring; the last one lands exactly on the
+    // design circle (radius 500) — the circular board ends with ink too.
+    for (let index = 0; index * base + ink <= maxRadius + 1e-6; index++) {
       inner.push(circlePath(index * base + ink));
     }
     for (let sector = 0; sector < CIRCULAR_SECTORS; sector++) {

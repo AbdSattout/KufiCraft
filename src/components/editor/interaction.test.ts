@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_PROJECT_CONFIG,
   arcKey,
+  cellSize,
   lineKey,
   maxGridIndex,
   tileKey,
@@ -15,6 +16,7 @@ import type {
   Zone,
 } from "@/lib/canvas/model";
 import { makeArc, makeLine, makeStroke, makeTile } from "@/lib/canvas/items";
+import { inkUnit } from "@/lib/canvas/geometry";
 import {
   DEFAULT_ARC_STYLE,
   DEFAULT_STYLE,
@@ -144,10 +146,12 @@ describe("anchoring", () => {
   });
 
   it("clips the pointer to the canvas first", () => {
+    // The board ends with the last cell's ink, so a pointer clipped to the
+    // canvas lands in that ink (zone 0) instead of a trailing space strip.
     expect(anchorAt(square, { x: 1200, y: -5 })).toEqual({
       column: 99,
       row: 0,
-      zone: 1,
+      zone: 0,
     });
   });
 
@@ -234,7 +238,12 @@ describe("hit testing", () => {
   it("computes item bounds that contain the item", () => {
     const item = tile(2, 3, 0);
     const bounds = itemBounds(square, item);
-    expect(bounds).toEqual({ x: 20, y: 30, w: 7.5, h: 7.5 });
+    expect(bounds).toEqual({
+      x: 2 * cellSize(square),
+      y: 3 * cellSize(square),
+      w: inkUnit(square),
+      h: inkUnit(square),
+    });
   });
 });
 

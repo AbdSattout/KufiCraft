@@ -13,11 +13,26 @@
 ## 1. Coordinate system
 
 * SVG `viewBox="0 0 1000 1000"`; origin top-left, `y` grows **downwards**.
-* Square grid: cells of `config.base` units. Cell `(column, row)` covers
-  `x ∈ [column·base, (column+1)·base)`, `y ∈ [row·base, (row+1)·base)` — up to
-  `VIEWBOX_SIZE / base` cells per axis.
+* `config.base` is the **stored** cell size — what the slider, the caption and
+  the file format speak. Every renderer and interaction draws with the **drawn
+  cell** `cellSize(config)` instead: the board is laid out over
+  `gridCount(config)` whole cells across its extent (the viewBox edge on the
+  square grid, the radius `500` on the circular one) and the **last cell's
+  trailing space is cropped**, so the extent is covered exactly and the canvas
+  ends with ink, never with a leftover space strip or a clamped sliver:
+
+  `gridCount = round(extent / base)`, `cellSize = extent / (gridCount − 1 + ratio)`
+
+  `base` 75 at `1:3` → 13 cells of `1000 / 12.75 = 78.431` (instead of 13 × 75
+  plus a 25-unit sliver). The space-less `1:1` cell has nothing to crop:
+  `cellSize = extent / gridCount`, so bases that divide the extent evenly are
+  unchanged. A non-finite or ≤ 0 `base`/`ratio` (never stored —
+  `sanitizeConfig` clamps them) falls back to the defaults.
+* Square grid: cell `(column, row)` covers
+  `x ∈ [column·cell, (column+1)·cell)`, `y ∈ [row·cell, (row+1)·cell)`.
 * Circular grid: centre `(500, 500)`; band `column` covers radius
-  `[column·base, (column+1)·base)`; sector `row` covers angle
+  `[column·cell, (column+1)·cell)` — the outermost band's ink ends on the
+  design circle (`500`) —; sector `row` covers angle
   `[row·10°, (row+1)·10°)` with `atan2(dy, dx)` normalised to `[0, 2π)`
   (36 sectors, `CIRCULAR_SECTORS`).
 
@@ -200,7 +215,7 @@ click-order quirk became the explicit `direction` control
 * **45° diagonal**: the four spring points are the two ink corners that face the
   chord, chosen by the sweep.
 * `size: "half"` → a semicircle over the chord: radius `chord/2` (or
-  `dColumn·base + ink/2` on a diagonal), `largeArc = 0`.
+  `dColumn·cell + ink/2` on a diagonal), `largeArc = 0`.
 * `size: "threeQuarter"` → 270°: radius `chord/√2`, `largeArc = 1`.
 * On the circular grid the arc runs at the mean radius between the two bands,
   spanning the sectors from `from.row` to `to.row` along the shortest angular
@@ -369,7 +384,8 @@ const full = renderSvg(config, items, { showGrid: config.showGrid });
 
 The engine suite (`bun run test`) covers, file by file: `geometry.test.ts`
 (frames, zone rects, slices, arc centres), `grid.test.ts` (addressing,
-round-trips, two-family grid paths, the space-less `1:1` case), `items.test.ts`
+round-trips, two-family grid paths, the drawn-cell tiling, the space-less
+`1:1` case), `items.test.ts`
 (item classes, keys, geometry, hit-testing), `ops.test.ts` (add/remove/paint/
 replace, `toOps`, pen/line items), `model.test.ts` (presets, snapping, keys,
 signatures), `render.test.ts` (markup, thumbnail budget), `kuficraft-file.test.ts`

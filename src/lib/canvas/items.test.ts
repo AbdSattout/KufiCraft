@@ -2,8 +2,9 @@
  * Tests for the canvas items — one class per stored item type, sharing the
  * render / bounds / JSON contract with every other renderer in the app.
  *
- * The fixtures are built from `DEFAULT_PROJECT_CONFIG` with `base: 10` so the
- * canonical cell is 10 units wide with a 7.5 ink square. Items are compared as
+ * The fixtures are built from `DEFAULT_PROJECT_CONFIG` with `base: 10` — 100
+ * drawn cells (`cellSize`), 1000/99.75 units wide with the last cell's space
+ * cropped (docs/CANVAS.md §1). Items are compared as
  * plain JSON (the transport format) wherever that is what the editor stores.
  */
 
@@ -13,6 +14,7 @@ import {
   DEFAULT_PROJECT_CONFIG,
   SHAPE_IDS,
   arcKey,
+  cellSize,
   itemSignature,
   lineKey,
   strokeKey,
@@ -260,9 +262,11 @@ describe("render", () => {
   });
 
   it("fills a straight line as one bar of ink", () => {
+    const cell = cellSize(SQUARE);
+    const ink = inkUnit(SQUARE);
     const rendered = itemRender(SQUARE, line({ column: 0, row: 4 }, { column: 4, row: 4 }));
     expect(rendered).toEqual({
-      path: rectPath({ x: 0, y: 40, w: 47.5, h: 7.5 }),
+      path: rectPath({ x: 0, y: 4 * cell, w: 4 * cell + ink, h: ink }),
       mode: "fill",
       width: 0,
     });
@@ -275,7 +279,7 @@ describe("render", () => {
     expectPointNear(start, geometry.start, 1e-4);
     expectPointNear(end, geometry.end, 1e-4);
     // Clockwise springs off the bottom ink edge of the row.
-    expect(start.y).toBeCloseTo(6 * SQUARE.base + inkUnit(SQUARE), 6);
+    expect(start.y).toBeCloseTo(6 * cellSize(SQUARE) + inkUnit(SQUARE), 6);
   });
 
   it("starts and ends an arc on the two cell centres of a circular grid", () => {
@@ -292,27 +296,32 @@ describe("render", () => {
 
 describe("bounds / contains", () => {
   it("contains the ink square and rejects the cell's space strip", () => {
+    const cell = cellSize(SQUARE);
+    const ink = inkUnit(SQUARE);
     const subject = tile(1, 2, 0);
-    expect(itemContains(SQUARE, subject, { x: 12, y: 22 })).toBe(true);
-    expect(itemContains(SQUARE, subject, { x: 19, y: 22 })).toBe(false); // x space
-    expect(itemContains(SQUARE, subject, { x: 12, y: 29 })).toBe(false); // y space
+    expect(itemContains(SQUARE, subject, { x: cell + ink / 2, y: 2 * cell + ink / 2 })).toBe(true);
+    expect(itemContains(SQUARE, subject, { x: cell + ink + 0.01, y: 2 * cell })).toBe(false); // x space
+    expect(itemContains(SQUARE, subject, { x: cell, y: 2 * cell + ink + 0.01 })).toBe(false); // y space
     const bounds = itemBounds(SQUARE, subject);
-    expect(bounds).toEqual({ x: 10, y: 20, w: 7.5, h: 7.5 });
+    expect(bounds).toEqual({ x: cell, y: 2 * cell, w: ink, h: ink });
     expect(itemContains(SQUARE, subject, { x: bounds.x, y: bounds.y })).toBe(true);
   });
 
   it("pads a line's hit area by half an ink thickness", () => {
+    const cell = cellSize(SQUARE);
+    const ink = inkUnit(SQUARE);
     const subject = line({ column: 0, row: 1 }, { column: 4, row: 1 });
-    expect(itemBounds(SQUARE, subject)).toEqual({ x: 0, y: 10, w: 47.5, h: 7.5 });
-    expect(itemContains(SQUARE, subject, { x: 5, y: 12 })).toBe(true); // on the bar
-    expect(itemContains(SQUARE, subject, { x: 5, y: 19 })).toBe(true); // within ink/2
+    expect(itemBounds(SQUARE, subject)).toEqual({ x: 0, y: cell, w: 4 * cell + ink, h: ink });
+    expect(itemContains(SQUARE, subject, { x: 5, y: cell + ink / 2 })).toBe(true); // on the bar
+    expect(itemContains(SQUARE, subject, { x: 5, y: cell + ink + 1 })).toBe(true); // within ink/2
     expect(itemContains(SQUARE, subject, { x: 5, y: 25 })).toBe(false); // a cell away
     expect(itemContains(SQUARE, subject, { x: 5, y: 3 })).toBe(false); // the row above
   });
 
   it("contains a point within ink/2 of a string", () => {
     const subject = stroke([{ column: 0, row: 0 }, { column: 2, row: 2 }]);
-    expect(itemContains(SQUARE, subject, { x: 3.75, y: 3.75 })).toBe(true);
+    const ink = inkUnit(SQUARE);
+    expect(itemContains(SQUARE, subject, { x: ink / 2, y: ink / 2 })).toBe(true);
     expect(itemContains(SQUARE, subject, { x: 100, y: 100 })).toBe(false);
   });
 
@@ -468,12 +477,14 @@ describe("item-level helpers", () => {
   });
 
   it("unions the bounds of a list, or null when there are none", () => {
+    const cell = cellSize(SQUARE);
+    const ink = inkUnit(SQUARE);
     expect(itemsBounds(SQUARE, [])).toBeNull();
     expect(itemsBounds(SQUARE, [tile(0, 0, 0), tile(3, 4, 0)])).toEqual({
       x: 0,
       y: 0,
-      w: 37.5,
-      h: 47.5,
+      w: 3 * cell + ink,
+      h: 4 * cell + ink,
     });
   });
 

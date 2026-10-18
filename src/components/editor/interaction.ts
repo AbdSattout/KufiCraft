@@ -20,6 +20,7 @@
 import {
   CIRCULAR_SECTORS,
   VIEWBOX_SIZE,
+  cellSize,
   itemSignature as signatureOf,
   maxGridIndex,
   tileKey,
@@ -170,13 +171,14 @@ export function cellLimits(config: ProjectConfig): {
   maxColumn: number;
   maxRow: number;
 } {
+  const base = cellSize(config);
   if (config.gridType === "circular") {
     return {
-      maxColumn: Math.max(0, Math.ceil(VIEWBOX_SIZE / 2 / config.base) - 1),
+      maxColumn: Math.max(0, Math.ceil(VIEWBOX_SIZE / 2 / base) - 1),
       maxRow: CIRCULAR_SECTORS - 1,
     };
   }
-  const count = Math.max(0, Math.ceil(VIEWBOX_SIZE / config.base) - 1);
+  const count = Math.max(0, Math.ceil(VIEWBOX_SIZE / base) - 1);
   return { maxColumn: count, maxRow: count };
 }
 

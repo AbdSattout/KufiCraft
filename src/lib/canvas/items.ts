@@ -22,6 +22,7 @@
 import {
   DEFAULT_PROJECT_CONFIG,
   arcKey,
+  cellSize,
   compareCells,
   lineKey,
   strokeKey,
@@ -376,7 +377,7 @@ export class Line extends KufiItem {
 
   /** The bar rectangle on a square grid (ink thick, anchored at the ink edge). */
   bar(config: ProjectConfig): Rect {
-    const base = config.base;
+    const base = cellSize(config);
     const ink = inkUnit(config);
     if (this.from.row === this.to.row) {
       const min = Math.min(this.from.column, this.to.column);
@@ -416,7 +417,7 @@ export class Line extends KufiItem {
   }
 
   private circularPath(config: ProjectConfig): string {
-    const base = config.base;
+    const base = cellSize(config);
     const minBand = Math.min(this.from.column, this.to.column);
     const maxBand = Math.max(this.from.column, this.to.column);
     const unit = (2 * Math.PI) / 36;
@@ -443,7 +444,7 @@ export class Line extends KufiItem {
   }
 
   private circularBounds(config: ProjectConfig): Rect {
-    const base = config.base;
+    const base = cellSize(config);
     const minBand = Math.min(this.from.column, this.to.column);
     const maxBand = Math.max(this.from.column, this.to.column);
     const unit = (2 * Math.PI) / 36;
@@ -691,7 +692,7 @@ export class Arc extends KufiItem {
   }
 
   geometry(config: ProjectConfig): ArcGeometry {
-    const base = config.base;
+    const base = cellSize(config);
     const ink = inkUnit(config);
     const clockwise = this.direction === "clockwise";
     const sweep: 0 | 1 = clockwise ? 1 : 0;
@@ -763,7 +764,7 @@ export class Arc extends KufiItem {
   }
 
   private circularPath(config: ProjectConfig): string {
-    const base = config.base;
+    const base = cellSize(config);
     const unit = (2 * Math.PI) / 36;
     const r1 = (this.from.column + 0.5) * base;
     const r2 = (this.to.column + 0.5) * base;
@@ -781,11 +782,12 @@ export class Arc extends KufiItem {
   bounds(config: ProjectConfig): Rect {
     if (config.gridType === "circular") {
       const points: Point[] = [];
+      const base = cellSize(config);
       for (let step = 0; step <= 8; step++) {
         const t = step / 8;
         const unit = (2 * Math.PI) / 36;
-        const r = (this.from.column + 0.5) * config.base +
-          (this.to.column - this.from.column) * config.base * t;
+        const r = (this.from.column + 0.5) * base +
+          (this.to.column - this.from.column) * base * t;
         const a = ((this.from.row + 0.5) + shortestSectorDelta(this.from.row, this.to.row) * t) * unit;
         points.push(polar(CENTER, CENTER, r, a));
       }

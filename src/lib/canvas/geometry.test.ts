@@ -3,11 +3,15 @@
  * build their paths from. Everything is deterministic maths on the fixed
  * `0 0 1000 1000` viewBox, so assertions are exact numbers (plus `toBeCloseTo`
  * for transcendental values). The canonical fixture is `ratio: 3/4`, `base: 10`
- * → a 10-unit cell with a 7.5 ink square.
+ * → the drawn cell (`cellSize`) with a `3/4` ink square.
  */
 
 import { describe, expect, it } from "vitest";
-import { CIRCULAR_ANGULAR_UNIT, DEFAULT_PROJECT_CONFIG } from "@/lib/canvas/model";
+import {
+  CIRCULAR_ANGULAR_UNIT,
+  DEFAULT_PROJECT_CONFIG,
+  cellSize,
+} from "@/lib/canvas/model";
 import type { ProjectConfig, Zone } from "@/lib/canvas/model";
 import {
   A,
@@ -49,7 +53,8 @@ function makeConfig(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
   return { ...DEFAULT_PROJECT_CONFIG, base: 10, ...overrides };
 }
 
-/** The default cell: ratio 3/4, base 10 → 7.5 units of ink. */
+/** The default cell: ratio 3/4, base 10 → 100 drawn cells (the last cell's
+ * space cropped), so the drawn cell is 1000 / 99.75 units. */
 const CANONICAL = makeConfig();
 /** The space-less `1:1` cell: the ink fills the whole square. */
 const MONO = makeConfig({ ratio: 1 });
@@ -74,32 +79,43 @@ function expectSlice(slice: CircularSlice, expected: CircularSlice): void {
 /* ------------------------------------------------------------------ */
 
 describe("inkUnit", () => {
-  it("is the ratio · base thickness of one cell", () => {
-    expect(inkUnit(CANONICAL)).toBe(7.5);
-    expect(inkUnit(MONO)).toBe(10);
-    expect(inkUnit(makeConfig({ ratio: 0.5, base: 20 }))).toBe(10);
-    expect(inkUnit(makeConfig({ ratio: 2 / 3, base: 30 }))).toBe(20);
+  it("is the ratio · drawn-cell thickness of one cell", () => {
+    expect(inkUnit(CANONICAL)).toBe(0.75 * cellSize(CANONICAL));
+    expect(inkUnit(MONO)).toBe(cellSize(MONO));
+    const thin = makeConfig({ ratio: 0.5, base: 20 });
+    expect(inkUnit(thin)).toBe(0.5 * cellSize(thin));
+    const fifths = makeConfig({ ratio: 5 / 6, base: 30 });
+    expect(inkUnit(fifths)).toBe((5 / 6) * cellSize(fifths));
   });
 });
 
 describe("zoneRect", () => {
-  it("splits the four zones of the canonical cell at 7.5", () => {
-    expect(zoneRect(CANONICAL, 0, 0, 0)).toEqual({ x: 0, y: 0, w: 7.5, h: 7.5 });
-    expect(zoneRect(CANONICAL, 0, 0, 1)).toEqual({ x: 7.5, y: 0, w: 2.5, h: 7.5 });
-    expect(zoneRect(CANONICAL, 0, 0, 2)).toEqual({ x: 0, y: 7.5, w: 7.5, h: 2.5 });
-    expect(zoneRect(CANONICAL, 0, 0, 3)).toEqual({ x: 7.5, y: 7.5, w: 2.5, h: 2.5 });
+  const cell = cellSize(CANONICAL);
+  const ink = inkUnit(CANONICAL);
+  const space = cell - ink;
+
+  it("splits the four zones of the canonical cell at the ink thickness", () => {
+    expect(zoneRect(CANONICAL, 0, 0, 0)).toEqual({ x: 0, y: 0, w: ink, h: ink });
+    expect(zoneRect(CANONICAL, 0, 0, 1)).toEqual({ x: ink, y: 0, w: space, h: ink });
+    expect(zoneRect(CANONICAL, 0, 0, 2)).toEqual({ x: 0, y: ink, w: ink, h: space });
+    expect(zoneRect(CANONICAL, 0, 0, 3)).toEqual({ x: ink, y: ink, w: space, h: space });
   });
 
   it("keeps the ink at the top-left of every cell", () => {
     for (const zone of QUADRANTS) {
       const rect = zoneRect(CANONICAL, 4, 7, zone);
-      expect(rect.x).toBeGreaterThanOrEqual(4 * 10);
-      expect(rect.y).toBeGreaterThanOrEqual(7 * 10);
-      expect(rect.x + rect.w).toBeLessThanOrEqual(5 * 10);
-      expect(rect.y + rect.h).toBeLessThanOrEqual(8 * 10);
+      expect(rect.x).toBeGreaterThanOrEqual(4 * cell);
+      expect(rect.y).toBeGreaterThanOrEqual(7 * cell);
+      expect(rect.x + rect.w).toBeLessThanOrEqual(5 * cell + 1e-9);
+      expect(rect.y + rect.h).toBeLessThanOrEqual(8 * cell + 1e-9);
     }
-    expect(zoneRect(CANONICAL, 4, 7, 0)).toEqual({ x: 40, y: 70, w: 7.5, h: 7.5 });
-    expect(zoneRect(CANONICAL, 4, 7, 3)).toEqual({ x: 47.5, y: 77.5, w: 2.5, h: 2.5 });
+    expect(zoneRect(CANONICAL, 4, 7, 0)).toEqual({ x: 4 * cell, y: 7 * cell, w: ink, h: ink });
+    expect(zoneRect(CANONICAL, 4, 7, 3)).toEqual({
+      x: 4 * cell + ink,
+      y: 7 * cell + ink,
+      w: space,
+      h: space,
+    });
   });
 
   it("makes zone 0 the whole cell at ratio 1 and the rest zero-area", () => {
@@ -113,13 +129,27 @@ describe("zoneRect", () => {
 
   it("honours a ratio thinner than the default", () => {
     const thin = makeConfig({ ratio: 0.25, base: 20 });
-    expect(zoneRect(thin, 2, 3, 0)).toEqual({ x: 40, y: 60, w: 5, h: 5 });
-    expect(zoneRect(thin, 2, 3, 3)).toEqual({ x: 45, y: 65, w: 15, h: 15 });
+    const thinCell = cellSize(thin);
+    const thinInk = inkUnit(thin);
+    expect(zoneRect(thin, 2, 3, 0)).toEqual({
+      x: 2 * thinCell,
+      y: 3 * thinCell,
+      w: thinInk,
+      h: thinInk,
+    });
+    expect(zoneRect(thin, 2, 3, 3)).toEqual({
+      x: 2 * thinCell + thinInk,
+      y: 3 * thinCell + thinInk,
+      w: thinCell - thinInk,
+      h: thinCell - thinInk,
+    });
   });
 });
 
 describe("circularSlice", () => {
   const U = CIRCULAR_ANGULAR_UNIT;
+  const cell = cellSize(CANONICAL_CIRCULAR);
+  const ink = inkUnit(CANONICAL_CIRCULAR);
   const slice = (
     config: ProjectConfig,
     band: number,
@@ -132,14 +162,14 @@ describe("circularSlice", () => {
   ) => expectSlice(circularSlice(config, band, sector, zone), { cx: 500, cy: 500, r1, r2, a1, a2 });
 
   it("places the radial / angular zones of the canonical band", () => {
-    slice(CANONICAL_CIRCULAR, 1, 0, 0, 10, 17.5, 0, 0.75 * U);
-    slice(CANONICAL_CIRCULAR, 1, 0, 1, 17.5, 20, 0, 0.75 * U);
-    slice(CANONICAL_CIRCULAR, 1, 0, 2, 10, 17.5, 0.75 * U, U);
-    slice(CANONICAL_CIRCULAR, 1, 0, 3, 17.5, 20, 0.75 * U, U);
+    slice(CANONICAL_CIRCULAR, 1, 0, 0, cell, cell + ink, 0, 0.75 * U);
+    slice(CANONICAL_CIRCULAR, 1, 0, 1, cell + ink, 2 * cell, 0, 0.75 * U);
+    slice(CANONICAL_CIRCULAR, 1, 0, 2, cell, cell + ink, 0.75 * U, U);
+    slice(CANONICAL_CIRCULAR, 1, 0, 3, cell + ink, 2 * cell, 0.75 * U, U);
   });
 
   it("offsets by band and sector, including the last sector", () => {
-    slice(CANONICAL_CIRCULAR, 2, 35, 0, 20, 27.5, 35 * U, 35.75 * U);
+    slice(CANONICAL_CIRCULAR, 2, 35, 0, 2 * cell, 2 * cell + ink, 35 * U, 35.75 * U);
   });
 
   it("collapses the space zones to zero width at ratio 1", () => {

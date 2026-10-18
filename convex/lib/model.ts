@@ -8,10 +8,13 @@
  *
  * Coordinate system (square grid):
  *   - The SVG has a fixed viewBox of `0 0 1000 1000`.
- *   - The plane is divided into square cells of `config.base` units.
+ *   - The plane is divided into `gridCount` square cells of `cellSize` units.
+ *     `config.base` is the **stored** size; the last cell's trailing space is
+ *     cropped, so the drawn cell fills the viewBox and the board ends with ink
+ *     exactly on its edge (`cellSize` below, `docs/CANVAS.md` §1).
  *   - Within each cell, each axis is split into two zones at `config.ratio`:
- *       ink zone   = [0, ratio)        → fragment size = ratio · base
- *       space zone = [ratio, 1)        → fragment size = (1 − ratio) · base
+ *       ink zone   = [0, ratio)        → fragment size = ratio · cellSize
+ *       space zone = [ratio, 1)        → fragment size = (1 − ratio) · cellSize
  *   - A click inside a cell picks the zone of each axis independently,
  *     yielding a fragment of (w, h) ∈ {ink, space}² — the classic square-kufi
  *     «قلم / فراغ» subdivision. The ink part is at the **start** (top-left) of
@@ -19,7 +22,8 @@
  *
  * Coordinate system (circular grid):
  *   - Same viewBox; the circle is centered at (500, 500).
- *   - Radially divided into bands of `config.base` units from the center.
+ *   - Radially divided into `gridCount` bands of `cellSize` units from the
+ *     center — the same crop, so the design circle ends on the last band's ink.
  *   - Angularly divided into 36 sectors of 10° (2π/36) each.
  *   - The same zone logic applies per axis: radial zone and angular zone.
  *
@@ -142,6 +146,46 @@ export function maxGridIndex(base: number): number {
     return Math.floor(VIEWBOX_SIZE / 4);
   }
   return Math.floor(VIEWBOX_SIZE / base);
+}
+
+/**
+ * Extent the grid is laid out over, in viewBox units: the viewBox edge on the
+ * square grid, the radius on the circular one (the circular design is the
+ * inscribed circle, so its outermost ring ends on it).
+ */
+function gridExtent(config: ProjectConfig): number {
+  return config.gridType === "circular" ? VIEWBOX_SIZE / 2 : VIEWBOX_SIZE;
+}
+
+/**
+ * Whole number of cells / radial bands the board shows along its extent. On
+ * the square grid this is exactly the `round(VIEWBOX_SIZE / base)` the
+ * settings panel announces for `config.base`, so caption and canvas cannot
+ * disagree; the circular grid lays the same rounding over its radius. A
+ * non-finite / non-positive `base` cannot come from a stored document
+ * (`sanitizeConfig` clamps it to `[4, 100]`); the fallback only keeps a
+ * degenerate in-memory config finite.
+ */
+export function gridCount(config: ProjectConfig): number {
+  const base = config.base;
+  const safe = Number.isFinite(base) && base > 0 ? base : DEFAULT_BASE;
+  return Math.max(1, Math.round(gridExtent(config) / safe));
+}
+
+/**
+ * Effective drawn cell / band size — what every renderer and every
+ * interaction uses. `config.base` is the **stored** size; the board is laid
+ * out so that it ends with ink, not with a leftover space strip: `gridCount`
+ * whole cells of `base` units would leave the last cell's space inside the
+ * extent (base `75` → 13 cells + a 25-unit sliver), so the drawn size is
+ * `extent / (gridCount − 1 + ratio)`: the last cell contributes only its ink
+ * and meets the extent exactly (`docs/CANVAS.md` §1).
+ */
+export function cellSize(config: ProjectConfig): number {
+  const ratio = config.ratio;
+  const safe =
+    Number.isFinite(ratio) && ratio > 0 ? Math.min(ratio, 1) : DEFAULT_RATIO;
+  return gridExtent(config) / (gridCount(config) - 1 + safe);
 }
 
 /** Default palette. */

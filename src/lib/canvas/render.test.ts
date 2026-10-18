@@ -203,13 +203,15 @@ describe("renderSvg", () => {
     expect(paths[0].attrs.stroke).toBeUndefined();
   });
 
-  it("strokes arcs with ratio · base", () => {
+  it("strokes arcs with the drawn ink thickness", () => {
     const config = makeConfig({ ratio: 0.75, base: 10, ink: "#123456" });
     const root = rootOf(renderSvg(config, [ARC]));
     const arc = find(root, "path")[0];
     expect(arc.attrs.fill).toBe("none");
     expect(arc.attrs.stroke).toBe("#123456");
-    expect(arc.attrs["stroke-width"]).toBe("7.5");
+    // The drawn cell is 1000/99.75, so the ink is 7.518797 — rounded to the
+    // 3 decimals every number in the SVG goes through.
+    expect(arc.attrs["stroke-width"]).toBe("7.519");
   });
 
   it("draws the grid as two paths only when asked", () => {
@@ -231,11 +233,13 @@ describe("renderSvg", () => {
   });
 
   it("draws circular construction rings and spokes", () => {
+    // base 100 on the polar grid → 5 drawn bands, so the rings sit at
+    // 105.263158 … 421.052632 (the last band's space is cropped).
     const config = makeConfig({ gridType: "circular", base: 100 });
     const root = rootOf(renderSvg(config, [], { showGrid: true }));
     const grid = find(root, "path")[0];
-    expect(grid.attrs.d).toContain("A 100 100");
-    expect(grid.attrs.d).toContain("A 400 400");
+    expect(grid.attrs.d).toContain("A 105.263158 105.263158");
+    expect(grid.attrs.d).toContain("A 421.052632 421.052632");
     expect((grid.attrs.d.match(/\bL\b/g) ?? []).length).toBeGreaterThan(35);
   });
 

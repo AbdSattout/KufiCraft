@@ -17,6 +17,7 @@ import {
   CIRCULAR_ANGULAR_UNIT,
   CIRCULAR_SECTORS,
   VIEWBOX_SIZE,
+  cellSize,
 } from "./model";
 import type { ProjectConfig, Zone } from "./model";
 
@@ -198,7 +199,7 @@ export function mapCommands(
 
 /** Ink thickness of one cell — the old app's `0.75` at the default ratio. */
 export function inkUnit(config: ProjectConfig): number {
-  return config.ratio * config.base;
+  return config.ratio * cellSize(config);
 }
 
 /**
@@ -212,7 +213,7 @@ export function zoneRect(
   row: number,
   zone: Zone,
 ): Rect {
-  const base = config.base;
+  const base = cellSize(config);
   const ink = inkUnit(config);
   const space = base - ink;
   return {
@@ -229,11 +230,12 @@ export function cellRect(
   column: number,
   row: number,
 ): Rect {
+  const base = cellSize(config);
   return {
-    x: column * config.base,
-    y: row * config.base,
-    w: config.base,
-    h: config.base,
+    x: column * base,
+    y: row * base,
+    w: base,
+    h: base,
   };
 }
 
@@ -244,7 +246,7 @@ export function circularSlice(
   sector: number,
   zone: Zone,
 ): CircularSlice {
-  const base = config.base;
+  const base = cellSize(config);
   const ink = inkUnit(config);
   const unit = CIRCULAR_ANGULAR_UNIT;
   const r1 = band * base + (zone & 1 ? ink : 0);
