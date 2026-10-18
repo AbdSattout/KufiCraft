@@ -14,13 +14,14 @@
  * `replace` per stroke would mean megabytes on a dense board.
  */
 
-import { itemSignature } from "./model";
+import { anchorOf, hasAnchor, itemSignature } from "./model";
 import type {
   Anchor,
   CanvasItem,
   Cell,
   ItemBorder,
   ItemRounding,
+  LinePoint,
   ProjectConfig,
   Rotation,
   ShapeId,
@@ -319,29 +320,80 @@ export function penItems(
 /**
  * Line tool → items.
  *
- * A run with **no diagonal segment** is either one solid `line` bar (the two
- * endpoints) or — when `config.straightLinesAsSquares` is on, the reference
- * app's default — one square per cell along every segment. Anything with a
- * diagonal part becomes one stroked `polyline`, exactly like the old app.
+ * A run whose points all sit on their cell centre — every point the
+ * pre-anchor tool could make — follows the reference app's rules unchanged: a
+ * run with **no diagonal segment** is either one solid `line` bar (the two
+ * endpoints) or, when `config.straightLinesAsSquares` is on (its default), one
+ * square per cell along every segment. Anything with a diagonal part becomes
+ * one stroked polyline, exactly like the old app.
+ *
+ * An anchored point sits **inside** its cell, which neither a bar nor a tile
+ * can express, so a run containing one is always a stroked polyline through
+ * the anchors. A straight run whose anchors all agree is collinear and merges
+ * to its two ends — the clicks between them draw nothing new — but a run with
+ * **mixed** anchors is never merged, so no point a designer placed is dropped
+ * (`docs/CANVAS.md` §4).
  */
 export function lineItems(
   config: ProjectConfig,
-  points: readonly Cell[],
+  points: readonly LinePoint[],
   closed: boolean,
   color?: string,
 ): CanvasItem[] {
-  const unique = dedupeCells(points, closed);
-  if (unique.length < 2) return [];
+  if (points.length < 2) return [];
   const lineColor = resolvedColor(config, color);
-  if (config.gridType === "square" && config.straightLinesAsSquares) {
-    const squared = straightRunSquares(config, unique, closed, lineColor);
-    if (squared !== null) return squared;
+  if (!points.some(hasAnchor)) {
+    const unique = dedupeCells(points, closed);
+    if (unique.length < 2) return [];
+    if (config.gridType === "square" && config.straightLinesAsSquares) {
+      const squared = straightRunSquares(config, unique, closed, lineColor);
+      if (squared !== null) return squared;
+    }
+    const run = runOf(unique);
+    if (!closed && run.axis !== null && config.gridType === "square") {
+      return [makeLine(unique[0], unique[unique.length - 1], lineColor)];
+    }
+    return [makeStroke(unique, closed, lineColor)];
   }
-  const run = runOf(unique);
-  if (!closed && run.axis !== null && config.gridType === "square") {
-    return [makeLine(unique[0], unique[unique.length - 1], lineColor)];
+  if (mergesToEnds(config, points, closed)) {
+    const last = points.length - 1;
+    return [makeStroke([points[0], points[last]], false, lineColor)];
   }
-  return [makeStroke(unique, closed, lineColor)];
+  return [makeStroke(points, closed, lineColor)];
+}
+
+/**
+ * Whether an anchored run may collapse to its two ends.
+ *
+ * The merged stroke spans from the run's first to its last point, which is
+ * what the run draws only when it is straight on the **square** grid (on the
+ * circular grid a "row" is an arc, not a line), every point carries the same
+ * anchor (so the path is collinear), the run advances in a single direction
+ * (a run that doubles back reaches past its last point, and merging would cut
+ * the ink short) and the run is open (a closed run is not its endpoints).
+ * Runs that fail any test are kept whole, point for point.
+ */
+function mergesToEnds(
+  config: ProjectConfig,
+  points: readonly LinePoint[],
+  closed: boolean,
+): boolean {
+  if (closed || config.gridType !== "square") return false;
+  const run = runOf(points);
+  if (run.axis === null) return false;
+  const along: "column" | "row" = run.axis === "row" ? "column" : "row";
+  const first = anchorOf(points[0]);
+  let direction = 0;
+  for (let index = 0; index < points.length; index++) {
+    const anchor = anchorOf(points[index]);
+    if (anchor.x !== first.x || anchor.y !== first.y) return false;
+    if (index === 0) continue;
+    const step = Math.sign(points[index][along] - points[index - 1][along]);
+    if (step === 0) continue;
+    if (direction === 0) direction = step;
+    else if (step !== direction) return false;
+  }
+  return true;
 }
 
 /**

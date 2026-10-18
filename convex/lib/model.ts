@@ -37,7 +37,9 @@
  *
  * Anchors:
  *   tile    — `column`, `row`, `zone`: one fragment of one cell.
- *   others  — `from`/`to` (`Cell`) or `points` (`Cell[]`): whole ink cells.
+ *   others  — `from`/`to` (`Cell`) or `points` (`LinePoint[]`): whole ink
+ *             cells; a line point may carry an `anchor`, a position inside its
+ *             cell's ink region (`docs/CANVAS.md` §3).
  */
 
 import { v } from "convex/values";
@@ -392,6 +394,48 @@ export interface ItemBorder {
   color?: string;
 }
 
+/**
+ * A position inside one cell's **ink region**, as fractions of that region's
+ * extent on each axis: `{x: 0, y: 0}` is the ink origin, `{x: 1, y: 1}` its
+ * opposite corner, `{x: 0.5, y: 0.5}` the centre. The editor snaps the pointer
+ * to the nine `ANCHOR_GRID` positions; the format itself accepts any fraction
+ * in `[0, 1]`, so free positioning needs no format change later.
+ */
+export interface InkPoint {
+  x: number;
+  y: number;
+}
+
+/**
+ * A line point: an ink cell plus where inside it the point sits. Absent
+ * `anchor` means the cell centre — the point every pre-anchor line point used
+ * — and the centre is **never stored** (`linePoint` drops it), so documents,
+ * files and keys written before anchors existed round-trip byte-identically.
+ */
+export interface LinePoint extends Cell {
+  anchor?: InkPoint;
+}
+
+/** The centre of an ink region: what an absent anchor normalises to. */
+export const CENTRE_ANCHOR: InkPoint = { x: 0.5, y: 0.5 };
+
+/**
+ * The nine positions the line tool snaps to, row-major (`docs/CANVAS.md` §3):
+ * `(0,0)`, `(0.5,0)`, `(1,0)`, `(0,0.5)`, …, `(1,1)`. Their order here is also
+ * their index order in the documentation.
+ */
+export const ANCHOR_GRID: readonly InkPoint[] = [
+  { x: 0, y: 0 },
+  { x: 0.5, y: 0 },
+  { x: 1, y: 0 },
+  { x: 0, y: 0.5 },
+  { x: 0.5, y: 0.5 },
+  { x: 1, y: 0.5 },
+  { x: 0, y: 1 },
+  { x: 0.5, y: 1 },
+  { x: 1, y: 1 },
+];
+
 /** One zone fragment, painted with one shape. */
 export interface TileItem {
   type: "tile";
@@ -428,13 +472,13 @@ export interface LineItem {
 
 /**
  * A multi-point polyline — the old line tool's diagonal case and any run of
- * three or more points. Drawn as a **stroked** path through the cell ink
- * centres (stroke width = ink thickness), like the reference app.
+ * three or more points. Drawn as a **stroked** path through the points, stroke
+ * width = ink thickness, like the reference app.
  */
 export interface StrokeItem {
   type: "stroke";
   key: string;
-  points: Cell[];
+  points: LinePoint[];
   /** Closed polyline (`Z` in the path); absent means open. */
   closed?: boolean;
   border?: ItemBorder;
@@ -506,6 +550,76 @@ export function sameCell(a: Cell, b: Cell): boolean {
   return a.column === b.column && a.row === b.row;
 }
 
+/* ------------------------------------------------------------------ */
+/* Line points                                                         */
+/* ------------------------------------------------------------------ */
+
+/** Whether `anchor` is the ink centre — the one anchor never stored. */
+export function isCentreAnchor(anchor: InkPoint): boolean {
+  return anchor.x === CENTRE_ANCHOR.x && anchor.y === CENTRE_ANCHOR.y;
+}
+
+/** The anchor a point draws at: its own, or the cell centre when absent. */
+export function anchorOf(point: LinePoint): InkPoint {
+  return point.anchor ?? CENTRE_ANCHOR;
+}
+
+/** Whether a point carries its own (non-centre) anchor. */
+export function hasAnchor(point: LinePoint): boolean {
+  return !isCentreAnchor(anchorOf(point));
+}
+
+/**
+ * Builds a line point, canonicalising the anchor: **the centre is dropped**,
+ * so every way of naming a centre point — no anchor, `(0.5, 0.5)` — produces
+ * the same value, key and JSON as the pre-anchor model did.
+ */
+export function linePoint(
+  column: number,
+  row: number,
+  anchor?: InkPoint,
+): LinePoint {
+  if (anchor === undefined || isCentreAnchor(anchor)) return { column, row };
+  return { column, row, anchor: { x: anchor.x, y: anchor.y } };
+}
+
+/**
+ * Tolerant read of a stored anchor: a record with two finite numbers is
+ * clamped to the ink region and returned, except the centre, which is
+ * canonical storage of nothing and comes back as `undefined`. Anything else —
+ * absent, a wrong shape, `NaN` — is `undefined` too, so every reader (the
+ * `.kuficraft` file, the backend sanitiser) repairs a damaged anchor into the
+ * cell centre instead of throwing the point away.
+ */
+export function normalizeAnchor(value: unknown): InkPoint | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const anchor = value as Record<string, unknown>;
+  const x = fraction(anchor.x);
+  const y = fraction(anchor.y);
+  if (x === undefined || y === undefined || isCentreAnchor({ x, y })) {
+    return undefined;
+  }
+  return { x, y };
+}
+
+/** A number clamped into the ink region, or `undefined` when not a number. */
+function fraction(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  return Math.min(1, Math.max(0, value));
+}
+
+/** Whether two points are the same cell *and* the same anchor. */
+export function sameLinePoint(a: LinePoint, b: LinePoint): boolean {
+  const anchorA = anchorOf(a);
+  const anchorB = anchorOf(b);
+  return (
+    a.column === b.column &&
+    a.row === b.row &&
+    anchorA.x === anchorB.x &&
+    anchorA.y === anchorB.y
+  );
+}
+
 /** `"column:row"` — the compact cell notation the keys are built from. */
 function cellKey(cell: Cell): string {
   return `${cell.column}:${cell.row}`;
@@ -522,11 +636,22 @@ export function lineKey(from: Cell, to: Cell): string {
 }
 
 /**
+ * Compact notation of one line point: the cell, and the anchor only when it
+ * is not the centre (which is absent by construction) — `"2:3"`, `"2:3@0,0.5"`.
+ */
+function linePointKey(point: LinePoint): string {
+  const anchor = anchorOf(point);
+  if (isCentreAnchor(anchor)) return cellKey(point);
+  return `${cellKey(point)}@${anchor.x},${anchor.y}`;
+}
+
+/**
  * Identity of a polyline: a digest of its point list, because a stroke's
  * point list is unbounded and a key must stay inside `MAX_KEY_LENGTH`.
+ * Anchor-less points key exactly as they did before anchors existed.
  */
-export function strokeKey(points: readonly Cell[], closed: boolean): string {
-  const payload = `${points.map(cellKey).join(";")}|${closed ? "closed" : "open"}`;
+export function strokeKey(points: readonly LinePoint[], closed: boolean): string {
+  const payload = `${points.map(linePointKey).join(";")}|${closed ? "closed" : "open"}`;
   return `stroke:${digest(payload)}`;
 }
 
@@ -585,7 +710,7 @@ export function itemSignature(item: CanvasItem): string {
     case "stroke":
       return [
         item.key,
-        item.points.map(cellKey).join(";"),
+        item.points.map(linePointKey).join(";"),
         item.closed ? 1 : 0,
         item.color ?? "",
         borderField(item.border),
@@ -683,6 +808,19 @@ export const borderValidator = v.object({
   color: v.optional(v.string()),
 });
 
+/**
+ * A line point's anchor. Structurally checked only — the two numbers are
+ * unbounded here on purpose: the tool emits the nine `ANCHOR_GRID` positions,
+ * but a stored anchor is **repaired** (clamped to `[0, 1]`, the centre dropped)
+ * by `sanitizeItem` on the way in rather than rejected at the door, so a write
+ * that was valid before anchors existed is still valid, whatever it carries.
+ */
+export const linePointValidator = v.object({
+  column: v.number(),
+  row: v.number(),
+  anchor: v.optional(v.object({ x: v.number(), y: v.number() })),
+});
+
 export const canvasItemValidator = v.union(
   v.object({
     type: v.literal("tile"),
@@ -707,7 +845,7 @@ export const canvasItemValidator = v.union(
   v.object({
     type: v.literal("stroke"),
     key: v.string(),
-    points: v.array(cellValidator),
+    points: v.array(linePointValidator),
     closed: v.optional(v.boolean()),
     border: v.optional(borderValidator),
     color: v.optional(v.string()),

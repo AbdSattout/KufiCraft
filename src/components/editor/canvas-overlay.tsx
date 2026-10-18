@@ -11,16 +11,18 @@
  *
  * Selected items are ringed in the theme's `--ring` colour (the artwork itself
  * is painted by the layer underneath), the armed start cell of a click
- * sequence gets a plain filled highlight with no border, and the eraser's
- * sweep is ringed in `--destructive`.
+ * sequence gets a plain filled highlight with no border, the line tool's snap
+ * dot marks the anchor the next click would store, and the eraser's sweep is
+ * ringed in `--destructive`.
  */
 
 import { memo } from "react";
 import { CanvasItemShape } from "@/components/canvas/canvas-preview";
 import { VIEWBOX_SIZE } from "@/lib/canvas/model";
-import type { Anchor, CanvasItem, ProjectConfig } from "@/lib/canvas/model";
+import type { Anchor, CanvasItem, LinePoint, ProjectConfig } from "@/lib/canvas/model";
+import { inkUnit } from "@/lib/canvas/geometry";
 import type { Rect } from "@/lib/canvas/geometry";
-import { anchorPath } from "@/lib/canvas/grid";
+import { anchorPath, linePointPosition } from "@/lib/canvas/grid";
 import { itemOf } from "@/lib/canvas/items";
 
 interface RingProps {
@@ -62,6 +64,11 @@ export interface CanvasOverlayProps {
   marquee: Rect | null;
   /** The armed start anchor of a click sequence, ringed before the preview. */
   marker: Anchor | null;
+  /**
+   * The line tool's snap dot: the anchored point the next click would store,
+   * drawn on top of the marker and the ghost so it is always visible.
+   */
+  dot: LinePoint | null;
   /** How the preview is painted: `solid` (the pen) or `ghost`. */
   previewMode: "solid" | "ghost";
 }
@@ -73,9 +80,11 @@ export const CanvasOverlay = memo(function CanvasOverlay({
   eraseItems,
   marquee,
   marker,
+  dot,
   previewMode,
 }: CanvasOverlayProps) {
   const ghost = previewMode === "ghost";
+  const dotPoint = dot === null ? null : linePointPosition(config, dot);
 
   return (
     <svg
@@ -144,6 +153,20 @@ export const CanvasOverlay = memo(function CanvasOverlay({
           width={2.5}
         />
       ))}
+
+      {dotPoint ? (
+        // The anchor under the cursor: exactly the point the next click
+        // stores, painted last so the marker and the ghost stay behind it.
+        <circle
+          cx={dotPoint.x}
+          cy={dotPoint.y}
+          r={inkUnit(config) / 3}
+          fill="var(--background)"
+          stroke="var(--primary)"
+          strokeWidth={2}
+          vectorEffect="non-scaling-stroke"
+        />
+      ) : null}
     </svg>
   );
 });

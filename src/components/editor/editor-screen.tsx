@@ -287,6 +287,7 @@ export function EditorScreen() {
             eraseItems={eraseItems}
             marquee={editor.marquee}
             marker={editor.previewMarker}
+            dot={editor.previewDot}
             previewMode={editor.previewMode}
             tool={editor.tool}
             zoom={editor.zoom}

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_PROJECT_CONFIG, arcKey, tileKey } from "@/lib/canvas/model";
+import { DEFAULT_PROJECT_CONFIG, arcKey, cellSize, tileKey } from "@/lib/canvas/model";
 import type { Anchor, CanvasItem, ProjectConfig } from "@/lib/canvas/model";
 import { anchorPath } from "@/lib/canvas/grid";
+import { inkUnit } from "@/lib/canvas/geometry";
 import { makeArc, makeLine, makeTile } from "@/lib/canvas/items";
 import {
   DEFAULT_ARC_STYLE,
@@ -43,13 +44,40 @@ function context(
   };
 }
 
-/** A viewBox point inside the ink zone (zone 0) of cell `(column, row)`. */
+/**
+ * A viewBox point at the **ink centre** of cell `(column, row)` — the anchor
+ * the line tool stores for a centre click — shifted by `offset` on both axes.
+ */
 function pointOf(
   column: number,
   row: number,
-  offset = 1,
+  offset = 0,
 ): { x: number; y: number } {
-  return { x: column * CONFIG.base + offset, y: row * CONFIG.base + offset };
+  const cell = cellSize(CONFIG);
+  const ink = inkUnit(CONFIG);
+  return {
+    x: column * cell + ink / 2 + offset,
+    y: row * cell + ink / 2 + offset,
+  };
+}
+
+/**
+ * A pointer that snaps to anchor `(x, y)` of cell `(column, row)`: the ink
+ * origin plus the anchor fraction of the ink extent. A half-multiple maps back
+ * to itself, so the click stores exactly this anchor.
+ */
+function anchorPointOf(
+  column: number,
+  row: number,
+  x: number,
+  y: number,
+): { x: number; y: number } {
+  const cell = cellSize(CONFIG);
+  const ink = inkUnit(CONFIG);
+  return {
+    x: column * cell + x * ink,
+    y: row * cell + y * ink,
+  };
 }
 
 function input(point: { x: number; y: number }, shift = false) {
@@ -364,6 +392,88 @@ describe("LineTool", () => {
     expect(preview.items).toHaveLength(3);
     expect(preview.items.every((item) => item.type === "tile")).toBe(true);
     expect(preview.marker).toEqual({ column: 1, row: 1, zone: 0 });
+  });
+
+  it("stores the clicked anchor of the cell under the cursor", () => {
+    const ctx = context();
+    const first = beginTool("line", ctx, NO_STATE, input(anchorPointOf(1, 1, 1, 1)));
+    expect(expectLine(first.state).points).toEqual([
+      { column: 1, row: 1, anchor: { x: 1, y: 1 } },
+    ]);
+
+    const second = beginTool("line", ctx, first.state, input(anchorPointOf(3, 1, 0, 1)));
+    expect(expectLine(second.state).points).toEqual([
+      { column: 1, row: 1, anchor: { x: 1, y: 1 } },
+      { column: 3, row: 1, anchor: { x: 0, y: 1 } },
+    ]);
+
+    // The run is straight, but a mixed-anchor run never merges into tiles: it
+    // is stroked through the anchors the designer clicked.
+    const out = beginTool("line", ctx, second.state, input(anchorPointOf(3, 1, 0, 1)));
+    expect(out.state).toBe(NO_STATE);
+    expect(out.commit?.items).toHaveLength(1);
+    expect(out.commit?.items[0]).toMatchObject({
+      type: "stroke",
+      points: [
+        { column: 1, row: 1, anchor: { x: 1, y: 1 } },
+        { column: 3, row: 1, anchor: { x: 0, y: 1 } },
+      ],
+    });
+  });
+
+  it("hovers an empty run, and its dot is exactly the next click's point", () => {
+    const ctx = context();
+    const hovered = moveTool("line", ctx, NO_STATE, input(anchorPointOf(2, 2, 1, 0)));
+    const state = expectLine(hovered.state);
+    expect(state.points).toEqual([]);
+
+    const preview = previewTool("line", ctx, state);
+    expect(preview.dot).toEqual({ column: 2, row: 2, anchor: { x: 1, y: 0 } });
+    expect(preview.items).toEqual([]);
+    expect(preview.marker).toBeNull();
+
+    // The click stores exactly the dot the overlay showed …
+    const clicked = beginTool("line", ctx, state, input(anchorPointOf(2, 2, 1, 0)));
+    expect(expectLine(clicked.state).points).toEqual([preview.dot]);
+
+    // … and the dot keeps tracking the anchor under the cursor mid-run.
+    const moved = moveTool("line", ctx, clicked.state, input(anchorPointOf(5, 1, 0.5, 0)));
+    const next = previewTool("line", ctx, moved.state);
+    expect(next.dot).toEqual({ column: 5, row: 1, anchor: { x: 0.5, y: 0 } });
+    expect(next.marker).toEqual({ column: 2, row: 2, zone: 0 });
+  });
+
+  it("previews exactly the run a click commits, anchors and all", () => {
+    const ctx = context();
+    let state = beginTool("line", ctx, NO_STATE, input(pointOf(1, 1))).state;
+    state = beginTool("line", ctx, state, input(anchorPointOf(3, 3, 1, 0))).state;
+    const hovered = moveTool("line", ctx, state, input(anchorPointOf(5, 1, 0, 1)));
+    const preview = previewTool("line", ctx, hovered.state);
+    expect(preview.items).toHaveLength(1);
+    expect(preview.items[0]).toMatchObject({ type: "stroke" });
+
+    // The pending hover, then clicking it again: the commit stores the very
+    // endpoints the ghost drew.
+    const extended = beginTool("line", ctx, hovered.state, input(anchorPointOf(5, 1, 0, 1)));
+    const out = beginTool("line", ctx, extended.state, input(anchorPointOf(5, 1, 0, 1)));
+    expect(out.state).toBe(NO_STATE);
+    expect(out.commit?.items).toEqual(preview.items);
+  });
+
+  it("accepts two points in one cell and closes on the first point", () => {
+    const ctx = context();
+    let state = beginTool("line", ctx, NO_STATE, input(anchorPointOf(2, 2, 0, 0))).state;
+    // The same cell at a different anchor is a real second point.
+    state = beginTool("line", ctx, state, input(anchorPointOf(2, 2, 1, 1))).state;
+    expect(expectLine(state).points).toHaveLength(2);
+    state = beginTool("line", ctx, state, input(anchorPointOf(2, 2, 1, 0))).state;
+    expect(expectLine(state).points).toHaveLength(3);
+
+    // Clicking the first point closes the run instead of extending it.
+    const out = beginTool("line", ctx, state, input(anchorPointOf(2, 2, 0, 0)));
+    expect(out.state).toBe(NO_STATE);
+    expect(out.commit?.items).toHaveLength(1);
+    expect(out.commit?.items[0]).toMatchObject({ type: "stroke", closed: true });
   });
 });
 

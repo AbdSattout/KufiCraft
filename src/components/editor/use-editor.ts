@@ -32,6 +32,7 @@ import type {
   CanvasItem,
   ItemBorder,
   ItemRounding,
+  LinePoint,
   ProjectConfig,
   ShapeId,
 } from "@/lib/canvas/model";
@@ -191,6 +192,8 @@ export interface EditorController {
   marquee: Rect | null;
   /** The armed start anchor of a click sequence (line / arc), or null. */
   previewMarker: Anchor | null;
+  /** The line tool's snap dot: the point the next click would store. */
+  previewDot: LinePoint | null;
   previewMode: "solid" | "ghost";
 
   exportSvg: () => void;
@@ -962,6 +965,7 @@ export function useEditor(
     previewKeys: preview.keys,
     marquee: preview.marquee,
     previewMarker: preview.marker,
+    previewDot: preview.dot,
     previewMode: preview.mode,
     exportSvg,
     exportPng,

@@ -18,6 +18,7 @@ import type {
 } from "@/lib/canvas/model";
 import { makeArc, makeLine, makeStroke, makeTile } from "@/lib/canvas/items";
 import { inkUnit } from "@/lib/canvas/geometry";
+import { lineItems } from "@/lib/canvas/ops";
 import {
   DEFAULT_ARC_STYLE,
   DEFAULT_STYLE,
@@ -44,6 +45,7 @@ import {
   itemSignature,
   itemsEqual,
   linePreview,
+  lineRun,
   marqueeSelection,
   moveItems,
   nextZoom,
@@ -513,19 +515,17 @@ describe("arcBetween + linePreview", () => {
   });
 
   it("is empty below two points", () => {
-    expect(linePreview(square, [], null, false)).toEqual([]);
-    expect(
-      linePreview(square, [{ column: 1, row: 1 }], null, false),
-    ).toEqual([]);
+    expect(linePreview(square, [], null)).toEqual([]);
+    expect(linePreview(square, [{ column: 1, row: 1 }], null)).toEqual([]);
+    // A pending hover on its own is not a run either.
+    expect(linePreview(square, [], { column: 1, row: 1 })).toEqual([]);
   });
 
   it("adds the hovered cell as the pending segment", () => {
-    const preview = linePreview(
-      square,
-      [{ column: 1, row: 1 }],
-      { column: 3, row: 1 },
-      false,
-    );
+    const preview = linePreview(square, [{ column: 1, row: 1 }], {
+      column: 3,
+      row: 1,
+    });
     expect(preview.map((item) => item.key)).toEqual([
       tileKey(1, 1, 0),
       tileKey(2, 1, 0),
@@ -534,16 +534,71 @@ describe("arcBetween + linePreview", () => {
     expect(preview.every((item) => item.color === square.ink)).toBe(true);
   });
 
-  it("makes a diagonal polyline open or closed on request", () => {
+  it("draws a diagonal polyline, closed when the hover returns to the start", () => {
     const points = [
       { column: 0, row: 0 },
       { column: 3, row: 3 },
     ];
-    const open = linePreview(square, points, null, false);
+    const open = linePreview(square, points, null);
     expect(open[0]).toMatchObject({ type: "stroke", color: square.ink });
     expect((open[0] as StrokeItem).closed).toBeFalsy();
-    const closed = linePreview(square, points, null, true);
+    // Hovering the first point is the closing click of the sequence.
+    const closed = linePreview(square, points, { column: 0, row: 0 });
     expect((closed[0] as StrokeItem).closed).toBe(true);
+  });
+
+  it("resolves a hover exactly as the click on it would", () => {
+    const points = [
+      { column: 1, row: 1 },
+      { column: 3, row: 1 },
+      { column: 3, row: 3 },
+    ];
+    // Extending: the hover becomes the next point, the run stays open.
+    expect(lineRun(points, { column: 1, row: 3 })).toEqual({
+      points: [...points, { column: 1, row: 3 }],
+      closed: false,
+      finished: false,
+    });
+    // Clicking the last point ends the run where it stands, open.
+    expect(lineRun(points, points[2])).toEqual({
+      points: [...points],
+      closed: false,
+      finished: true,
+    });
+    // Clicking the first point closes it.
+    expect(lineRun(points, points[0])).toEqual({
+      points: [...points],
+      closed: true,
+      finished: true,
+    });
+    // Two points on the same cell but different anchors are not the same
+    // point, so the run extends instead of finishing.
+    const anchored = [{ column: 2, row: 2, anchor: { x: 0, y: 0 } }];
+    expect(lineRun(anchored, { column: 2, row: 2, anchor: { x: 1, y: 1 } })).toEqual(
+      {
+        points: [...anchored, { column: 2, row: 2, anchor: { x: 1, y: 1 } }],
+        closed: false,
+        finished: false,
+      },
+    );
+  });
+
+  it("previews exactly the run the click commits, endpoint included", () => {
+    // A closing gesture: the last point is the first cell again, one anchor
+    // across. The ghost must equal the committed items — same closing
+    // segment, same endpoints (the bug this pins: the preview used to draw an
+    // open run and nudge both ends to the ink edges).
+    const points = [
+      { column: 1, row: 1, anchor: { x: 0, y: 0 } },
+      { column: 3, row: 1, anchor: { x: 0, y: 0 } },
+      { column: 3, row: 3, anchor: { x: 0, y: 0 } },
+      { column: 1, row: 3, anchor: { x: 0, y: 0 } },
+    ];
+    const hover = { column: 1, row: 1, anchor: { x: 0, y: 0 } };
+    const run = lineRun(points, hover);
+    expect(linePreview(square, points, hover)).toEqual(
+      lineItems(square, run.points, run.closed),
+    );
   });
 });
 

@@ -10,12 +10,14 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  ANCHOR_GRID,
   CIRCULAR_ANGULAR_UNIT,
   DEFAULT_PROJECT_CONFIG,
   RATIO_PRESETS,
   VIEWBOX_SIZE,
   cellSize,
   gridCount,
+  linePoint,
 } from "@/lib/canvas/model";
 import type { Anchor, Cell, ProjectConfig, Zone } from "@/lib/canvas/model";
 import {
@@ -34,8 +36,10 @@ import {
   cellsBetween,
   gridPaths,
   isSameAxis,
+  linePointPosition,
   pointToAnchor,
   pointToCell,
+  pointToLinePoint,
   runOf,
 } from "@/lib/canvas/grid";
 
@@ -217,6 +221,183 @@ describe("cellCentre", () => {
     expect(centre.x).toBeCloseTo(expected.x, 9);
     expect(centre.y).toBeCloseTo(expected.y, 9);
     expect(Math.hypot(centre.x - CENTER, centre.y - CENTER)).toBeCloseTo(radius, 6);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* line points                                                         */
+/* ------------------------------------------------------------------ */
+
+describe("linePointPosition", () => {
+  it("puts a point without an anchor exactly on the cell centre", () => {
+    // The back-compat pin: a document written before anchors existed must
+    // render on the same pixels.
+    expect(linePointPosition(SQUARE, { column: 2, row: 3 })).toEqual(
+      cellCentre(SQUARE, { column: 2, row: 3 }),
+    );
+    expect(linePointPosition(CIRCULAR, { column: 3, row: 6 })).toEqual(
+      cellCentre(CIRCULAR, { column: 3, row: 6 }),
+    );
+  });
+
+  it("puts the explicit centre exactly there too, however it is written", () => {
+    const centre = { x: 0.5, y: 0.5 };
+    expect(linePointPosition(SQUARE, { column: 2, row: 3, anchor: centre })).toEqual(
+      cellCentre(SQUARE, { column: 2, row: 3 }),
+    );
+    expect(linePointPosition(CIRCULAR, { column: 3, row: 6, anchor: centre })).toEqual(
+      cellCentre(CIRCULAR, { column: 3, row: 6 }),
+    );
+  });
+
+  it("spreads the nine anchors evenly over the ink square", () => {
+    const cell = cellSize(SQUARE);
+    const ink = inkUnit(SQUARE);
+    const at0 = linePointPosition(SQUARE, {
+      column: 1,
+      row: 2,
+      anchor: { x: 0, y: 0 },
+    });
+    const at1 = linePointPosition(SQUARE, {
+      column: 1,
+      row: 2,
+      anchor: { x: 1, y: 1 },
+    });
+    // The ink origin of the **drawn** cell is its top-left corner…
+    expect(at0).toEqual({ x: cell, y: 2 * cell });
+    // …its far corner is one ink away, in half-ink steps between.
+    expect(at1).toEqual({ x: cell + ink, y: 2 * cell + ink });
+    expect(
+      linePointPosition(SQUARE, { column: 1, row: 2, anchor: { x: 0.5, y: 0 } }),
+    ).toEqual({ x: cell + ink / 2, y: 2 * cell });
+    expect(
+      linePointPosition(SQUARE, { column: 1, row: 2, anchor: { x: 0, y: 1 } }),
+    ).toEqual({ x: cell, y: 2 * cell + ink });
+  });
+
+  it("reads the circular anchor in the sector's own frame", () => {
+    const config = makeConfig({ gridType: "circular", base: 20 });
+    const cell = cellSize(config);
+    const ink = inkUnit(config);
+    const origin = linePointPosition(config, {
+      column: 3,
+      row: 6,
+      anchor: { x: 0, y: 0 },
+    });
+    const expected = at(3 * cell, 6);
+    expect(origin.x).toBeCloseTo(expected.x, 9);
+    expect(origin.y).toBeCloseTo(expected.y, 9);
+    // x runs outwards along the radius, y around the sector: the far corner of
+    // the ink region is one ink-thickness out and one whole sector round.
+    const far = linePointPosition(config, {
+      column: 3,
+      row: 6,
+      anchor: { x: 1, y: 1 },
+    });
+    const farExpected = at(3 * cell + ink, 7);
+    expect(far.x).toBeCloseTo(farExpected.x, 9);
+    expect(far.y).toBeCloseTo(farExpected.y, 9);
+  });
+});
+
+describe("pointToLinePoint", () => {
+  it("round-trips every anchor of the square grid", () => {
+    for (const cell of [
+      { column: 0, row: 0 },
+      { column: 4, row: 7 },
+    ]) {
+      for (const anchor of ANCHOR_GRID) {
+        // An ink origin on an interior cell sits exactly on that cell's
+        // leading border, and the drawn cell size is not a binary fraction
+        // (§1), so its computed position can floor into the previous cell by
+        // one ulp. A real pointer is never exactly on a border; the origin
+        // is nudged the same hair inside its own cell.
+        const point = linePointPosition(SQUARE, { ...cell, anchor });
+        const nudge = (index: number, edge: number) =>
+          index > 0 && edge === 0 ? 1e-6 : 0;
+        expect(
+          pointToLinePoint(SQUARE, {
+            x: point.x + nudge(cell.column, anchor.x),
+            y: point.y + nudge(cell.row, anchor.y),
+          }),
+        ).toEqual(linePoint(cell.column, cell.row, anchor));
+      }
+    }
+  });
+
+  it("round-trips the anchors that are not on a cell boundary", () => {
+    // The radial origin of a band sits on the boundary between two cells, and
+    // the circular addressing goes through `atan2`/`hypot`: there the last bit
+    // decides which of the two equally-correct addresses comes back. The
+    // *position* is identical either way (that is the point), only the address
+    // may flip, so the round-trip is pinned away from cell boundaries.
+    const config = makeConfig({ gridType: "circular", base: 20 });
+    for (const x of [0.5, 1]) {
+      const anchor = { x, y: 0.5 };
+      expect(
+        pointToLinePoint(config, linePointPosition(config, { column: 3, row: 6, anchor })),
+      ).toEqual(linePoint(3, 6, anchor));
+    }
+  });
+
+  it("snaps to the nearest anchor, and clamps inside the ink region", () => {
+    const cell = cellSize(SQUARE);
+    const ink = inkUnit(SQUARE);
+    // 1/8 into the ink: the nearest anchor is the origin.
+    expect(pointToLinePoint(SQUARE, { x: ink / 8, y: ink / 8 })).toEqual({
+      column: 0,
+      row: 0,
+      anchor: { x: 0, y: 0 },
+    });
+    // 3/8: the nearest is the middle — which the model canonicalises to the
+    // point without an anchor, exactly as it always stored a centre point.
+    expect(pointToLinePoint(SQUARE, { x: (3 * ink) / 8, y: (3 * ink) / 8 })).toEqual(
+      linePoint(0, 0, { x: 0.5, y: 0.5 }),
+    );
+    // The space strip has no anchor of its own: the pointer snaps to the
+    // nearest ink edge of the cell it is in.
+    const spaceMiddle = ink + (cell - ink) / 2;
+    expect(pointToLinePoint(SQUARE, { x: spaceMiddle, y: 2 * cell })).toEqual({
+      column: 0,
+      row: 2,
+      anchor: { x: 1, y: 0 },
+    });
+    // …and a point exactly on a cell border belongs to the higher cell.
+    expect(pointToLinePoint(SQUARE, { x: cell, y: 2 * cell })).toEqual({
+      column: 1,
+      row: 2,
+      anchor: { x: 0, y: 0 },
+    });
+  });
+
+  it("rounds a tie towards the higher anchor", () => {
+    const ink = inkUnit(SQUARE);
+    // ¼ of the ink is exactly between 0 and ½: ½ wins.
+    expect(pointToLinePoint(SQUARE, { x: ink / 4, y: 0 })).toEqual({
+      column: 0,
+      row: 0,
+      anchor: { x: 0.5, y: 0 },
+    });
+    // ¾ is between ½ and 1: 1 wins.
+    expect(pointToLinePoint(SQUARE, { x: (3 * ink) / 4, y: 0 })).toEqual({
+      column: 0,
+      row: 0,
+      anchor: { x: 1, y: 0 },
+    });
+  });
+
+  it("snaps in the circular frame of the cell under the cursor", () => {
+    const config = makeConfig({ gridType: "circular", base: 20 });
+    // The cell centre (mid-sector angle) is the centre point.
+    expect(pointToLinePoint(config, cellCentre(config, { column: 3, row: 6 }))).toEqual(
+      { column: 3, row: 6 },
+    );
+    // 0.9 of the sector past its start rounds to the sector's end.
+    expect(pointToLinePoint(config, at(67.5, 6.9))).toEqual({
+      column: 3,
+      row: 6,
+      anchor: { x: 0.5, y: 1 },
+    });
   });
 });
 

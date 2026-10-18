@@ -35,6 +35,7 @@ import type {
   CanvasItemType,
   Cell,
   LineItem,
+  LinePoint,
   ProjectConfig,
   Rotation,
   ShapeId,
@@ -129,7 +130,7 @@ function arc(
   };
 }
 
-function stroke(points: Cell[], closed = false): StrokeItem {
+function stroke(points: readonly LinePoint[], closed = false): StrokeItem {
   return {
     type: "stroke",
     key: strokeKey(points, closed),
@@ -193,6 +194,18 @@ describe("keys", () => {
       new Stroke({ points }).key,
     );
   });
+
+  it("carries the stroke's anchors into its key", () => {
+    const plain = [{ column: 0, row: 0 }, { column: 2, row: 0 }];
+    const anchored = [
+      { column: 0, row: 0, anchor: { x: 0, y: 1 } },
+      { column: 2, row: 0, anchor: { x: 1, y: 1 } },
+    ];
+    expect(new Stroke({ points: anchored }).key).toBe(strokeKey(anchored, false));
+    expect(new Stroke({ points: anchored }).key).not.toBe(
+      new Stroke({ points: plain }).key,
+    );
+  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -228,6 +241,19 @@ describe("parseItem / itemOf", () => {
     ).toEqual(
       makeArc({ from: { column: 0, row: 2 }, to: { column: 4, row: 2 }, direction: "clockwise", size: "half" }),
     );
+  });
+
+  it("round-trips a stroke's anchors and drops the centre", () => {
+    const json = makeStroke(
+      [
+        { column: 0, row: 0, anchor: { x: 0, y: 1 } },
+        { column: 2, row: 0, anchor: { x: 0.5, y: 0.5 } },
+      ],
+      false,
+    );
+    // A centre anchor is storage-free: the point stays a plain cell.
+    expect(json.points[1]).toEqual({ column: 2, row: 0 });
+    expect(parseItem(json).toJSON()).toEqual(json);
   });
 });
 
@@ -270,6 +296,38 @@ describe("render", () => {
       expect(rendered.width).toBe(inkUnit(SQUARE));
       expect(rendered.path).not.toBe("");
     }
+  });
+
+  it("strokes through a stroke's anchors, not its cell centres", () => {
+    const cell = cellSize(SQUARE);
+    const ink = inkUnit(SQUARE);
+    const subject = new Stroke({
+      points: [
+        { column: 0, row: 0, anchor: { x: 1, y: 1 } },
+        { column: 2, row: 0, anchor: { x: 0, y: 0 } },
+      ],
+    });
+    const { start, end } = endpoints(itemRender(SQUARE, subject.toJSON()).path);
+    // The far ink corner of the cell is one ink in from its drawn origin.
+    expectPointNear(start, { x: ink, y: ink }, 1e-6);
+    // An anchored end is drawn exactly: no nudge out to the fragment edge.
+    expectPointNear(end, { x: 2 * cell, y: 0 }, 1e-6);
+  });
+
+  it("nudges only a centre end out to the fragment edge", () => {
+    const cell = cellSize(SQUARE);
+    const ink = inkUnit(SQUARE);
+    const mixed = new Stroke({
+      points: [
+        // Centre end on the left …
+        { column: 0, row: 0 },
+        // … explicit anchor on the right, where the nudge would land.
+        { column: 2, row: 0, anchor: { x: 0, y: 0.5 } },
+      ],
+    });
+    const { start, end } = endpoints(itemRender(SQUARE, mixed.toJSON()).path);
+    expectPointNear(start, { x: 0, y: ink / 2 }, 1e-6);
+    expectPointNear(end, { x: 2 * cell, y: ink / 2 }, 1e-6);
   });
 
   it("fills a straight line as one bar of ink", () => {
@@ -327,6 +385,26 @@ describe("bounds / contains", () => {
     const ink = inkUnit(SQUARE);
     expect(itemContains(SQUARE, subject, { x: ink / 2, y: ink / 2 })).toBe(true);
     expect(itemContains(SQUARE, subject, { x: 100, y: 100 })).toBe(false);
+  });
+
+  it("follows a stroke's anchors for bounds and hit tests", () => {
+    const cell = cellSize(SQUARE);
+    const ink = inkUnit(SQUARE);
+    const subject = stroke([
+      { column: 0, row: 0, anchor: { x: 1, y: 1 } },
+      { column: 2, row: 0, anchor: { x: 0, y: 0 } },
+    ]);
+    // Both ends are anchored, so no nudge: the segment runs
+    // (ink, ink) → (2·cell, 0), padded by half an ink on every side.
+    expect(itemBounds(SQUARE, subject)).toEqual({
+      x: ink / 2,
+      y: -ink / 2,
+      w: 2 * cell,
+      h: 2 * ink,
+    });
+    expect(itemContains(SQUARE, subject, { x: ink / 2 + cell, y: ink / 2 })).toBe(true);
+    // The fence's own cell centre is off the drawing.
+    expect(itemContains(SQUARE, subject, { x: ink / 2, y: ink / 2 })).toBe(false);
   });
 
   it("tests radial and angular points of a circular tile", () => {
@@ -387,6 +465,24 @@ describe("cellRange / moved", () => {
     );
     expect(moveItem(stroke([{ column: 0, row: 0 }, { column: 2, row: 2 }]), 2, 2)).toEqual(
       makeStroke([{ column: 2, row: 2 }, { column: 4, row: 4 }], false),
+    );
+    expect(
+      moveItem(
+        stroke([
+          { column: 0, row: 0, anchor: { x: 0, y: 1 } },
+          { column: 2, row: 2, anchor: { x: 1, y: 1 } },
+        ]),
+        1,
+        -1,
+      ),
+    ).toEqual(
+      makeStroke(
+        [
+          { column: 1, row: -1, anchor: { x: 0, y: 1 } },
+          { column: 3, row: 1, anchor: { x: 1, y: 1 } },
+        ],
+        false,
+      ),
     );
   });
 });

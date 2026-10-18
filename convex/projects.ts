@@ -13,6 +13,8 @@ import {
   snapRatio,
   arcKey,
   lineKey,
+  linePoint,
+  normalizeAnchor,
   strokeKey,
   tileKey,
   MAX_COLOR_LENGTH,
@@ -28,6 +30,7 @@ import type {
   CanvasItem,
   Cell,
   LineItem,
+  LinePoint,
   ProjectConfig,
   StrokeItem,
   TileItem,
@@ -139,7 +142,15 @@ function sanitizeItem(item: CanvasItem, config: ProjectConfig): CanvasItem | nul
       return next;
     }
     case "stroke": {
-      const points = item.points.map(cell);
+      const points: LinePoint[] = item.points.map((point) =>
+        linePoint(
+          column(point.column),
+          row(point.row),
+          // A damaged anchor is repaired into the ink region — or into the
+          // cell centre — never rejected; see `normalizeAnchor`.
+          normalizeAnchor(point.anchor),
+        ),
+      );
       if (points.length < 2) return null;
       const closed = item.closed === true;
       const next: StrokeItem = {

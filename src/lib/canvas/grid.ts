@@ -1,8 +1,8 @@
 /**
  * KufiCraft — grid addressing and the construction grid.
  *
- * Addressing: pointer → anchor (cell + zone), anchor → centre, straight runs.
- * Square grid: cell `(column, row)` covers
+ * Addressing: pointer → anchor (cell + zone), anchor → centre, line points
+ * (snap and position), straight runs. Square grid: cell `(column, row)` covers
  * `x ∈ [column·base, (column+1)·base)` and the same on `y`; circular grid:
  * band `column` covers radius `[column·base, (column+1)·base)`, sector `row`
  * covers `[row·10°, (row+1)·10°)` with `atan2(dy, dx)` normalised to `[0, 2π)`.
@@ -22,8 +22,9 @@ import {
   CIRCULAR_SECTORS,
   VIEWBOX_SIZE,
   cellSize,
+  linePoint,
 } from "./model";
-import type { Anchor, Cell, ProjectConfig, Zone } from "./model";
+import type { Anchor, Cell, LinePoint, ProjectConfig, Zone } from "./model";
 import {
   A,
   M,
@@ -129,6 +130,83 @@ export function cellCentre(config: ProjectConfig, cell: Cell): Point {
 /** Whether two cells share one row or one column. */
 export function isSameAxis(a: Cell, b: Cell): boolean {
   return a.column === b.column || a.row === b.row;
+}
+
+/* ------------------------------------------------------------------ */
+/* Line points                                                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Position of a line point: the ink origin of its **drawn** cell
+ * (`cellSize(config)`, §1) plus `anchor · ink` on each axis. A point without an
+ * anchor is `cellCentre` — literally the same value, so a document written
+ * before anchors existed renders identically.
+ *
+ * Square grid: `x · ink` across, `y · ink` down from the ink square's origin.
+ * Circular grid: `x · ink` outwards from the inner ink edge and `y · sector`
+ * from the sector's start — the angular fraction spans the whole **sector**,
+ * not the ink slice, which is what puts `(0.5, 0.5)` on the sector's mid-angle
+ * and so exactly on `cellCentre`.
+ */
+export function linePointPosition(config: ProjectConfig, point: LinePoint): Point {
+  const anchor = point.anchor;
+  if (anchor === undefined) return cellCentre(config, point);
+  const base = cellSize(config);
+  const ink = inkUnit(config);
+  if (config.gridType === "circular") {
+    const radius = point.column * base + anchor.x * ink;
+    const angle = (point.row + anchor.y) * CIRCULAR_ANGULAR_UNIT;
+    return polar(CENTER, CENTER, radius, angle);
+  }
+  return {
+    x: point.column * base + anchor.x * ink,
+    y: point.row * base + anchor.y * ink,
+  };
+}
+
+/**
+ * The line tool's point under a pointer: the cell under the cursor (`floor`,
+ * so a point exactly on a border belongs to the higher cell) and the anchor
+ * nearest the pointer inside that cell's ink region, snapped to the nine
+ * `ANCHOR_GRID` positions. The ink fraction is clamped to `[0, 1]`, so a
+ * pointer in the cell's space strip lands on the nearest ink edge — the cell
+ * under the cursor always wins.
+ */
+export function pointToLinePoint(config: ProjectConfig, point: Point): LinePoint {
+  const base = cellSize(config);
+  const ink = inkUnit(config);
+  if (config.gridType === "circular") {
+    const dx = point.x - CENTER;
+    const dy = point.y - CENTER;
+    const radius = Math.hypot(dx, dy);
+    const column = Math.floor(radius / base);
+    const angle = normalizeAngle(Math.atan2(dy, dx));
+    const row = Math.min(
+      Math.floor(angle / CIRCULAR_ANGULAR_UNIT),
+      CIRCULAR_SECTORS - 1,
+    );
+    return linePoint(column, row, {
+      x: anchorFraction(radius - column * base, ink),
+      y: anchorFraction(angle - row * CIRCULAR_ANGULAR_UNIT, CIRCULAR_ANGULAR_UNIT),
+    });
+  }
+  const column = Math.floor(point.x / base);
+  const row = Math.floor(point.y / base);
+  return linePoint(column, row, {
+    x: anchorFraction(point.x - column * base, ink),
+    y: anchorFraction(point.y - row * base, ink),
+  });
+}
+
+/**
+ * `local / span` snapped to the nearest of `{0, ½, 1}` and clamped into the
+ * ink region: a tie (`¼`, `¾` of the extent) rounds outwards, to the anchor
+ * after it. Degenerate input (a vanished ink region) snaps to the centre.
+ */
+function anchorFraction(local: number, span: number): number {
+  if (!(span > 0) || !Number.isFinite(local)) return 0.5;
+  const fraction = Math.round((local / span) * 2) / 2;
+  return Math.min(1, Math.max(0, fraction));
 }
 
 /**

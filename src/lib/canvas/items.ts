@@ -26,7 +26,9 @@ import {
   arcKey,
   cellSize,
   compareCells,
+  hasAnchor,
   lineKey,
+  linePoint,
   sanitizeBorder,
   sanitizeRounding,
   strokeKey,
@@ -43,6 +45,7 @@ import type {
   ItemBorder,
   ItemRounding,
   LineItem,
+  LinePoint,
   ProjectConfig,
   Rotation,
   ShapeId,
@@ -71,7 +74,7 @@ import {
 } from "./geometry";
 import type { CircularSlice, PathCmd, Point, Rect } from "./geometry";
 import { borderOutline } from "./border";
-import { cellCentre } from "./grid";
+import { cellCentre, linePointPosition } from "./grid";
 import { roundingRadius } from "./rounding";
 import { shapeById, shapePath } from "./shapes";
 
@@ -138,6 +141,16 @@ function rectFrom(points: readonly Point[], pad: number): Rect {
  */
 function plainCell(cell: Cell): Cell {
   return { column: cell.column, row: cell.row };
+}
+
+/**
+ * A line point as it is **stored**: the cell plus the anchor when it has one
+ * (the centre is never stored — `linePoint` drops it). Fields are copied one
+ * by one, like `plainCell`, so a caller's object can never leak a foreign key
+ * (`anchor`'s own extras included) onto the wire; `docs/CANVAS.md` §3.
+ */
+function plainLinePoint(point: LinePoint): LinePoint {
+  return linePoint(point.column, point.row, point.anchor);
 }
 
 /** Bounding box of an annular sector (corners + any cardinal angle inside). */
@@ -606,7 +619,7 @@ export class Line extends KufiItem {
 /* ------------------------------------------------------------------ */
 
 export interface StrokeInit {
-  points: Cell[];
+  points: readonly LinePoint[];
   closed?: boolean;
   border?: ItemBorder;
   color?: string;
@@ -614,21 +627,23 @@ export interface StrokeInit {
 
 /**
  * A multi-point polyline — the old line tool's diagonal / many-point case.
- * Drawn as a **stroked** path of ink width through the cell ink centres; the
- * first and last points are pushed half an ink square outwards along an
- * axis-aligned end segment so a straight end reaches the fragment edge,
- * exactly like the reference implementation.
+ * Drawn as a **stroked** path of ink width through its points: each point's
+ * anchored position, or its cell centre when it carries no anchor (the
+ * pre-anchor model). The first and last **centre** points are pushed half an
+ * ink square outwards along an axis-aligned end segment so a straight end
+ * reaches the fragment edge, exactly like the reference implementation; an
+ * explicit anchor is a position the designer chose and is drawn exactly.
  */
 export class Stroke extends KufiItem {
   readonly type = "stroke" as const;
-  readonly points: readonly Cell[];
+  readonly points: readonly LinePoint[];
   readonly closed: boolean;
   readonly border?: ItemBorder;
   readonly color?: string;
 
   constructor(init: StrokeInit) {
     super();
-    this.points = init.points.map(plainCell);
+    this.points = init.points.map(plainLinePoint);
     this.closed = init.closed ?? false;
     this.border = init.border;
     this.color = init.color;
@@ -642,7 +657,7 @@ export class Stroke extends KufiItem {
     const item: StrokeItem = {
       type: "stroke",
       key: this.key,
-      points: this.points.map(plainCell),
+      points: this.points.map(plainLinePoint),
     };
     if (this.closed) item.closed = true;
     if (this.border !== undefined) item.border = this.border;
@@ -665,17 +680,20 @@ export class Stroke extends KufiItem {
     };
   }
 
-  /** Cell centres, with the reference implementation's end nudges. */
+  /** The points the stroke is drawn through, with the reference end nudges. */
   anchorPoints(config: ProjectConfig): Point[] {
     const ink = inkUnit(config);
-    const centres = this.points.map((cell) => cellCentre(config, cell));
-    if (centres.length < 2) return centres;
-    const last = centres.length - 1;
-    return centres.map((point, index) => {
+    const positions = this.points.map((point) => linePointPosition(config, point));
+    if (positions.length < 2) return positions;
+    const last = positions.length - 1;
+    return positions.map((point, index) => {
       if (this.closed) return point;
       if (index !== 0 && index !== last) return point;
-      const previous = centres[index === 0 ? index : index - 1];
-      const next = centres[index === 0 ? index + 1 : index];
+      // An anchored end is where the designer put it — only a centre end is
+      // nudged out to the fragment edge, as the reference app always did.
+      if (hasAnchor(this.points[index])) return point;
+      const previous = positions[index === 0 ? index : index - 1];
+      const next = positions[index === 0 ? index + 1 : index];
       const dx = next.x - previous.x;
       const dy = next.y - previous.y;
       const out = expandRect(
@@ -719,10 +737,9 @@ export class Stroke extends KufiItem {
 
   moved(columns: number, rows: number): Stroke {
     return new Stroke({
-      points: this.points.map((cell) => ({
-        column: cell.column + columns,
-        row: cell.row + rows,
-      })),
+      points: this.points.map((point) =>
+        linePoint(point.column + columns, point.row + rows, point.anchor),
+      ),
       closed: this.closed,
       border: this.border,
       color: this.color,
@@ -1186,7 +1203,7 @@ export function makeLine(from: Cell, to: Cell, color?: string): LineItem {
 }
 
 export function makeStroke(
-  points: readonly Cell[],
+  points: readonly LinePoint[],
   closed: boolean,
   color?: string,
 ): StrokeItem {

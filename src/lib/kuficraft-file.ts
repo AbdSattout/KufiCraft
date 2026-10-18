@@ -34,7 +34,9 @@ import {
   CIRCULAR_SECTORS,
   arcKey,
   lineKey,
+  linePoint,
   maxGridIndex,
+  normalizeAnchor,
   sanitizeBorder,
   sanitizeRounding,
   snapRatio,
@@ -50,6 +52,7 @@ import type {
   ItemBorder,
   ItemRounding,
   LineItem,
+  LinePoint,
   ProjectConfig,
   Rotation,
   ShapeId,
@@ -304,11 +307,16 @@ export function normalizeItem(
     }
     case "stroke": {
       if (!Array.isArray(value.points) || value.points.length < 2) return null;
-      const points: Cell[] = [];
+      const points: LinePoint[] = [];
       for (const candidate of value.points) {
+        if (!isRecord(candidate)) return null;
         const cell = cellOf(candidate, maxColumn, maxRow);
         if (!cell) return null;
-        points.push(cell);
+        // The anchor is optional and bounded to the ink region; an unusable
+        // one falls back to the cell centre instead of killing the item.
+        points.push(
+          linePoint(cell.column, cell.row, normalizeAnchor(candidate.anchor)),
+        );
       }
       const closed = value.closed === true;
       const item: StrokeItem = {

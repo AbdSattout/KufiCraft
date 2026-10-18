@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  ANCHOR_GRID,
   BORDER_ALL,
   BORDER_LEFT,
   BORDER_TOP,
+  CENTRE_ANCHOR,
   CORNER_ALL,
   CORNER_BOTTOM_LEFT,
   CORNER_TOP_LEFT,
@@ -15,12 +17,18 @@ import {
   MIN_BORDER_WIDTH,
   MIN_RATIO,
   RATIO_PRESETS,
+  anchorOf,
   arcKey,
   clampBorderWidth,
   clampRoundingRadius,
+  hasAnchor,
+  isCentreAnchor,
   itemSignature,
   lineKey,
+  linePoint,
+  normalizeAnchor,
   ratioLabel,
+  sameLinePoint,
   sanitizeBorder,
   sanitizeRounding,
   snapRatio,
@@ -33,6 +41,7 @@ import type {
   StrokeItem,
   TileItem,
 } from "@/lib/canvas/model";
+import { makeStroke } from "@/lib/canvas/items";
 
 const LAST = RATIO_PRESETS[RATIO_PRESETS.length - 1];
 /** The equal cell: half ink beside half space — the lightest preset. */
@@ -186,6 +195,120 @@ describe("rounding / border model", () => {
     expect(
       sanitizeBorder({ sides: BORDER_TOP, width: 2, color: long })?.color,
     ).toBe(long.slice(0, MAX_COLOR_LENGTH));
+  });
+});
+
+describe("line points", () => {
+  it("offers the nine anchors of the ink region, row-major", () => {
+    expect(ANCHOR_GRID).toEqual([
+      { x: 0, y: 0 },
+      { x: 0.5, y: 0 },
+      { x: 1, y: 0 },
+      { x: 0, y: 0.5 },
+      { x: 0.5, y: 0.5 },
+      { x: 1, y: 0.5 },
+      { x: 0, y: 1 },
+      { x: 0.5, y: 1 },
+      { x: 1, y: 1 },
+    ]);
+    // The fourth entry is the ink centre — the point the model used before
+    // anchors existed.
+    expect(ANCHOR_GRID[4]).toEqual(CENTRE_ANCHOR);
+  });
+
+  it("normalises the centre away, whichever way it is written", () => {
+    const centre = linePoint(2, 3, { x: 0.5, y: 0.5 });
+    expect(centre).toEqual({ column: 2, row: 3 });
+    expect(linePoint(2, 3)).toEqual(centre);
+    expect(centre).not.toHaveProperty("anchor");
+  });
+
+  it("keeps a non-centre anchor, copying it rather than aliasing it", () => {
+    const anchor = { x: 0, y: 1 };
+    const point = linePoint(2, 3, anchor);
+    expect(point).toEqual({ column: 2, row: 3, anchor: { x: 0, y: 1 } });
+    expect(point.anchor).not.toBe(anchor);
+  });
+
+  it("reads a point's anchor, absent meaning the centre", () => {
+    const bare = linePoint(1, 1);
+    const centred = linePoint(1, 1, { x: 0.5, y: 0.5 });
+    const corner = linePoint(1, 1, { x: 1, y: 0 });
+    expect(anchorOf(bare)).toEqual(CENTRE_ANCHOR);
+    expect(hasAnchor(bare)).toBe(false);
+    expect(hasAnchor(centred)).toBe(false);
+    expect(anchorOf(centred)).toEqual(CENTRE_ANCHOR);
+    expect(hasAnchor(corner)).toBe(true);
+    expect(isCentreAnchor(anchorOf(corner))).toBe(false);
+  });
+
+  it("compares two points by cell and anchor together", () => {
+    const corner = linePoint(1, 1, { x: 0, y: 0 });
+    expect(sameLinePoint(corner, linePoint(1, 1, { x: 0, y: 0 }))).toBe(true);
+    // The same cell, written with an explicit centre, is still the centre.
+    expect(sameLinePoint(linePoint(1, 1), linePoint(1, 1, CENTRE_ANCHOR))).toBe(true);
+    expect(sameLinePoint(corner, linePoint(1, 1, { x: 1, y: 0 }))).toBe(false);
+    expect(sameLinePoint(corner, linePoint(1, 2, { x: 0, y: 0 }))).toBe(false);
+  });
+
+  it("repairs a stored anchor: clamps it, drops what is not a point", () => {
+    expect(normalizeAnchor({ x: 0, y: 0.5 })).toEqual({ x: 0, y: 0.5 });
+    expect(normalizeAnchor({ x: 4, y: -2 })).toEqual({ x: 1, y: 0 });
+    // The centre is canonical storage of nothing.
+    expect(normalizeAnchor({ x: 0.5, y: 0.5 })).toBeUndefined();
+    // Anything that is not two finite numbers is not an anchor.
+    expect(normalizeAnchor(undefined)).toBeUndefined();
+    expect(normalizeAnchor(4)).toBeUndefined();
+    expect(normalizeAnchor({ x: 0 })).toBeUndefined();
+    expect(normalizeAnchor({ x: Number.NaN, y: 0 })).toBeUndefined();
+    expect(normalizeAnchor({ x: Number.POSITIVE_INFINITY, y: 0 })).toBeUndefined();
+  });
+
+  it("keys an anchor-less stroke exactly as the pre-anchor model did", () => {
+    const points = [
+      { column: 0, row: 0 },
+      { column: 1, row: 1 },
+    ];
+    // The centre is dropped on construction, so a stroke built from an
+    // explicit-centre list keys exactly like the old one: files and documents
+    // round-trip without their keys moving.
+    const throughCentre = points.map((cell) =>
+      linePoint(cell.column, cell.row, CENTRE_ANCHOR),
+    );
+    expect(strokeKey(throughCentre, false)).toBe(strokeKey(points, false));
+    expect(strokeKey(points, true)).not.toBe(strokeKey(points, false));
+  });
+
+  it("gives a different key to the same cells with different anchors", () => {
+    const bare = [
+      { column: 0, row: 0 },
+      { column: 1, row: 1 },
+    ];
+    const corner = [
+      linePoint(0, 0, { x: 0, y: 0 }),
+      linePoint(1, 1, { x: 0, y: 0 }),
+    ];
+    const edge = [
+      linePoint(0, 0, { x: 0.5, y: 0 }),
+      linePoint(1, 1, { x: 0, y: 0 }),
+    ];
+    expect(new Set([strokeKey(bare, false), strokeKey(corner, false), strokeKey(edge, false)]).size).toBe(3);
+  });
+
+  it("tells anchored strokes apart in the item signature too", () => {
+    const points = [
+      linePoint(0, 0),
+      linePoint(1, 1),
+    ];
+    const bare = makeStroke(points, false);
+    const corner = makeStroke(
+      [linePoint(0, 0, { x: 0, y: 0 }), linePoint(1, 1, { x: 0, y: 0 })],
+      false,
+    );
+    expect(itemSignature(bare)).toBe(
+      itemSignature({ ...bare, points: [...points] }),
+    );
+    expect(itemSignature(corner)).not.toBe(itemSignature(bare));
   });
 });
 

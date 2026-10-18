@@ -7,8 +7,11 @@
  *   • viewport → viewBox mapping (`clientToViewBox`) including CSS scaling
  *     and RTL — the SVG is fitted with `preserveAspectRatio="xMidYMid meet"`,
  *     so the mapping is a uniform scale plus a centred letterbox offset;
- *   • anchoring (`anchorAt`, `inkAnchorAt`, `anchorsAlongLine`) and hit testing
- *     (`hitTest`) — the item classes answer for their own geometry;
+ *   • anchoring (`anchorAt`, `inkAnchorAt`, `linePointAt`,
+ *     `anchorsAlongLine`) and hit testing (`hitTest`) — the item classes answer
+ *     for their own geometry;
+ *   • the line tool's run resolver (`lineRun`): preview and commit resolve a
+ *     gesture through it, so they can never disagree on an endpoint;
  *   • selection operations (move, recolour, reshape, duplicate, delete);
  *   • the shared types the tools speak: `ToolId`, `ToolContext`, `DrawStyle`,
  *     `ArcStyle`.
@@ -24,7 +27,9 @@ import {
   VIEWBOX_SIZE,
   cellSize,
   itemSignature as signatureOf,
+  linePoint,
   maxGridIndex,
+  sameLinePoint,
   tileKey,
 } from "@/lib/canvas/model";
 import type {
@@ -36,11 +41,17 @@ import type {
   Cell,
   ItemBorder,
   ItemRounding,
+  LinePoint,
   ProjectConfig,
   Rotation,
   ShapeId,
 } from "@/lib/canvas/model";
-import { cellCentre, pointToAnchor, pointToCell } from "@/lib/canvas/grid";
+import {
+  cellCentre,
+  pointToAnchor,
+  pointToCell,
+  pointToLinePoint,
+} from "@/lib/canvas/grid";
 import { shortestSectorDelta } from "@/lib/canvas/geometry";
 import { lineItems, removeItems } from "@/lib/canvas/ops";
 import {
@@ -218,6 +229,15 @@ export function inkAnchorAt(config: ProjectConfig, point: Point): Anchor {
   return { column: cell.column, row: cell.row, zone: 0 };
 }
 
+/**
+ * The line tool's point under `point`: the cell under the cursor plus the
+ * anchor nearest the pointer inside its ink region (nine positions —
+ * `docs/CANVAS.md` §3).
+ */
+export function linePointAt(config: ProjectConfig, point: Point): LinePoint {
+  return pointToLinePoint(config, clampToCanvas(point));
+}
+
 function sameCell(a: Cell, b: Cell): boolean {
   return a.column === b.column && a.row === b.row;
 }
@@ -372,10 +392,9 @@ function wrapRows(item: CanvasItem): CanvasItem {
       });
     case "stroke":
       return makeStroke(
-        item.points.map((cell) => ({
-          column: cell.column,
-          row: wrapSector(cell.row),
-        })),
+        item.points.map((point) =>
+          linePoint(point.column, wrapSector(point.row), point.anchor),
+        ),
         item.closed ?? false,
         item.color,
       );
@@ -538,21 +557,62 @@ export function arcBetween(
 }
 
 /**
- * Line-tool items for a polyline plus the cell under the cursor.
+ * The run a line gesture holds, resolved for the point under the cursor.
  *
- * The run paints with the project ink colour; the fragments keep their own
- * copy of it, so later ink changes leave the committed run alone.
+ * `preview` and a click both go through `lineRun`, so the ghost the overlay
+ * paints and the run the click stores are the same list of points closed the
+ * same way — the preview *is* the commit, not a copy of it.
+ */
+export interface LineRun {
+  /** The points the run would store. */
+  points: LinePoint[];
+  /** Whether the run would be closed (`Z` in the path). */
+  closed: boolean;
+  /** Whether the hover finishes the run instead of extending it. */
+  finished: boolean;
+}
+
+/**
+ * Resolves a click sequence: the points so far plus the pending hover, exactly
+ * as a click on that hover would commit them. The first click starts the run,
+ * clicking the last point ends it (open), clicking the first one closes it;
+ * anything else extends it. With no hover, the run is the points as they stand.
+ *
+ * This is the **only** place the line tool's rules live: `linePreview` calls it
+ * to paint, the tool calls it to commit, so a preview can never show an
+ * endpoint the commit does not draw (`docs/CANVAS.md` §6).
+ */
+export function lineRun(
+  points: readonly LinePoint[],
+  hover: LinePoint | null,
+): LineRun {
+  if (hover === null) return { points: [...points], closed: false, finished: false };
+  const first = points[0];
+  const last = points[points.length - 1];
+  if (last === undefined) {
+    return { points: [hover], closed: false, finished: false };
+  }
+  if (sameLinePoint(last, hover)) {
+    return { points: [...points], closed: false, finished: true };
+  }
+  if (points.length >= 2 && first !== undefined && sameLinePoint(first, hover)) {
+    return { points: [...points], closed: true, finished: true };
+  }
+  return { points: [...points, hover], closed: false, finished: false };
+}
+
+/**
+ * Line-tool items for a run in flight. The run paints with the project ink
+ * colour; the fragments keep their own copy of it, so later ink changes leave
+ * the committed run alone.
  */
 export function linePreview(
   config: ProjectConfig,
-  points: readonly Cell[],
-  hover: Cell | null,
-  closed: boolean,
+  points: readonly LinePoint[],
+  hover: LinePoint | null,
 ): CanvasItem[] {
-  if (points.length === 0) return [];
-  const path = hover === null ? [...points] : [...points, hover];
-  if (path.length < 2) return [];
-  return lineItems(config, path, closed);
+  const run = lineRun(points, hover);
+  return lineItems(config, run.points, run.closed);
 }
 
 /* ------------------------------------------------------------------ */

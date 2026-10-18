@@ -7,6 +7,7 @@ import {
   arcKey,
   cellSize,
   lineKey,
+  linePoint,
   strokeKey,
   tileKey,
 } from "@/lib/canvas/model";
@@ -15,6 +16,7 @@ import type {
   CanvasItem,
   Cell,
   ProjectConfig,
+  StrokeItem,
   TileItem,
   Zone,
 } from "@/lib/canvas/model";
@@ -30,8 +32,9 @@ import {
   replaceItems,
   toOps,
 } from "@/lib/canvas/ops";
-import { itemColor, makeArc, makeLine } from "@/lib/canvas/items";
-import { inkUnit, zoneRect } from "@/lib/canvas/geometry";
+import { itemColor, itemRender, makeArc, makeLine, makeStroke } from "@/lib/canvas/items";
+import { L, M, cmdsToPath, inkUnit, zoneRect } from "@/lib/canvas/geometry";
+import { linePointPosition } from "@/lib/canvas/grid";
 
 function makeConfig(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
   return { ...DEFAULT_PROJECT_CONFIG, ...overrides };
@@ -777,6 +780,111 @@ describe("lineItems", () => {
     );
     expect(stroke).toHaveLength(1);
     expect(stroke[0]).toMatchObject({ type: "stroke", color: "#101010" });
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Anchored line runs                                                  */
+/* ------------------------------------------------------------------ */
+
+describe("lineItems with anchored points", () => {
+  const config = makeConfig();
+  const corner = linePoint(0, 4, { x: 0, y: 0 });
+
+  it("merges a straight run whose anchors agree to its two ends", () => {
+    const points = [corner, linePoint(1, 4, { x: 0, y: 0 }), linePoint(2, 4, { x: 0, y: 0 })];
+    // The clicks between the ends draw nothing new on a collinear run, so the
+    // item keeps just the ends — with their anchors.
+    expect(lineItems(config, points, false)).toEqual([
+      makeStroke([points[0], points[2]], false, config.ink),
+    ]);
+  });
+
+  it("keeps a run that doubles back whole", () => {
+    // Merging to the ends would cut the ink short: this run reaches (3, 4)
+    // and turns back, so the span is not its two ends.
+    const points = [corner, linePoint(3, 4, { x: 0, y: 0 }), linePoint(1, 4, { x: 0, y: 0 })];
+    const items = lineItems(config, points, false);
+    expect(items).toHaveLength(1);
+    expect((items[0] as StrokeItem).points).toEqual(points);
+  });
+
+  it("never merges a run whose anchors differ", () => {
+    const points = [
+      corner,
+      linePoint(2, 4, { x: 0, y: 0 }),
+      linePoint(2, 4, { x: 1, y: 1 }),
+    ];
+    const items = lineItems(config, points, false);
+    expect((items[0] as StrokeItem).points).toEqual(points);
+  });
+
+  it("keeps a closed anchored run whole, closing segment included", () => {
+    const points = [
+      corner,
+      linePoint(2, 4, { x: 0, y: 0 }),
+      linePoint(2, 2, { x: 1, y: 1 }),
+    ];
+    const items = lineItems(config, points, true);
+    expect(items).toEqual([makeStroke(points, true, config.ink)]);
+  });
+
+  it("strokes an anchored run even when it is straight and short", () => {
+    // A bar or a tile cannot express a point inside a cell, so the anchored
+    // run is a stroke whatever `straightLinesAsSquares` says — and it keeps
+    // both endpoints as they were clicked.
+    const points = [linePoint(0, 4, { x: 0.5, y: 0 }), linePoint(2, 4, { x: 0.5, y: 0 })];
+    const items = lineItems(makeConfig({ straightLinesAsSquares: true }), points, false);
+    expect(items).toHaveLength(1);
+    expect(items[0].type).toBe("stroke");
+    expect((items[0] as StrokeItem).points).toEqual(points);
+  });
+
+  it("keeps an anchored run whole on the circular grid", () => {
+    // A "row" of the circular grid is an arc, not a line: nothing merges.
+    const circular = makeConfig({ gridType: "circular" });
+    const points = [
+      linePoint(3, 0, { x: 0.5, y: 0.5 }),
+      linePoint(5, 0, { x: 0.5, y: 0.5 }),
+    ];
+    const items = lineItems(circular, points, false);
+    expect((items[0] as StrokeItem).points).toEqual(points);
+  });
+
+  it("stores two points of one cell once per anchor", () => {
+    const points = [linePoint(1, 1, { x: 0, y: 0 }), linePoint(1, 1, { x: 1, y: 1 })];
+    const items = lineItems(config, points, false);
+    expect(items).toHaveLength(1);
+    expect(items[0].type).toBe("stroke");
+    expect((items[0] as StrokeItem).points).toEqual(points);
+  });
+
+  it("keeps a repeated point: a zero-length segment draws nothing", () => {
+    const point = linePoint(1, 1, { x: 0, y: 0 });
+    const items = lineItems(config, [point, point], false);
+    expect(items).toHaveLength(1);
+    // Both ends of the path are the same position — anchor (0,0) of cell
+    // (1,1) is its ink origin — so no ink is laid down.
+    const at = linePointPosition(config, point);
+    expect(itemRender(config, items[0])).toEqual({
+      path: cmdsToPath([M(at.x, at.y), L(at.x, at.y)]),
+      mode: "stroke",
+      width: inkUnit(config),
+    });
+  });
+
+  it("draws the anchored points, not the cell centres", () => {
+    const points = [linePoint(0, 0, { x: 0, y: 0 }), linePoint(2, 0, { x: 1, y: 1 })];
+    const items = lineItems(config, points, false);
+    // No end nudges either: both ends are where they were clicked — the ink
+    // origin of (0, 0) and the far ink corner of (2, 0).
+    const ink = inkUnit(config);
+    const cell = cellSize(config);
+    expect(itemRender(config, items[0])).toEqual({
+      path: cmdsToPath([M(0, 0), L(2 * cell + ink, ink)]),
+      mode: "stroke",
+      width: ink,
+    });
   });
 });
 

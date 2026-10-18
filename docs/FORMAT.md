@@ -35,6 +35,11 @@ apps never had (see “Legacy” below).
   `docs/CANVAS.md` §3 for the four item types and their keys.
 * `color` is **per item**: it is written on every item the editor creates, so a
   file looks the same no matter what `config.ink` is.
+* A `stroke` point may carry an optional `anchor: { x, y }` — where inside the
+  cell's **ink region** the point sits, as fractions of its extent (`0…1`,
+  `docs/CANVAS.md` §3). Absent means the cell centre, and the centre is never
+  written (`0.5, 0.5` is dropped on write), so a file from before anchors existed
+  is unchanged.
 
 ### Style fields (`rounding`, `border`)
 
@@ -103,7 +108,11 @@ that omits them renders **exactly** like a v2 file written before they existed.
      and ineffective ones dropped (see “Style fields”); items that fail
      validation are dropped (only model fields are kept), as are degenerate arcs
      and strokes with fewer than two points; the list is capped at `MAX_ITEMS`
-     (excess dropped, with a warning toast);
+     (excess dropped, with a warning toast). A point's optional `anchor` is
+     **repaired, never rejected**: finite fractions clamp into `[0, 1]`, and
+     anything else (wrong shape, `NaN`, a stored centre) becomes the cell
+     centre — so a write that was valid before anchors existed can never be
+     refused for one;
   5. `name` is trimmed/collapsed like the backend and capped at
      `MAX_NAME_LENGTH`.
 * Implemented in **one module** — `src/lib/kuficraft-file.ts` — used by both the

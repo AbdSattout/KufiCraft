@@ -26,7 +26,7 @@ import { Minus, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CanvasPreview } from "@/components/canvas/canvas-preview";
 import { visibleItems } from "@/lib/canvas/items";
-import type { Anchor, CanvasItem, ProjectConfig } from "@/lib/canvas/model";
+import type { Anchor, CanvasItem, LinePoint, ProjectConfig } from "@/lib/canvas/model";
 import type { Rect } from "@/lib/canvas/geometry";
 import { MAX_ZOOM, MIN_ZOOM } from "@/lib/editor-prefs";
 import { cn } from "@/lib/utils";
@@ -46,6 +46,8 @@ export interface CanvasStageProps {
   marquee: Rect | null;
   /** The armed start anchor of a click sequence (line / arc), or null. */
   marker: Anchor | null;
+  /** The line tool's snap dot: the point the next click would store. */
+  dot: LinePoint | null;
   previewMode: "solid" | "ghost";
   tool: ToolId;
   zoom: number;
@@ -69,6 +71,7 @@ export function CanvasStage({
   eraseItems,
   marquee,
   marker,
+  dot,
   previewMode,
   tool,
   zoom,
@@ -135,6 +138,7 @@ export function CanvasStage({
               eraseItems={eraseItems}
               marquee={marquee}
               marker={marker}
+              dot={dot}
               previewMode={previewMode}
             />
           </div>

@@ -1403,6 +1403,42 @@ describe("item sanitisation", () => {
     expect(doc.items[1]).toMatchObject({ type: "stroke", points, closed: true });
   });
 
+  it("keeps a point's anchor, clamps it, and repairs the rest", async () => {
+    const t = newTest();
+    const asA = t.withIdentity(USER_A);
+    const projectId = await createProject(t, USER_A, "مرتكزات");
+    const points = [
+      { column: 1, row: 1, anchor: { x: 0, y: 0.25 } },
+      { column: 2, row: 1, anchor: { x: 9, y: -3 } },
+      { column: 3, row: 1, anchor: { x: Number.NaN, y: 1 } },
+      { column: 4, row: 1, anchor: { x: 0.5, y: 0.5 } },
+      { column: 5, row: 1 },
+    ];
+
+    await asA.mutation(api.projects.applyOps, {
+      projectId,
+      ops: [{ type: "add", items: [{ type: "stroke", key: "client", points }] }],
+    });
+
+    const doc = required(
+      await asA.query(api.projects.get, { projectId }),
+      "project should exist",
+    );
+    // The anchor is repaired on the way in, never used to reject the point:
+    // out-of-range fractions clamp to the ink region, a broken or centre
+    // anchor becomes the plain cell.
+    const expected = [
+      { column: 1, row: 1, anchor: { x: 0, y: 0.25 } },
+      { column: 2, row: 1, anchor: { x: 1, y: 0 } },
+      { column: 3, row: 1 },
+      { column: 4, row: 1 },
+      { column: 5, row: 1 },
+    ];
+    expect(doc.items).toHaveLength(1);
+    expect(doc.items[0]).toMatchObject({ type: "stroke", points: expected });
+    expect(doc.items[0]?.key).toBe(strokeKey(expected, false));
+  });
+
   it("drops a default square shape and a zero rotation", async () => {
     const t = newTest();
     const asA = t.withIdentity(USER_A);

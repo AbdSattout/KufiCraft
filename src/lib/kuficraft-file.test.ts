@@ -14,7 +14,7 @@ import {
   strokeKey,
   tileKey,
 } from "@/lib/canvas/model";
-import type { CanvasItem, ProjectConfig } from "@/lib/canvas/model";
+import type { CanvasItem, LinePoint, ProjectConfig } from "@/lib/canvas/model";
 import {
   FILE_ERRORS,
   FALLBACK_FILE_NAME,
@@ -156,6 +156,32 @@ describe("exportProjectFile", () => {
     expect(parsed.config).toEqual(input.config);
     expect(parsed.items).toEqual([...input.items]);
     expect(parsed.droppedItems).toBe(0);
+  });
+
+  it("round-trips an anchored stroke, dropping a stored centre", () => {
+    const items: CanvasItem[] = [
+      {
+        type: "stroke",
+        key: "bogus",
+        points: [
+          { column: 0, row: 0, anchor: { x: 0, y: 0.25 } },
+          { column: 1, row: 0, anchor: { x: 0.5, y: 0.5 } },
+          { column: 2, row: 0 },
+        ],
+        closed: true,
+      },
+    ];
+    const points: LinePoint[] = [
+      { column: 0, row: 0, anchor: { x: 0, y: 0.25 } },
+      { column: 1, row: 0 },
+      { column: 2, row: 0 },
+    ];
+    const parsed = parseProjectFile(
+      exportProjectFile({ name: "x", config: sampleConfig(), items }, FIXED_AT),
+    );
+    expect(parsed.items).toEqual([
+      { type: "stroke", key: strokeKey(points, true), points, closed: true },
+    ]);
   });
 });
 
@@ -339,6 +365,34 @@ describe("parseProjectFile — items", () => {
     expect(parsed.items).toEqual([
       { type: "tile", key: tileKey(0, 3, 0), column: 0, row: 3, zone: 0 },
       { type: "tile", key: tileKey(0, 0, 0), column: 0, row: 0, zone: 0 },
+    ]);
+  });
+
+  it("clamps and repairs line anchors instead of dropping the point", () => {
+    const points: LinePoint[] = [
+      { column: 0, row: 0, anchor: { x: 0, y: 0.25 } },
+      { column: 1, row: 0, anchor: { x: 1, y: 0 } }, // clamped from (2, -1)
+      { column: 2, row: 0 }, // repaired from a non-numeric x
+      { column: 3, row: 0 }, // a stored centre is canonical storage of nothing
+    ];
+    const parsed = parseProjectFile(
+      rawFile({
+        items: [
+          {
+            type: "stroke",
+            key: "bogus",
+            points: [
+              { column: 0, row: 0, anchor: { x: 0, y: 0.25 } },
+              { column: 1, row: 0, anchor: { x: 2, y: -1 } },
+              { column: 2, row: 0, anchor: { x: "nope", y: 0.5 } },
+              { column: 3, row: 0, anchor: { x: 0.5, y: 0.5 } },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(parsed.items).toEqual([
+      { type: "stroke", key: strokeKey(points, false), points },
     ]);
   });
 

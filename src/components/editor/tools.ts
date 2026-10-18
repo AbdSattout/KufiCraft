@@ -19,6 +19,7 @@
  * `@/lib/canvas/items`, so a tool never hand-writes geometry.
  */
 
+import { sameLinePoint } from "@/lib/canvas/model";
 import type {
   Anchor,
   ArcItem,
@@ -26,6 +27,7 @@ import type {
   CanvasItemType,
   Cell,
   GridType,
+  LinePoint,
 } from "@/lib/canvas/model";
 import type { Point, Rect } from "@/lib/canvas/geometry";
 import { addItems, lineItems, paintItems, penItems, removeItems } from "@/lib/canvas/ops";
@@ -39,13 +41,16 @@ import {
   clampDelta,
   hitTest,
   inkAnchorAt,
+  linePointAt,
   linePreview,
+  lineRun,
   marqueeSelection,
   moveItems,
   rectFromPoints,
   shiftSelection,
   type ArcStyle,
   type DrawStyle,
+  type LineRun,
   type ToolContext,
   type ToolId,
 } from "./interaction";
@@ -73,7 +78,7 @@ export type ToolState =
   | { kind: "pen"; anchors: Anchor[]; cursor: Anchor }
   | { kind: "erase"; keys: string[]; from: Anchor }
   | { kind: "arc"; from: Anchor; to: Anchor }
-  | { kind: "line"; points: Cell[]; hover: Cell | null }
+  | { kind: "line"; points: LinePoint[]; hover: LinePoint | null }
   | { kind: "marquee"; from: Point; to: Point; base: readonly string[] }
   | { kind: "move"; from: Cell; to: Cell; keys: readonly string[] };
 
@@ -110,6 +115,8 @@ export interface ToolPreview {
   marquee: Rect | null;
   /** The armed start anchor of a click sequence (line / arc), to ring. */
   marker: Anchor | null;
+  /** The line tool's snap dot: the point the next click would store. */
+  dot: LinePoint | null;
 }
 
 const EMPTY_PREVIEW: ToolPreview = {
@@ -118,6 +125,7 @@ const EMPTY_PREVIEW: ToolPreview = {
   keys: [],
   marquee: null,
   marker: null,
+  dot: null,
 };
 
 /** A piece of a toolbar icon, drawn in a `0 0 24 24` box. */
@@ -307,6 +315,7 @@ class SelectTool extends KufiTool {
         keys: [],
         marquee: box,
         marker: null,
+        dot: null,
       };
     }
     if (state.kind === "move") {
@@ -324,6 +333,7 @@ class SelectTool extends KufiTool {
         keys: [],
         marquee: null,
         marker: null,
+        dot: null,
       };
     }
     return EMPTY_PREVIEW;
@@ -441,6 +451,7 @@ class PenTool extends KufiTool {
       keys: [],
       marquee: null,
       marker: null,
+      dot: null,
     };
   }
 
@@ -463,9 +474,16 @@ class PenTool extends KufiTool {
  * The line tool is a click sequence, not a drag: the first click starts a run,
  * each further click extends it, and clicking the last point again commits an
  * open polyline while clicking the first one commits a closed one (`Z`). That
- * is exactly the reference app's behaviour. A run with a diagonal part is
- * stroked; a run made only of axis-aligned segments is drawn as
- * `config.straightLinesAsSquares` says — one square per cell, or one solid bar.
+ * is exactly the reference app's behaviour.
+ *
+ * Clicks land on the nine anchors of the cell under the cursor
+ * (`linePointAt`), so a run can turn and end inside a cell; the overlay shows
+ * a dot on the anchor the next click would store. Both the ghost and the
+ * committed run are resolved by `lineRun` + `lineItems`, so the preview shows
+ * the *same* endpoints the click stores. A run with a diagonal part, or with
+ * anchored points, is stroked; a run made only of centre points and
+ * axis-aligned segments is drawn as `config.straightLinesAsSquares` says — one
+ * square per cell, or one solid bar.
  */
 class LineTool extends KufiTool {
   readonly id = "line" as const;
@@ -489,61 +507,34 @@ class LineTool extends KufiTool {
   ];
 
   begin(ctx: ToolContext, state: ToolState, input: ToolInput): ToolOutcome {
-    const anchor = inkAnchorAt(ctx.config, input.point);
-    return this.extend(ctx, state, { column: anchor.column, row: anchor.row });
+    const point = linePointAt(ctx.config, input.point);
+    const points = state.kind === "line" ? state.points : [];
+    const run = lineRun(points, point);
+    if (!run.finished) {
+      return { state: { kind: "line", points: run.points, hover: null } };
+    }
+    return this.finish(ctx, run);
   }
 
   /**
-   * Adds `cell` to the run held in `state`, or finishes it: clicking the last
-   * point ends the polyline, clicking the first one closes it.
+   * Tracks the anchor under the cursor — on hover too (the tool is
+   * `persistent`), because the dot it produces is where the next click lands.
+   * The hover is a *pending* click: it is the same value `begin` would store,
+   * so the two can never drift apart.
    */
-  private extend(ctx: ToolContext, state: ToolState, cell: Cell): ToolOutcome {
-    if (state.kind !== "line") {
-      return { state: { kind: "line", points: [cell], hover: null } };
-    }
-    const points = state.points;
-    const first = points[0];
-    const last = points[points.length - 1];
-    if (last.column === cell.column && last.row === cell.row) {
-      return this.finish(ctx, points, false);
-    }
-    if (
-      points.length >= 2 &&
-      first.column === cell.column &&
-      first.row === cell.row
-    ) {
-      return this.finish(ctx, points, true);
-    }
-    return {
-      state: { kind: "line", points: [...points, cell], hover: null },
-    };
-  }
-
-  /** Commits the run (`closed` adds the closing segment). */
-  private finish(
-    ctx: ToolContext,
-    points: readonly Cell[],
-    closed: boolean,
-  ): ToolOutcome {
-    const items = lineItems(ctx.config, points, closed);
-    if (items.length === 0) return { state: NO_STATE };
-    const next = addItems({ items: ctx.items }, items).items;
-    if (next === ctx.items) return { state: NO_STATE };
-    return { state: NO_STATE, commit: commit([...next], ctx.selection, "خط") };
-  }
-
   move(ctx: ToolContext, state: ToolState, input: ToolInput): ToolOutcome {
-    if (state.kind !== "line") return unchanged(state);
-    const anchor = inkAnchorAt(ctx.config, input.point);
-    const hover: Cell = { column: anchor.column, row: anchor.row };
-    if (
-      state.hover !== null &&
-      state.hover.column === hover.column &&
-      state.hover.row === hover.row
-    ) {
+    if (state.kind !== "none" && state.kind !== "line") return unchanged(state);
+    const hover = linePointAt(ctx.config, input.point);
+    if (state.kind === "line" && state.hover !== null && sameLinePoint(state.hover, hover)) {
       return unchanged(state);
     }
-    return { state: { ...state, hover } };
+    return {
+      state: {
+        kind: "line",
+        points: state.kind === "line" ? state.points : [],
+        hover,
+      },
+    };
   }
 
   end(ctx: ToolContext, state: ToolState): ToolOutcome {
@@ -553,17 +544,27 @@ class LineTool extends KufiTool {
   }
 
   override preview(ctx: ToolContext, state: ToolState): ToolPreview {
-    if (state.kind !== "line" || state.points.length === 0) return EMPTY_PREVIEW;
+    if (state.kind !== "line") return EMPTY_PREVIEW;
     const first = state.points[0];
     return {
-      items: linePreview(ctx.config, state.points, state.hover, false),
+      items: linePreview(ctx.config, state.points, state.hover),
       mode: "ghost",
       keys: [],
       marquee: null,
       marker: first
         ? { column: first.column, row: first.row, zone: 0 }
         : null,
+      dot: state.hover,
     };
+  }
+
+  /** Commits a finished run — the exact points and closing the preview showed. */
+  private finish(ctx: ToolContext, run: LineRun): ToolOutcome {
+    const items = lineItems(ctx.config, run.points, run.closed);
+    if (items.length === 0) return { state: NO_STATE };
+    const next = addItems({ items: ctx.items }, items).items;
+    if (next === ctx.items) return { state: NO_STATE };
+    return { state: NO_STATE, commit: commit([...next], ctx.selection, "خط") };
   }
 }
 
@@ -650,6 +651,7 @@ class EraserTool extends KufiTool {
       keys: state.keys,
       marquee: null,
       marker: null,
+      dot: null,
     };
   }
 }
@@ -726,6 +728,7 @@ class ArcTool extends KufiTool {
       keys: [],
       marquee: null,
       marker: state.from,
+      dot: null,
     };
   }
 
