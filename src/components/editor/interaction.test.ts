@@ -18,6 +18,9 @@ import { makeArc, makeLine, makeStroke, makeTile } from "@/lib/canvas/items";
 import {
   DEFAULT_ARC_STYLE,
   DEFAULT_STYLE,
+  WHEEL_GESTURE_GAP_MS,
+  WHEEL_GESTURE_MAX_STOPS,
+  WHEEL_IDLE,
   anchorAt,
   anchorsAlongLine,
   arcBetween,
@@ -52,7 +55,7 @@ import {
   zoomScrollOffset,
   ZOOM_STOPS,
 } from "./interaction";
-import type { ScrollLike, ToolContext } from "./interaction";
+import type { ScrollLike, ToolContext, WheelGesture } from "./interaction";
 
 const square: ProjectConfig = { ...DEFAULT_PROJECT_CONFIG };
 const circular: ProjectConfig = { ...square, gridType: "circular" };
@@ -863,45 +866,156 @@ describe("zoom controls", () => {
 });
 
 describe("wheel zoom normalisation", () => {
-  it("banks pixel deltas into ~60 px notches", () => {
-    // A trackpad streams small deltas: nothing happens until they add up.
-    const first = wheelSteps(0, 20, 0);
-    expect(first).toEqual({ pending: 20, steps: 0 });
-    const second = wheelSteps(first.pending, 20, 0);
-    expect(second).toEqual({ pending: 40, steps: 0 });
-    expect(wheelSteps(second.pending, 20, 0)).toEqual({ pending: 0, steps: 1 });
+  it("walks one stop on a gesture's first event, whatever its size or mode", () => {
+    // The acceptance criterion: one scroll must *visibly* zoom. Banking alone
+    // left a 48 px Firefox notch (deltaMode 1) and a ~53 px Linux trackpad
+    // event under the 60 px stop — they did nothing at all.
+    expect(wheelSteps(WHEEL_IDLE, 53, 0, 0)).toEqual({
+      pending: 0,
+      direction: 1,
+      spent: 1,
+      lastAt: 0,
+      steps: 1,
+      began: true,
+    });
+    expect(wheelSteps(WHEEL_IDLE, 3, 1, 0).steps).toBe(1); // 3 lines = 48 px
+    expect(wheelSteps(WHEEL_IDLE, 1, 2, 0).steps).toBe(1); // a page = 100 px
+    expect(wheelSteps(WHEEL_IDLE, 5, 0, 0).steps).toBe(1); // a trackpad nudge
+    expect(wheelSteps(WHEEL_IDLE, -5, 0, 0).steps).toBe(-1); // up zooms in
+    // The one-stop guarantee charges one stop: the rest of the event is banked.
+    expect(wheelSteps(WHEEL_IDLE, 100, 0, 0)).toMatchObject({
+      pending: 40,
+      steps: 1,
+    });
   });
 
-  it("counts a notched wheel's 100 px event as one notch", () => {
-    expect(wheelSteps(0, 100, 0)).toEqual({ pending: 40, steps: 1 });
-    // The banked remainder joins the next event.
-    expect(wheelSteps(40, 100, 0)).toEqual({ pending: 20, steps: 2 });
+  it("banks a gesture's later events towards further stops", () => {
+    // The guarantee is spent on the first event; from there the bank is the old
+    // one, so a notched mouse behaves exactly as before: 100 px = one stop.
+    let step = wheelSteps(WHEEL_IDLE, 100, 0, 0);
+    expect(step).toMatchObject({ pending: 40, steps: 1, began: true });
+    step = wheelSteps(step, 100, 0, 80);
+    expect(step).toMatchObject({ pending: 20, steps: 2, began: false });
+
+    // A trackpad stream: the first nudge already stepped, the rest add up.
+    step = wheelSteps(WHEEL_IDLE, 20, 0, 0);
+    expect(step.steps).toBe(1);
+    step = wheelSteps(step, 20, 0, 16);
+    expect(step).toMatchObject({ pending: 20, steps: 0 });
+    step = wheelSteps(step, 20, 0, 32);
+    expect(step).toMatchObject({ pending: 40, steps: 0 });
+    step = wheelSteps(step, 20, 0, 48);
+    expect(step).toMatchObject({ pending: 0, steps: 1 });
   });
 
   it("normalises line and page deltas (deltaMode 1 / 2)", () => {
-    // Firefox reports lines (3 per notch): one line is 16 px, so a 3-line
-    // event is 48 px — under a notch, and it must not be read as pixels.
-    expect(wheelSteps(0, -3, 1)).toEqual({ pending: -48, steps: 0 });
-    expect(wheelSteps(-12, -3, 1)).toEqual({ pending: 0, steps: -1 });
-    // A page is a whole notch with pixels to spare.
-    expect(wheelSteps(0, 1, 2).steps).toBe(1);
+    // Firefox's 3-line notch is 48 px. The first one steps (the guarantee);
+    // its 12 px shortfall then counts against the next stop, so three quick
+    // notches (144 px) are two stops, exactly as 144 px of travel deserves.
+    const one = wheelSteps(WHEEL_IDLE, 3, 1, 0);
+    expect(one).toMatchObject({ pending: 0, steps: 1 });
+    const two = wheelSteps(one, 3, 1, 50);
+    expect(two).toMatchObject({ pending: 48, steps: 0 });
+    const three = wheelSteps(two, 3, 1, 100);
+    expect(three).toMatchObject({ pending: 36, steps: 1 });
+    // A page is a whole stop with pixels to spare.
+    expect(wheelSteps(WHEEL_IDLE, 1, 2, 0)).toMatchObject({
+      pending: 40,
+      steps: 1,
+    });
   });
 
-  it("drops the bank when the direction flips", () => {
-    // 55 px banked zooming in, then the wheel reverses: the leftover must not
-    // cancel part of the first notch the other way (that is what stops a
-    // trackpad's small correction flick from closing a whole step).
-    expect(wheelSteps(55, -10, 0)).toEqual({ pending: -10, steps: 0 });
-    expect(wheelSteps(-10, -55, 0)).toEqual({ pending: -5, steps: -1 });
+  it("starts a fresh gesture when the direction flips", () => {
+    // The bank of one direction must never cancel the first stop of the other,
+    // and the flip walks its own guaranteed stop even from an empty bank.
+    const down = wheelSteps(WHEEL_IDLE, 3, 1, 0); // 48 px: one stop, no bank
+    expect(wheelSteps(down, -3, 1, 40)).toEqual({
+      pending: 0,
+      direction: -1,
+      spent: 1,
+      lastAt: 40,
+      steps: -1,
+      began: true,
+    });
+    // A nonzero bank is dropped, not netted against the new direction.
+    const banked = wheelSteps(WHEEL_IDLE, 100, 0, 0);
+    expect(wheelSteps(banked, -10, 0, 50)).toMatchObject({
+      pending: 0,
+      steps: -1,
+      began: true,
+    });
+  });
+
+  it("caps a single gesture at its stop budget", () => {
+    // A free-spinning wheel streams events; one gesture may not cross the whole
+    // ladder, so the stops stop until a quiet gap (or a flip) starts the next.
+    let step = wheelSteps(WHEEL_IDLE, 100, 0, 0);
+    let walked = Math.abs(step.steps);
+    for (let index = 1; index <= 8; index++) {
+      step = wheelSteps(step, 100, 0, index * 10);
+      walked += Math.abs(step.steps);
+      if (index > 2) expect(step.steps).toBe(0);
+    }
+    expect(walked).toBe(WHEEL_GESTURE_MAX_STOPS);
+    // The cap is per gesture: after the quiet gap the wheel is free again.
+    expect(wheelSteps(step, 100, 0, 200)).toMatchObject({
+      steps: 1,
+      began: true,
+    });
   });
 
   it("ignores zero and non-finite deltas", () => {
-    expect(wheelSteps(30, 0, 0)).toEqual({ pending: 30, steps: 0 });
-    expect(wheelSteps(30, Number.NaN, 0)).toEqual({ pending: 30, steps: 0 });
+    expect(wheelSteps(WHEEL_IDLE, 0, 0, 5)).toEqual({
+      ...WHEEL_IDLE,
+      steps: 0,
+      began: false,
+    });
+    const live: WheelGesture = {
+      pending: 30,
+      direction: 1,
+      spent: 1,
+      lastAt: 5,
+    };
+    for (const delta of [Number.NaN, Number.POSITIVE_INFINITY, 0]) {
+      expect(wheelSteps(live, delta, 0, 90)).toEqual({
+        ...live,
+        steps: 0,
+        began: false,
+      });
+    }
+    // An untravelled event does not split the gesture: the clock of the last
+    // real travel still decides when the next one began.
+    expect(wheelSteps(wheelSteps(live, 0, 0, 90), 10, 0, 95)).toMatchObject({
+      pending: 40,
+      steps: 0,
+      began: false,
+    });
+  });
+
+  it("splits gestures at the quiet gap, just under / at / over", () => {
+    const banked: WheelGesture = {
+      pending: 30,
+      direction: 1,
+      spent: 1,
+      lastAt: 1_000,
+    };
+    // Just under: still the same scroll, so the pixels join the bank.
+    expect(
+      wheelSteps(banked, 10, 0, 1_000 + WHEEL_GESTURE_GAP_MS - 1),
+    ).toMatchObject({ began: false, steps: 0, pending: 40 });
+    // At and over: a new scroll — one stop, whatever its size.
+    for (const gap of [WHEEL_GESTURE_GAP_MS, WHEEL_GESTURE_GAP_MS + 1]) {
+      expect(wheelSteps(banked, 10, 0, 1_000 + gap)).toMatchObject({
+        began: true,
+        steps: 1,
+        pending: 0,
+        spent: 1,
+      });
+    }
   });
 
   it("maps one scroll-up notch to one ladder stop in", () => {
-    const { steps } = wheelSteps(0, -100, 0);
+    const { steps } = wheelSteps(WHEEL_IDLE, -100, 0, 0);
     expect(steps).toBe(-1);
     // The handler's rule: `deltaY > 0` (wheel down) zooms out.
     expect(nextZoom(1, steps > 0 ? -1 : 1, 0.1, 32)).toBe(1.5);

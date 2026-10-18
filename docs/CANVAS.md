@@ -285,16 +285,28 @@ The hand tool pans, the wheel zooms. The maths is pure, lives in
   surface is `min(100%, 100svh - 14rem) × zoom`, so at 10 % a whole 1000-unit
   board is 100 px, and at 32× a `base` = 4 cell is ~87 px on a 900-px-tall
   window — drawing size, which the old 4× ceiling was not.
-* **Wheel zoom** — the plain wheel (no modifier) over the canvas **zooms**:
-  one notch walks one stop through `nextZoom`, and the board fraction under
-  the **pointer** stays under it. Trackpads stream tiny deltas, so
-  `wheelSteps` banks them in ~60 px notches (`deltaMode` lines ×16, pages
-  ×100) and drops the bank when the direction flips; the listener is attached
-  by hand on the viewport because React's `onWheel` is passive and could not
-  `preventDefault()` the pane's own scroll. A notch during a pointer gesture
-  is swallowed — a mid-drag zoom would remap the gesture's coordinates. The
-  consequence is intended: the viewport no longer wheel-scrolls; the hand tool
-  and the scrollbars still pan.
+* **Wheel zoom** — the plain wheel (no `Ctrl`/`Cmd`) over the canvas **zooms**:
+  a **gesture** is a run of events with no quiet gap longer than
+  `WHEEL_GESTURE_GAP_MS` (100 ms) travelling the same way, and its first event
+  walks **exactly one stop** through `nextZoom`, whatever its size or
+  `deltaMode` — one scroll must *visibly* zoom (Firefox's 3-line notch is
+  48 px and a Linux trackpad event ~53 px, both under the 60 px stop, so
+  banking alone left them doing nothing). Events continuing the gesture bank
+  their pixels in ~60 px stops (`deltaMode` lines ×16, pages ×100) up to
+  `WHEEL_GESTURE_MAX_STOPS` (4) per gesture, so a free-spin cannot cross the
+  whole ladder at once; a direction flip starts a fresh gesture, so the bank of
+  one way can never cancel the first stop of the other. The board fraction
+  under the **pointer** stays under it.
+* **Wheel zoom, modified** — `Ctrl`/`Cmd`+wheel is left to the browser:
+  trackpad pinch and page zoom are accessibility features this pane must not
+  swallow. The listener is attached by hand on the viewport (so the sidebar and
+  panels keep their own wheel behaviour) because React's `onWheel` is passive
+  and could not `preventDefault()` the pane's own scroll; a wheel during a live
+  pointer gesture is swallowed — a mid-drag zoom would remap the gesture's
+  coordinates — but only while the primary button is really down
+  (`event.buttons`), so a missed pointer-up cannot mute the wheel for the rest
+  of the session. The consequence is intended: the viewport no longer
+  wheel-scrolls; the hand tool and the scrollbars still pan.
 * **Anchoring** (`zoomScrollOffset`) — a zoom keeps one board point fixed on
   screen: the **pointer** for a wheel notch, the **middle of the pane** for
   the ± buttons (which are not on the canvas, so there is no pointer to

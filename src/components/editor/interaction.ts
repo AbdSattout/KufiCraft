@@ -720,49 +720,122 @@ export function zoomPercent(zoom: number): number {
 
 /* Wheel delta normalisation (plain-wheel zoom). */
 
-/** Pixels of wheel travel that count as one notch on the zoom ladder. */
+/** Pixels of wheel travel that count as one stop on the zoom ladder. */
 const WHEEL_NOTCH_PX = 60;
 /** A `deltaMode 1` (lines) delta, in pixels — Firefox sends ~3 per notch. */
 const WHEEL_LINE_PX = 16;
 /** A `deltaMode 2` (pages) delta, in pixels. */
 const WHEEL_PAGE_PX = 100;
 
-/** One wheel event, normalised: whole notches plus what is banked. */
-export interface WheelStep {
-  /** Pixels banked towards the next notch (same sign as the last delta). */
+/**
+ * Quiet period that ends a wheel **gesture**: events closer together than this
+ * belong to one scroll. 100 ms sits above the repeat interval of a notched
+ * mouse being spun (~50–80 ms) and below the pause between two deliberate
+ * scrolls, so «one scroll» and «one gesture» line up on every device.
+ */
+export const WHEEL_GESTURE_GAP_MS = 100;
+
+/**
+ * Stops one gesture may walk. The ladder has 15 stops; 4 (1× → 4×) is a
+ * visible but still-reversible change, while a free-spinning wheel streaming
+ * events would otherwise cross the whole range in one flick.
+ */
+export const WHEEL_GESTURE_MAX_STOPS = 4;
+
+/** The wheel's carry-over between the events of one gesture. */
+export interface WheelGesture {
+  /** Pixels banked towards the next stop (unsigned) since the last one. */
   pending: number;
-  /** Whole notches this event carried, signed like `deltaY`. */
+  /** Which way the gesture travels (`0` before it has seen any travel). */
+  direction: -1 | 0 | 1;
+  /** Stops the gesture has already walked (counted against the cap). */
+  spent: number;
+  /** Clock reading of the previous event, or `null` before the first. */
+  lastAt: number | null;
+}
+
+/** A gesture that has seen no events. */
+export const WHEEL_IDLE: WheelGesture = {
+  pending: 0,
+  direction: 0,
+  spent: 0,
+  lastAt: null,
+};
+
+/** One wheel event, normalised: its stops plus the gesture it leaves behind. */
+export interface WheelStep extends WheelGesture {
+  /** Whole stops this event carries, signed like `deltaY`. */
   steps: number;
+  /** Whether this event began a gesture (a quiet gap, a flip, or the first). */
+  began: boolean;
 }
 
 /**
- * Turns one wheel event into whole notches, banking the remainder.
+ * Turns one wheel event into whole stops, gesture-aware.
  *
- * One notch is ~60 px of travel. A notched mouse emits one 100 px event, but a
- * trackpad or a free-spinning wheel emits a stream of small deltas that would
- * otherwise walk the whole ladder in one flick; `pending` carries the pixels
- * banked between events. When the direction flips the bank is dropped, so the
- * leftover of one direction can never cancel the first notch of the other.
+ * A **gesture** is a run of events with no quiet gap longer than
+ * `WHEEL_GESTURE_GAP_MS`, all travelling the same way. Its first event walks
+ * **exactly one stop**, whatever its size or `deltaMode` — the acceptance
+ * criterion is that one scroll *visibly* zooms, and a pixel threshold cannot
+ * promise that: Firefox's 3-line notch is 48 px and a Linux trackpad event
+ * ~53 px, both under the 60 px stop, so banking alone left them doing nothing.
  *
- * The raw delta is in the event's `deltaMode` units: lines (`1`) and pages
- * (`2`) have to be converted before the pixel threshold means anything. Signs
- * follow `deltaY` (positive = scrolled down); the caller maps that to a zoom
- * direction.
+ * Events continuing the gesture bank their pixels towards further stops (the
+ * raw delta is in the event's unit: lines ×16, pages ×100), but the gesture
+ * walks at most `WHEEL_GESTURE_MAX_STOPS` stops in total. A **direction flip
+ * starts a fresh gesture**: its bank can never cancel the first stop of the
+ * other way, and the flip itself still walks its guaranteed stop.
+ *
+ * The clock is injected (`now`, the same source as `lastAt`); a reading that is
+ * not usable (NaN, or a clock that went backwards) counts as a quiet gap,
+ * because a fresh guarantee is the safe side. An event with no travel (0, or
+ * non-finite) is not input: it neither steps nor splits the gesture.
  */
 export function wheelSteps(
-  pending: number,
+  state: WheelGesture,
   deltaY: number,
   deltaMode: number,
+  now: number,
 ): WheelStep {
-  const pixels =
-    deltaY *
-    (deltaMode === 1 ? WHEEL_LINE_PX : deltaMode === 2 ? WHEEL_PAGE_PX : 1);
-  if (!Number.isFinite(pixels) || pixels === 0) return { pending, steps: 0 };
-  const banked = Math.sign(pending) === Math.sign(pixels) ? pending : 0;
-  const total = banked + pixels;
-  // `|| 0` folds `Math.trunc`'s -0 into 0: a zero-count step has no direction.
-  const steps = Math.trunc(total / WHEEL_NOTCH_PX) || 0;
-  return { pending: total - steps * WHEEL_NOTCH_PX, steps };
+  const unit =
+    deltaMode === 1 ? WHEEL_LINE_PX : deltaMode === 2 ? WHEEL_PAGE_PX : 1;
+  const pixels = deltaY * unit;
+  if (!Number.isFinite(pixels) || pixels === 0) {
+    return { ...state, steps: 0, began: false };
+  }
+  const direction: 1 | -1 = pixels > 0 ? 1 : -1;
+  const travel = Math.abs(pixels);
+  const gap =
+    state.lastAt === null ? Number.POSITIVE_INFINITY : now - state.lastAt;
+  const ongoing =
+    gap >= 0 && gap < WHEEL_GESTURE_GAP_MS && state.direction === direction;
+  if (!ongoing) {
+    // One stop, whatever the magnitude — and only one: the guarantee is the
+    // visible answer to the user's scroll, not a licence to leap the ladder.
+    return {
+      pending: Math.max(0, travel - WHEEL_NOTCH_PX),
+      direction,
+      spent: 1,
+      lastAt: now,
+      steps: direction,
+      began: true,
+    };
+  }
+  const total = state.pending + travel;
+  const wanted = Math.trunc(total / WHEEL_NOTCH_PX);
+  const budget = Math.max(0, WHEEL_GESTURE_MAX_STOPS - state.spent);
+  const taken = Math.min(wanted, budget);
+  return {
+    // The uncapped remainder, so the bank stays a sub-stop fraction even when
+    // the cap suppressed the stops the pixels would have bought.
+    pending: total - wanted * WHEEL_NOTCH_PX,
+    direction,
+    spent: state.spent + taken,
+    lastAt: now,
+    // `|| 0` folds -0 into 0: a zero-stop event has no direction.
+    steps: direction * taken || 0,
+    began: false,
+  };
 }
 
 /**

@@ -46,6 +46,7 @@ import { downloadProjectFile } from "@/lib/kuficraft-file";
 import { arrangeItems } from "@/lib/canvas/ops";
 import type { ArrangeAction } from "@/lib/canvas/ops";
 import {
+  WHEEL_IDLE,
   centreScroll,
   clientToViewBox,
   clampToCanvas,
@@ -67,6 +68,7 @@ import type {
   ScrollOffset,
   ToolContext,
   ToolId,
+  WheelGesture,
 } from "./interaction";
 import {
   NO_STATE,
@@ -704,39 +706,51 @@ export function useEditor(
     view.scrollTop = next.top;
   }, [zoom]);
 
-  // Plain-wheel zoom over the canvas, anchored at the pointer. React attaches
-  // `wheel` passively, so a `preventDefault()` in `onWheel` would be a no-op
-  // (with a warning); the listener is attached by hand instead. It lives on
-  // the viewport element only, so the sidebar and panels keep their own wheel
-  // behaviour, and the viewport no longer wheel-scrolls — the hand tool and
-  // the scrollbars still pan (docs/CANVAS.md §6).
+  // Plain-wheel zoom over the canvas, anchored at the pointer, stepped by
+  // gestures (docs/CANVAS.md §6). React attaches `wheel` passively, so a
+  // `preventDefault()` in `onWheel` would be a no-op (with a warning); the
+  // listener is attached by hand instead. It lives on the viewport element
+  // only, so the sidebar and panels keep their own wheel behaviour, and the
+  // viewport no longer wheel-scrolls — the hand tool and the scrollbars still
+  // pan.
   useEffect(() => {
     if (!enabled || document.status !== "ready") return;
     const view = viewportRef.current;
     if (!view) return;
-    // Pixels banked between notches; lives with the listener, so a reset is
-    // harmless — a fresh listener starts a fresh gesture.
-    let banked = 0;
+    // The gesture's carry-over (banked pixels, direction, stops walked, the
+    // clock). It lives with the listener, so a fresh attach starts a fresh
+    // gesture.
+    let gesture: WheelGesture = WHEEL_IDLE;
     const onWheel = (event: WheelEvent) => {
+      // Ctrl/Cmd+wheel is the browser's own zoom — trackpad pinch and page
+      // zoom are accessibility features this pane must not swallow.
+      if (event.ctrlKey || event.metaKey) return;
       if (pointerDownRef.current) {
-        // A live gesture owns the mapping: zooming now would remap the
-        // pointer mid-drag, and the next interpolated position would jump.
-        event.preventDefault();
-        return;
+        if (event.buttons & 1) {
+          // A live gesture owns the mapping: zooming now would remap the
+          // pointer mid-drag, and the next interpolated position would jump.
+          event.preventDefault();
+          return;
+        }
+        // Self-heal: a pointerup that never arrived (a release outside the
+        // capture, alt-tab, a context menu) must not mute the wheel for the
+        // rest of the session — the event's own buttons say no drag is live.
+        pointerDownRef.current = false;
       }
       if (event.deltaY === 0) return; // horizontal-only wheel: not ours
       event.preventDefault();
-      const { pending, steps } = wheelSteps(
-        banked,
+      const step = wheelSteps(
+        gesture,
         event.deltaY,
         event.deltaMode,
+        performance.now(),
       );
-      banked = pending;
-      if (steps === 0) return;
+      gesture = step;
+      if (step.steps === 0) return;
       // Scrolling up zooms in, like every map: `steps` is signed by `deltaY`.
-      const direction: 1 | -1 = steps > 0 ? -1 : 1;
+      const direction: 1 | -1 = step.steps > 0 ? -1 : 1;
       let next = zoomRef.current;
-      for (let index = 0; index < Math.abs(steps); index++) {
+      for (let index = 0; index < Math.abs(step.steps); index++) {
         next = nextZoom(next, direction, MIN_ZOOM, MAX_ZOOM);
       }
       setZoom(next, { x: event.clientX, y: event.clientY });
