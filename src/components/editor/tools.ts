@@ -62,7 +62,7 @@ export interface ToolInput {
  */
 export type ToolState =
   | { kind: "none" }
-  | { kind: "pen"; anchors: Anchor[] }
+  | { kind: "pen"; anchors: Anchor[]; cursor: Anchor }
   | { kind: "erase"; keys: string[]; from: Anchor }
   | { kind: "arc"; from: Anchor; to: Anchor }
   | { kind: "line"; points: Cell[]; hover: Cell | null }
@@ -342,9 +342,13 @@ function moveDelta(
  * pointer touches the canvas: the in-flight fragments are the real items.
  *
  * The pointer reports one position per event, so a fast drag flies over whole
- * cells. The segment between the last anchor and the new one is filled with
- * `anchorsAlongLine`, so a stroke stays continuous instead of coming out
- * scattered — and the pen still never merges a run into a bar.
+ * cells. The segment between the pointer's live cell and the new one is filled
+ * with `anchorsAlongLine`, so a stroke stays continuous instead of coming out
+ * scattered. The fill's source is the pointer (`cursor`), never the last
+ * stored fragment: a pointer that retraces the stroke stores nothing — dedup
+ * decides what is painted, not where the fill starts — so retracing to the
+ * junction of a T and turning up paints the turn, not a chord across the bar.
+ * And the pen still never merges a run into a bar.
  */
 class PenTool extends KufiTool {
   readonly id = "pen" as const;
@@ -359,28 +363,46 @@ class PenTool extends KufiTool {
 
   begin(ctx: ToolContext, state: ToolState, input: ToolInput): ToolOutcome {
     void state;
-    return { state: { kind: "pen", anchors: [anchorAt(ctx.config, input.point)] } };
+    const anchor = anchorAt(ctx.config, input.point);
+    return { state: { kind: "pen", anchors: [anchor], cursor: anchor } };
   }
 
   move(ctx: ToolContext, state: ToolState, input: ToolInput): ToolOutcome {
     if (state.kind !== "pen") return unchanged(state);
     const anchor = anchorAt(ctx.config, input.point);
-    const last = state.anchors[state.anchors.length - 1];
+    // The fill runs from the pointer's live cell, never from the stroke's last
+    // stored fragment: a pointer that retraces already-painted cells stores
+    // nothing, and fuelling the next fill from the tail would paint the chord
+    // the pointer never walked (the T's bar-to-stem jump).
+    const cursor = state.cursor;
+    const sameCell =
+      cursor.column === anchor.column && cursor.row === anchor.row;
     // Inside one cell only the fragment under the pointer can change, so the
     // one-anchor step stays exactly what it was; a step to another cell brings
     // the cells the pointer flew over along with it.
-    const candidates =
-      last.column === anchor.column && last.row === anchor.row
-        ? [anchor]
-        : anchorsAlongLine(ctx.config, last, anchor);
+    const candidates = sameCell
+      ? [anchor]
+      : anchorsAlongLine(ctx.config, cursor, anchor);
     // An anchor's key is its identity, so a fragment is never listed twice and
-    // the already-painted part of the line is dropped, not re-added.
+    // the already-painted part of the line is dropped, not re-added. De-dup
+    // decides what is stored — never where the fill starts.
     const taken = new Set(state.anchors.map(anchorKey));
     const fresh = candidates.filter(
       (candidate) => !taken.has(anchorKey(candidate)),
     );
-    if (fresh.length === 0) return unchanged(state);
-    return { state: { kind: "pen", anchors: [...state.anchors, ...fresh] } };
+    if (fresh.length === 0) {
+      // Nothing to store, but the pointer still moved: keep the fill's source
+      // live, or a retrace would freeze the pen at the stroke's tail.
+      if (sameCell) return unchanged(state);
+      return { state: { ...state, cursor: anchor } };
+    }
+    return {
+      state: {
+        ...state,
+        anchors: [...state.anchors, ...fresh],
+        cursor: anchor,
+      },
+    };
   }
 
   end(ctx: ToolContext, state: ToolState): ToolOutcome {
@@ -534,7 +556,9 @@ class LineTool extends KufiTool {
  * The eraser removes whatever the pointer touches. The reported position is
  * exact, and the cells a fast drag flew over between two reported positions are
  * swept at their centre (in the same spirit as the pen's gap fill), so a quick
- * sweep does not skip the items it passed over.
+ * sweep does not skip the items it passed over. The sweep also runs from the
+ * pointer's **live** cell (`from`), so a sweep that retraces itself does not
+ * brush the chord its stale end would draw.
  */
 class EraserTool extends KufiTool {
   readonly id = "eraser" as const;
@@ -572,7 +596,12 @@ class EraserTool extends KufiTool {
       );
       if (brushed) keys.add(brushed.key);
     }
-    if (keys.size === state.keys.length) return unchanged(state);
+    // The sweep's source is the live pointer, for the pen's reason: a retrace
+    // adds no keys, and a sweep fuelled by a stale `from` would brush the
+    // chord it never walked.
+    const moved =
+      anchor.column !== state.from.column || anchor.row !== state.from.row;
+    if (keys.size === state.keys.length && !moved) return unchanged(state);
     return { state: { kind: "erase", keys: [...keys], from: anchor } };
   }
 

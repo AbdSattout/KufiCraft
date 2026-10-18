@@ -236,22 +236,28 @@ name. Adding a tool = one class + one registry line.
 1. Every pointer position paints **the cell under the pointer** (its ink or
    space fragment, `anchorAt`) — the reference app's pen.
 2. **A fast drag is filled in.** The pointer reports one position per event and
-   can fly over whole cells, so the tool connects its last anchor to the new one
-   with `anchorsAlongLine` — a supercover walk of the segment between the two
-   cell centres that advances one cell per gridline crossed and reports **both**
-   cells at an exact corner crossing, so a diagonal stroke is edge-connected and
-   never reads as dotted at `ratio < 1`. There is no teleport rule and no
-   maximum gap: a stroke is the line between the positions the browser reported.
+   can fly over whole cells, so the tool connects the cell under the pointer's
+   **live** anchor (`cursor`) to the new one with `anchorsAlongLine` — a
+   supercover walk of the segment between the two cell centres that advances
+   one cell per gridline crossed and reports **both** cells at an exact corner
+   crossing, so a diagonal stroke is edge-connected and never reads as dotted
+   at `ratio < 1`. There is no teleport rule and no maximum gap: a stroke is
+   the line between the positions the browser reported.
 3. Anchors are deduplicated by identity (`anchorKey` = column/row/zone), so a
    fragment is never listed twice in one stroke: the fill drops the cells the
-   stroke already carries instead of listing them again.
+   stroke already carries instead of listing them again. De-dup decides what is
+   **stored**, never where the fill starts — a pointer that retraces its own
+   stroke stores nothing, yet the next segment still runs from where the
+   pointer is (retracing to a T's junction and turning up paints the turn, not
+   a chord from the bar's far end).
 4. Nothing is previewed before the pointer touches the canvas (no hover ghost):
    the pen has no pending state, and the in-flight fragments are the real items.
 5. Nothing merges: a straight run stays a row of `tile` fragments, never a bar.
 
 The **eraser** sweeps the same way: the reported position is hit-tested exactly,
 and every cell a fast drag flew over is hit-tested at its centre, so a quick
-sweep does not skip the items it passed between two events.
+sweep does not skip the items it passed between two events. Its sweep runs from
+the live pointer too, so a sweep that retraces itself does not brush a chord.
 
 ### Preview
 

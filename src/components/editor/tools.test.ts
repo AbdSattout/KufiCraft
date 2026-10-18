@@ -117,6 +117,79 @@ describe("PenTool", () => {
     expect(keys.has(tileKey(4, 3, 0))).toBe(false);
   });
 
+  it("paints the stem from the live pointer, not the bar's tail (the T)", () => {
+    const ctx = context();
+    let state = beginTool("pen", ctx, NO_STATE, input(pointOf(1, 4))).state;
+    state = moveTool("pen", ctx, state, input(pointOf(5, 4))).state;
+    // Without lifting, the pointer walks back along the bar to the junction…
+    state = moveTool("pen", ctx, state, input(pointOf(4, 4))).state;
+    state = moveTool("pen", ctx, state, input(pointOf(3, 4))).state;
+    // … and up: the fill starts where the pointer is, so the stem is the stem
+    // and never a chord from the bar's far end.
+    state = moveTool("pen", ctx, state, input(pointOf(3, 3))).state;
+    state = moveTool("pen", ctx, state, input(pointOf(3, 1))).state;
+
+    expect(
+      expectPen(state).anchors.map(
+        (anchor) => `${anchor.column}:${anchor.row}`,
+      ),
+    ).toEqual(["1:4", "2:4", "3:4", "4:4", "5:4", "3:3", "3:2", "3:1"]);
+  });
+
+  it("stores nothing when the pointer retraces the stroke", () => {
+    const ctx = context();
+    let state = beginTool("pen", ctx, NO_STATE, input(pointOf(1, 5))).state;
+    state = moveTool("pen", ctx, state, input(pointOf(5, 5))).state;
+    const painted = expectPen(state).anchors;
+    // Back along every painted cell, to the first one: dedup stores nothing…
+    for (const column of [4, 3, 2, 1]) {
+      state = moveTool("pen", ctx, state, input(pointOf(column, 5))).state;
+    }
+    expect(expectPen(state).anchors).toEqual(painted);
+    // … and the next fresh cell is still painted from where the pointer is.
+    state = moveTool("pen", ctx, state, input(pointOf(1, 4))).state;
+    expect(
+      expectPen(state).anchors.map(
+        (anchor) => `${anchor.column}:${anchor.row}`,
+      ),
+    ).toEqual(["1:5", "2:5", "3:5", "4:5", "5:5", "1:4"]);
+  });
+
+  it("connects the clamped cell when the pointer leaves the board, not the tail", () => {
+    const ctx = context();
+    let state = beginTool("pen", ctx, NO_STATE, input(pointOf(2, 4))).state;
+    state = moveTool("pen", ctx, state, input(pointOf(6, 4))).state;
+    // Back to the bar's start, then out of the canvas: the reported position
+    // is clamped to (0, 0), and the fill runs from the **live** cell to it —
+    // never from the bar's far end across the board (which is what tempted a
+    // chord out to the edge).
+    for (const column of [5, 4, 3, 2]) {
+      state = moveTool("pen", ctx, state, input(pointOf(column, 4))).state;
+    }
+    state = moveTool("pen", ctx, state, input({ x: -50, y: -50 })).state;
+    state = moveTool("pen", ctx, state, input(pointOf(2, 0))).state;
+
+    expect(
+      expectPen(state).anchors.map(
+        (anchor) => `${anchor.column}:${anchor.row}`,
+      ),
+    ).toEqual([
+      "2:4",
+      "3:4",
+      "4:4",
+      "5:4",
+      "6:4",
+      "2:3",
+      "1:3",
+      "1:2",
+      "1:1",
+      "0:1",
+      "0:0",
+      "1:0",
+      "2:0",
+    ]);
+  });
+
   it("is unchanged when the pointer stays inside the same cell", () => {
     const ctx = context();
     const start = beginTool("pen", ctx, NO_STATE, input(pointOf(1, 1)));
@@ -417,6 +490,26 @@ describe("EraserTool", () => {
     // Without the sweep the middle tile (3, 2) survives — the pointer never
     // reported a position over it.
     expect(out.commit?.items).toEqual([]);
+  });
+
+  it("sweeps from the live pointer when the drag retraces itself", () => {
+    const row = [1, 2, 3, 4, 5].map((column) =>
+      makeTile({ column, row: 2, zone: 0 }),
+    );
+    const bystander = makeTile({ column: 3, row: 1, zone: 0 });
+    const target = makeTile({ column: 2, row: 0, zone: 0 });
+    const ctx = context([...row, bystander, target], { tool: "eraser" });
+
+    let state = beginTool("eraser", ctx, NO_STATE, input(pointOf(1, 2))).state;
+    state = moveTool("eraser", ctx, state, input(pointOf(5, 2))).state;
+    // Back along the erased row, then up to the target. A sweep fuelled by the
+    // stale far end would brush the bystander on its way back — the pointer
+    // never crossed it.
+    state = moveTool("eraser", ctx, state, input(pointOf(2, 2))).state;
+    state = moveTool("eraser", ctx, state, input(pointOf(2, 0))).state;
+    const out = endTool("eraser", ctx, state);
+
+    expect(out.commit?.items).toEqual([bystander]);
   });
 });
 
