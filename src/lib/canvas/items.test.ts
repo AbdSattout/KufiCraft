@@ -81,7 +81,6 @@ import {
   visibleItems,
 } from "@/lib/canvas/items";
 import { shapePath } from "@/lib/canvas/shapes";
-import { borderPath } from "@/lib/canvas/border";
 
 /* ------------------------------------------------------------------ */
 /* fixtures + helpers                                                  */
@@ -608,15 +607,18 @@ describe("rounding / border", () => {
     const items = [
       line({ column: 0, row: 1 }, { column: 4, row: 1 }),
       stroke([{ column: 0, row: 0 }, { column: 2, row: 2 }]),
-      arc({ column: 0, row: 6 }, { column: 4, row: 6 }),
     ];
     for (const item of items) {
-      const next = styleItem(item, { border: BORDER });
+      const next = styleItem(item, { border: BORDER, rounding: ROUNDING });
       expect(next).not.toBe(item);
-      expect(next).toMatchObject({ border: BORDER });
-      // A tile-only field is still inert on these types.
-      expect(styleItem(item, { rounding: ROUNDING })).toBe(item);
+      expect(next).toMatchObject({ border: BORDER, rounding: ROUNDING });
+      expect(styleItem(next, { border: null, rounding: null })).toEqual(item);
     }
+
+    // An arc has no corners to round; it carries the border alone.
+    const rib = arc({ column: 0, row: 6 }, { column: 4, row: 6 });
+    expect(styleItem(rib, { border: BORDER })).toMatchObject({ border: BORDER });
+    expect(styleItem(rib, { rounding: ROUNDING })).toBe(rib);
   });
 
   it("carries the style through moved() and withColor()", () => {
@@ -642,31 +644,29 @@ describe("rounding / border", () => {
     });
   });
 
-  it("outlines in draw(), while render() stays the item's own paint", () => {
+  it("duplicates in draw(), while render() stays the item's own paint", () => {
     const subject = parseItem(
       makeTile({ column: 0, row: 0, zone: 0, border: BORDER }),
     );
     const rendered = subject.render(SQUARE);
-    expect(rendered.outline).toBeUndefined();
+    expect(rendered.borders).toBeUndefined();
 
     const drawn = subject.draw(SQUARE);
     expect(drawn.path).toBe(rendered.path);
-    // The box is the tile's ink fragment of the **drawn** cell: `base: 10`
-    // lays out `1000 / 99.75` cells, so the ink edge is
-    // `inkUnit(SQUARE)` = 0.75 × 7.5… = 7.518797 — never the stored `base`
-    // (docs/CANVAS.md §1).
-    expect(drawn.outline).toEqual({
-      path: "M -3 -1.5 L 7.518797 -1.5 M -1.5 -3 L -1.5 7.518797",
-      width: 3,
-      color: "#7c2d12",
-    });
+    // One copy per enabled side, translated by the width; the path is the
+    // item's own path, so both renderers can paint the same duplicate.
+    expect(drawn.borders).toEqual([
+      { dx: 0, dy: -3, color: "#7c2d12" },
+      { dx: -3, dy: 0, color: "#7c2d12" },
+    ]);
+    expect(drawn.mode).toBe("fill");
 
     // Without a border `draw` paints exactly `render`.
     const plain = parseItem(makeTile({ column: 0, row: 0, zone: 0 }));
     expect(plain.draw(SQUARE)).toEqual(plain.render(SQUARE));
   });
 
-  it("falls back to the resolved item colour for the outline", () => {
+  it("falls back to the resolved item colour for the duplicate", () => {
     const subject = parseItem(
       makeTile({
         column: 0,
@@ -676,7 +676,7 @@ describe("rounding / border", () => {
         border: { sides: BORDER_TOP, width: 2 },
       }),
     );
-    expect(subject.draw(SQUARE).outline?.color).toBe("#abcdef");
+    expect(subject.draw(SQUARE).borders?.[0].color).toBe("#abcdef");
     expect(
       parseItem(
         makeTile({
@@ -685,7 +685,7 @@ describe("rounding / border", () => {
           zone: 0,
           border: { sides: BORDER_TOP, width: 2 },
         }),
-      ).draw(INKED).outline?.color,
+      ).draw(INKED).borders?.[0].color,
     ).toBe("#123456");
   });
 
@@ -708,7 +708,7 @@ describe("rounding / border", () => {
     });
   });
 
-  it("outlines a run, a polyline and an arc around their own bounds", () => {
+  it("duplicates a run, a polyline and an arc with the same path", () => {
     const border = { sides: BORDER_TOP | BORDER_LEFT, width: 2 };
     const items = [
       line({ column: 0, row: 1 }, { column: 4, row: 1 }),
@@ -722,12 +722,40 @@ describe("rounding / border", () => {
       const bordered = styleItem(item, { border });
       const drawn = parseItem(bordered).draw(SQUARE);
       expect(drawn.path).toBe(itemRender(SQUARE, bordered).path);
-      expect(drawn.outline).toEqual({
-        path: borderPath(itemBounds(SQUARE, bordered), border.sides, border.width),
-        width: border.width,
-        color: SQUARE.ink,
-      });
+      expect(drawn.borders).toEqual([
+        { dx: 0, dy: -2, color: SQUARE.ink },
+        { dx: -2, dy: 0, color: SQUARE.ink },
+      ]);
     }
+  });
+
+  it("rounds a line bar and a polyline's turns", () => {
+    const bar: LineItem = {
+      ...line({ column: 0, row: 1 }, { column: 4, row: 1 }),
+      rounding: { radius: 0.4, corners: CORNER_ALL },
+    };
+    const barPath = parseItem(bar).render(SQUARE).path;
+    expect(barPath).toBe(
+      shapePath("square", itemBounds(SQUARE, bar), 0, bar.rounding),
+    );
+    expect(barPath).toContain(" C ");
+
+    const polyline: StrokeItem = {
+      ...stroke([
+        { column: 0, row: 0 },
+        { column: 3, row: 0 },
+        { column: 3, row: 3 },
+      ]),
+      rounding: { radius: 0.1, corners: CORNER_ALL },
+    };
+    const rounded = parseItem(polyline).render(SQUARE).path;
+    expect(rounded).toContain(" C ");
+    // The two ends stay square (a turn is what rounds), and the JSON keeps it.
+    expect(parseItem(polyline).toJSON()).toMatchObject({
+      rounding: polyline.rounding,
+    });
+    const plain = parseItem({ ...polyline, rounding: undefined });
+    expect(plain.render(SQUARE).path).not.toContain(" C ");
   });
 
   it("is part of the item signature", () => {
@@ -737,6 +765,17 @@ describe("rounding / border", () => {
     );
     expect(itemSignature(plain)).not.toBe(
       itemSignature(tile(1, 2, 0, { border: BORDER })),
+    );
+    const run = line({ column: 0, row: 1 }, { column: 4, row: 1 });
+    expect(itemSignature(run)).not.toBe(
+      itemSignature({ ...run, rounding: ROUNDING }),
+    );
+    const polyline = stroke([
+      { column: 0, row: 0 },
+      { column: 2, row: 2 },
+    ]);
+    expect(itemSignature(polyline)).not.toBe(
+      itemSignature({ ...polyline, rounding: ROUNDING }),
     );
   });
 });

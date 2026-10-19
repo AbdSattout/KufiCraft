@@ -236,9 +236,9 @@ export interface InkStyle {
   color?: string;
   /** Quarter-turn rotation for the drawn tiles. */
   rotation?: Rotation;
-  /** Corner rounding for the drawn tiles (`radius: 0` → square corners). */
+  /** Corner rounding for the drawn tiles / line items (`radius: 0` → off). */
   rounding?: ItemRounding;
-  /** Outside border for the drawn tiles. */
+  /** Outside border for the drawn items. */
   border?: ItemBorder;
 }
 
@@ -272,6 +272,18 @@ function resolvedColor(
   return color !== undefined && color.length > 0 ? color : config.ink;
 }
 
+/** The stored form of a draw style's rounding: radius 0 is the off state. */
+function activeRounding(
+  rounding: ItemRounding | undefined,
+): ItemRounding | undefined {
+  return rounding !== undefined && rounding.radius > 0 ? rounding : undefined;
+}
+
+/** The stored form of a draw style's border: no sides is the off state. */
+function activeBorder(border: ItemBorder | undefined): ItemBorder | undefined {
+  return border !== undefined && border.sides !== 0 ? border : undefined;
+}
+
 function tileFor(
   config: ProjectConfig,
   anchor: Anchor,
@@ -281,14 +293,8 @@ function tileFor(
   const rotation = (((style.rotation ?? 0) % 4) + 4) % 4;
   // `radius: 0` / `sides: 0` are the off ends of the style: they store nothing,
   // which is exactly how a document drawn before these fields existed looks.
-  const rounding =
-    style.rounding !== undefined && style.rounding.radius > 0
-      ? style.rounding
-      : undefined;
-  const border =
-    style.border !== undefined && style.border.sides !== 0
-      ? style.border
-      : undefined;
+  const rounding = activeRounding(style.rounding);
+  const border = activeBorder(style.border);
   return makeTile({
     column: anchor.column,
     row: anchor.row,
@@ -339,27 +345,47 @@ export function lineItems(
   points: readonly LinePoint[],
   closed: boolean,
   color?: string,
+  style: Pick<InkStyle, "rounding" | "border"> = {},
 ): CanvasItem[] {
   if (points.length < 2) return [];
   const lineColor = resolvedColor(config, color);
+  const rounding = activeRounding(style.rounding);
+  const border = activeBorder(style.border);
   if (!points.some(hasAnchor)) {
     const unique = dedupeCells(points, closed);
     if (unique.length < 2) return [];
-    if (config.gridType === "square" && config.straightLinesAsSquares) {
-      const squared = straightRunSquares(config, unique, closed, lineColor);
+    // A rounded run must stay one item: rounding cells independently would
+    // notch the joins. With rounding on, a straight run is a `Line` bar (its
+    // box corners round) and a run with turns is a `Stroke` (its turns round).
+    if (
+      rounding === undefined &&
+      config.gridType === "square" &&
+      config.straightLinesAsSquares
+    ) {
+      const squared = straightRunSquares(config, unique, closed, lineColor, border);
       if (squared !== null) return squared;
     }
     const run = runOf(unique);
     if (!closed && run.axis !== null && config.gridType === "square") {
-      return [makeLine(unique[0], unique[unique.length - 1], lineColor)];
+      return [
+        makeLine(unique[0], unique[unique.length - 1], lineColor, {
+          rounding,
+          border,
+        }),
+      ];
     }
-    return [makeStroke(unique, closed, lineColor)];
+    return [makeStroke(unique, closed, lineColor, { rounding, border })];
   }
   if (mergesToEnds(config, points, closed)) {
     const last = points.length - 1;
-    return [makeStroke([points[0], points[last]], false, lineColor)];
+    return [
+      makeStroke([points[0], points[last]], false, lineColor, {
+        rounding,
+        border,
+      }),
+    ];
   }
-  return [makeStroke(points, closed, lineColor)];
+  return [makeStroke(points, closed, lineColor, { rounding, border })];
 }
 
 /**
@@ -407,6 +433,7 @@ function straightRunSquares(
   cells: readonly Cell[],
   closed: boolean,
   color: string,
+  border?: ItemBorder,
 ): CanvasItem[] | null {
   const segments: [Cell, Cell][] = [];
   for (let index = 1; index < cells.length; index++) {
@@ -434,7 +461,10 @@ function straightRunSquares(
     }
   }
   return along.map((cell) =>
-    tileFor(config, { column: cell.column, row: cell.row, zone: 0 }, { color }),
+    tileFor(config, { column: cell.column, row: cell.row, zone: 0 }, {
+      color,
+      border,
+    }),
   );
 }
 

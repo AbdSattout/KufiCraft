@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  BORDER_TOP,
+  CORNER_ALL,
+  DEFAULT_BORDER_WIDTH,
   DEFAULT_PROJECT_CONFIG,
   RATIO_PRESETS,
   arcKey,
@@ -56,6 +59,7 @@ import {
   rectsIntersect,
   reshapeItems,
   shiftSelection,
+  styleForSelection,
   wheelSteps,
   zoomPercent,
   zoomScrollOffset,
@@ -606,6 +610,60 @@ describe("arcBetween + linePreview", () => {
     expect(linePreview(square, points, hover)).toEqual(
       lineItems(square, run.points, run.closed),
     );
+  });
+
+  it("previews with the draw style's rounding and border", () => {
+    const rounding = { radius: 0.2, corners: CORNER_ALL };
+    const border = { sides: BORDER_TOP, width: 2 };
+    // Rounding turns the straight run into one roundable bar in the preview,
+    // exactly as the commit does.
+    const preview = linePreview(
+      square,
+      [
+        { column: 0, row: 0 },
+        { column: 2, row: 0 },
+      ],
+      null,
+      { rounding, border },
+    );
+    expect(preview).toHaveLength(1);
+    expect(preview[0]).toMatchObject({ type: "line", rounding, border });
+  });
+});
+
+describe("styleForSelection", () => {
+  it("shows the draw style when nothing is selected", () => {
+    expect(styleForSelection(DEFAULT_STYLE, undefined)).toBe(DEFAULT_STYLE);
+  });
+
+  it("shows the selected item's own rounding and border", () => {
+    const rounding = { radius: 0.2, corners: CORNER_ALL };
+    const border = { sides: BORDER_TOP, width: 3, color: "#ff0000" };
+    const item: CanvasItem = { ...tile(0, 0), rounding, border };
+    expect(styleForSelection(DEFAULT_STYLE, item)).toMatchObject({
+      rounding,
+      border,
+    });
+    // The draw style itself is never mutated by the panel's view.
+    expect(DEFAULT_STYLE.rounding).toEqual({ radius: 0, corners: CORNER_ALL });
+  });
+
+  it("shows the off states for an item without style and no rounding on an arc", () => {
+    expect(styleForSelection(DEFAULT_STYLE, tile(0, 0))).toMatchObject({
+      rounding: { radius: 0, corners: CORNER_ALL },
+      border: { sides: 0, width: DEFAULT_BORDER_WIDTH },
+    });
+    const arc = makeArc({
+      from: { column: 0, row: 0 },
+      to: { column: 2, row: 0 },
+      direction: "clockwise",
+      size: "half",
+      border: { sides: BORDER_TOP, width: 2 },
+    });
+    expect(styleForSelection(DEFAULT_STYLE, arc)).toMatchObject({
+      rounding: { radius: 0, corners: CORNER_ALL },
+      border: { sides: BORDER_TOP, width: 2 },
+    });
   });
 });
 

@@ -73,9 +73,10 @@ import {
   zoneRect,
 } from "./geometry";
 import type { CircularSlice, PathCmd, Point, Rect } from "./geometry";
-import { borderOutline } from "./border";
+import { borderCopies } from "./border";
+import type { BorderCopy } from "./border";
 import { cellCentre, linePointPosition } from "./grid";
-import { roundingRadius } from "./rounding";
+import { roundCorners, roundingRadius } from "./rounding";
 import { shapeById, shapePath } from "./shapes";
 
 /* ------------------------------------------------------------------ */
@@ -91,18 +92,11 @@ export interface Rendered {
   /** Stroke width in viewBox units (0 for fills). */
   width: number;
   /**
-   * The item's outside border, when it carries one (`draw`, not `render`).
-   * Drawn **before** the item's own path so ink always wins over a border.
+   * The item's outside border, when it carries one (`draw`, not `render`):
+   * one translated duplicate of `path` per enabled side, painted **before**
+   * the item's own path so the ink always wins.
    */
-  outline?: RenderedOutline;
-}
-
-/** A border ready to paint: path, stroke width and resolved colour. */
-export interface RenderedOutline {
-  path: string;
-  /** Stroke width in viewBox units (always `> 0`). */
-  width: number;
-  color: string;
+  borders?: readonly BorderCopy[];
 }
 
 /** Inclusive cell extent of an item — used to clamp a selection move. */
@@ -114,9 +108,9 @@ export interface CellRange {
 }
 
 /**
- * Style patch applied to an item. Shape and rotation are the tile's own; a
- * border is a stroke outside **any** item. `null` clears a field, `undefined`
- * leaves it alone.
+ * Style patch applied to an item. Shape and rotation are the tile's own;
+ * rounding belongs to tiles, lines and strokes, and a border to every type.
+ * `null` clears a field, `undefined` leaves it alone.
  */
 export interface ItemStyle {
   shape?: ShapeId;
@@ -195,7 +189,7 @@ export abstract class KufiItem {
   abstract render(config: ProjectConfig): Rendered;
 
   /**
-   * What a renderer paints for this item: the outside border first (so the
+   * What a renderer paints for this item: the border duplicates first (so the
    * item's ink always wins), then the item's own path. This is the entry point
    * of every renderer; `render` is for callers that want the shape alone
    * (selection rings, toolbar icons).
@@ -204,12 +198,8 @@ export abstract class KufiItem {
     const rendered = this.render(config);
     const border = this.border;
     if (border === undefined) return rendered;
-    const outline = borderOutline(
-      this.bounds(config),
-      border,
-      this.resolvedColor(config),
-    );
-    return outline === undefined ? rendered : { ...rendered, outline };
+    const copies = borderCopies(border, this.resolvedColor(config));
+    return copies.length > 0 ? { ...rendered, borders: copies } : rendered;
   }
 
   abstract bounds(config: ProjectConfig): Rect;
@@ -468,6 +458,7 @@ export function sameBorder(
 export interface LineInit {
   from: Cell;
   to: Cell;
+  rounding?: ItemRounding;
   border?: ItemBorder;
   color?: string;
 }
@@ -486,6 +477,7 @@ export class Line extends KufiItem {
   readonly type = "line" as const;
   readonly from: Cell;
   readonly to: Cell;
+  readonly rounding?: ItemRounding;
   readonly border?: ItemBorder;
   readonly color?: string;
 
@@ -497,6 +489,7 @@ export class Line extends KufiItem {
         : [init.to, init.from];
     this.from = plainCell(from);
     this.to = plainCell(to);
+    this.rounding = init.rounding;
     this.border = init.border;
     this.color = init.color;
   }
@@ -512,6 +505,9 @@ export class Line extends KufiItem {
       from: plainCell(this.from),
       to: plainCell(this.to),
     };
+    if (this.rounding !== undefined && this.rounding.radius > 0) {
+      item.rounding = this.rounding;
+    }
     if (this.border !== undefined) item.border = this.border;
     if (this.color !== undefined) item.color = this.color;
     return item;
@@ -543,7 +539,12 @@ export class Line extends KufiItem {
 
   render(config: ProjectConfig): Rendered {
     if (this.from.row === this.to.row || this.from.column === this.to.column) {
-      return { path: rectToPath(this.bar(config)), mode: "fill", width: 0 };
+      const bar = this.bar(config);
+      const path =
+        this.rounding !== undefined && this.rounding.radius > 0
+          ? shapePath("square", bar, 0, this.rounding)
+          : rectToPath(bar);
+      return { path, mode: "fill", width: 0 };
     }
     // Not a straight run (invalid item): join the two cell centres.
     const p1 = cellCentre(config, this.from);
@@ -586,6 +587,7 @@ export class Line extends KufiItem {
     return new Line({
       from: { column: this.from.column + columns, row: this.from.row + rows },
       to: { column: this.to.column + columns, row: this.to.row + rows },
+      rounding: this.rounding,
       border: this.border,
       color: this.color,
     });
@@ -595,20 +597,29 @@ export class Line extends KufiItem {
     return new Line({
       from: this.from,
       to: this.to,
+      rounding: this.rounding,
       border: this.border,
       color,
     });
   }
 
-  /** A line has no shape or rounding; a border is the one style it can carry. */
+  /** A line bar can round the corners of its box; any line can be bordered. */
   withStyle(style: ItemStyle): Line {
-    if (style.border === undefined || sameBorder(style.border ?? undefined, this.border)) {
+    if (style.border === undefined && style.rounding === undefined) {
+      return this;
+    }
+    const rounding =
+      style.rounding === undefined ? this.rounding : (style.rounding ?? undefined);
+    const border =
+      style.border === undefined ? this.border : (style.border ?? undefined);
+    if (sameRounding(rounding, this.rounding) && sameBorder(border, this.border)) {
       return this;
     }
     return new Line({
       from: this.from,
       to: this.to,
-      border: style.border ?? undefined,
+      rounding,
+      border,
       color: this.color,
     });
   }
@@ -621,6 +632,7 @@ export class Line extends KufiItem {
 export interface StrokeInit {
   points: readonly LinePoint[];
   closed?: boolean;
+  rounding?: ItemRounding;
   border?: ItemBorder;
   color?: string;
 }
@@ -638,6 +650,7 @@ export class Stroke extends KufiItem {
   readonly type = "stroke" as const;
   readonly points: readonly LinePoint[];
   readonly closed: boolean;
+  readonly rounding?: ItemRounding;
   readonly border?: ItemBorder;
   readonly color?: string;
 
@@ -645,6 +658,7 @@ export class Stroke extends KufiItem {
     super();
     this.points = init.points.map(plainLinePoint);
     this.closed = init.closed ?? false;
+    this.rounding = init.rounding;
     this.border = init.border;
     this.color = init.color;
   }
@@ -660,6 +674,9 @@ export class Stroke extends KufiItem {
       points: this.points.map(plainLinePoint),
     };
     if (this.closed) item.closed = true;
+    if (this.rounding !== undefined && this.rounding.radius > 0) {
+      item.rounding = this.rounding;
+    }
     if (this.border !== undefined) item.border = this.border;
     if (this.color !== undefined) item.color = this.color;
     return item;
@@ -668,11 +685,18 @@ export class Stroke extends KufiItem {
   render(config: ProjectConfig): Rendered {
     const points = this.anchorPoints(config);
     if (points.length < 2) return { path: "", mode: "stroke", width: inkUnit(config) };
-    const cmds: PathCmd[] = [M(points[0].x, points[0].y)];
+    let cmds: PathCmd[] = [M(points[0].x, points[0].y)];
     for (let index = 1; index < points.length; index++) {
       cmds.push(L(points[index].x, points[index].y));
     }
     if (this.closed) cmds.push(Z);
+    if (this.rounding !== undefined && this.rounding.radius > 0) {
+      const box = this.bounds(config);
+      const radius = roundingRadius(this.rounding, box.w, box.h);
+      if (radius > 0) {
+        cmds = roundCorners(cmds, box, radius, this.rounding.corners);
+      }
+    }
     return {
       path: cmdsToPath(cmds),
       mode: "stroke",
@@ -741,6 +765,7 @@ export class Stroke extends KufiItem {
         linePoint(point.column + columns, point.row + rows, point.anchor),
       ),
       closed: this.closed,
+      rounding: this.rounding,
       border: this.border,
       color: this.color,
     });
@@ -750,20 +775,29 @@ export class Stroke extends KufiItem {
     return new Stroke({
       points: [...this.points],
       closed: this.closed,
+      rounding: this.rounding,
       border: this.border,
       color,
     });
   }
 
-  /** A polyline has no shape or rounding; a border is its one style field. */
+  /** A polyline rounds its turns; any stroke can be bordered. */
   withStyle(style: ItemStyle): Stroke {
-    if (style.border === undefined || sameBorder(style.border ?? undefined, this.border)) {
+    if (style.border === undefined && style.rounding === undefined) {
+      return this;
+    }
+    const rounding =
+      style.rounding === undefined ? this.rounding : (style.rounding ?? undefined);
+    const border =
+      style.border === undefined ? this.border : (style.border ?? undefined);
+    if (sameRounding(rounding, this.rounding) && sameBorder(border, this.border)) {
       return this;
     }
     return new Stroke({
       points: [...this.points],
       closed: this.closed,
-      border: style.border ?? undefined,
+      rounding,
+      border,
       color: this.color,
     });
   }
@@ -1037,6 +1071,7 @@ export function parseItem(item: CanvasItem): KufiItem {
       return new Line({
         from: item.from,
         to: item.to,
+        rounding: item.rounding,
         border: item.border,
         color: item.color,
       });
@@ -1044,6 +1079,7 @@ export function parseItem(item: CanvasItem): KufiItem {
       return new Stroke({
         points: item.points,
         closed: item.closed,
+        rounding: item.rounding,
         border: item.border,
         color: item.color,
       });
@@ -1198,16 +1234,28 @@ export function makeTile(init: TileInit): TileItem {
   return new Tile(init).toJSON();
 }
 
-export function makeLine(from: Cell, to: Cell, color?: string): LineItem {
-  return new Line({ from, to, color }).toJSON();
+/** Extra style a factory may carry, shared by line and stroke creation. */
+export interface StrokeStyle {
+  rounding?: ItemRounding;
+  border?: ItemBorder;
+}
+
+export function makeLine(
+  from: Cell,
+  to: Cell,
+  color?: string,
+  style: StrokeStyle = {},
+): LineItem {
+  return new Line({ from, to, ...style, color }).toJSON();
 }
 
 export function makeStroke(
   points: readonly LinePoint[],
   closed: boolean,
   color?: string,
+  style: StrokeStyle = {},
 ): StrokeItem {
-  return new Stroke({ points: [...points], closed, color }).toJSON();
+  return new Stroke({ points: [...points], closed, ...style, color }).toJSON();
 }
 
 export function makeArc(init: ArcInit): ArcItem {

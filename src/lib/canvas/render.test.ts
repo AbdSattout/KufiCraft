@@ -18,8 +18,6 @@ import type {
   Zone,
 } from "@/lib/canvas/model";
 import { renderSvg, renderThumbnail } from "@/lib/canvas/render";
-import { itemBounds } from "@/lib/canvas/items";
-import { borderPath } from "@/lib/canvas/border";
 
 /* ------------------------------------------------------------------ */
 /* a tiny strict XML reader (node has no DOMParser)                    */
@@ -317,29 +315,83 @@ describe("style in the SVG renderer", () => {
     expect(rounded[0].attrs["data-k"]).toBe(TILE.key);
   });
 
-  it("paints the border before the ink, as a separate stroke path", () => {
+  it("paints one translated duplicate per border side, before the ink", () => {
     const config = makeConfig({ ink: "#123456" });
     const paths = find(rootOf(renderSvg(config, [BORDERED])), "path");
-    expect(paths).toHaveLength(2);
+    expect(paths).toHaveLength(3);
 
-    const [outline, ink] = paths;
-    expect(outline.attrs.fill).toBe("none");
-    expect(outline.attrs.stroke).toBe("#ff0000");
-    expect(outline.attrs["stroke-width"]).toBe("3");
-    expect(outline.attrs["stroke-linecap"]).toBe("butt");
-    expect(outline.attrs["stroke-linejoin"]).toBe("miter");
-    expect(outline.attrs["data-k"]).toBe(BORDERED.key);
-    expect(outline.attrs.d).toBe(
-      borderPath(
-        itemBounds(config, BORDERED),
-        BORDER_TOP | BORDER_LEFT,
-        3,
-      ),
-    );
+    const [top, left, ink] = paths;
+    expect(top.attrs.transform).toBe("translate(0 -3)");
+    expect(top.attrs.fill).toBe("#ff0000");
+    expect(top.attrs.stroke).toBeUndefined();
+    expect(top.attrs["data-k"]).toBe(BORDERED.key);
+    expect(left.attrs.transform).toBe("translate(-3 0)");
+    expect(left.attrs.fill).toBe("#ff0000");
 
+    // Both copies are the item's own path; only the translation moves them.
     expect(ink.attrs.fill).toBe("#123456");
-    expect(ink.attrs.stroke).toBeUndefined();
-    expect(ink.attrs.d).not.toBe(outline.attrs.d);
+    expect(ink.attrs.transform).toBeUndefined();
+    expect(top.attrs.d).toBe(ink.attrs.d);
+    expect(left.attrs.d).toBe(ink.attrs.d);
+  });
+
+  it("duplicates stroked items (line, stroke, arc) the same way", () => {
+    const config = makeConfig({ ink: "#123456" });
+    const items: CanvasItem[] = [
+      {
+        type: "line",
+        key: lineKey({ column: 0, row: 1 }, { column: 3, row: 1 }),
+        from: { column: 0, row: 1 },
+        to: { column: 3, row: 1 },
+        border: { sides: BORDER_TOP, width: 2 },
+      },
+      {
+        type: "stroke",
+        key: strokeKey([
+          { column: 0, row: 0 },
+          { column: 2, row: 2 },
+        ], false),
+        points: [
+          { column: 0, row: 0 },
+          { column: 2, row: 2 },
+        ],
+        border: { sides: BORDER_LEFT, width: 2 },
+      },
+      {
+        type: "arc",
+        key: arcKey(
+          { column: 0, row: 6 },
+          { column: 3, row: 6 },
+          "clockwise",
+          "half",
+        ),
+        from: { column: 0, row: 6 },
+        to: { column: 3, row: 6 },
+        direction: "clockwise",
+        size: "half",
+        border: { sides: BORDER_TOP, width: 2 },
+      },
+    ];
+    // A line bar is a filled item, so its duplicate is filled as well.
+    const [lineCopy, lineInk] = find(
+      rootOf(renderSvg(config, [items[0]])),
+      "path",
+    );
+    expect(lineCopy.attrs.transform).toBe("translate(0 -2)");
+    expect(lineCopy.attrs.fill).toBe("#123456");
+    expect(lineCopy.attrs.d).toBe(lineInk.attrs.d);
+
+    for (const item of items.slice(1)) {
+      const paths = find(rootOf(renderSvg(config, [item])), "path");
+      expect(paths).toHaveLength(2);
+      const [copy, ink] = paths;
+      expect(copy.attrs.transform).toBeDefined();
+      expect(copy.attrs.fill).toBe("none");
+      expect(copy.attrs.stroke).toBe("#123456");
+      expect(copy.attrs.d).toBe(ink.attrs.d);
+      expect(ink.attrs.fill).toBe("none");
+      expect(ink.attrs.stroke).toBe("#123456");
+    }
   });
 
   it("uses the item's resolved colour when the border has no colour", () => {
@@ -349,8 +401,8 @@ describe("style in the SVG renderer", () => {
       color: "#abcdef",
       border: { sides: BORDER_TOP, width: 2 },
     };
-    const [outline] = find(rootOf(renderSvg(config, [item])), "path");
-    expect(outline.attrs.stroke).toBe("#abcdef");
+    const [copy] = find(rootOf(renderSvg(config, [item])), "path");
+    expect(copy.attrs.fill).toBe("#abcdef");
   });
 
   it("escapes a hostile border colour", () => {
@@ -361,19 +413,20 @@ describe("style in the SVG renderer", () => {
     };
     const source = renderSvg(makeConfig(), [item]);
     expect(source).not.toContain("<script");
-    const [outline] = find(rootOf(source), "path");
-    expect(outline.attrs.stroke).toBe(hostile);
+    const [copy] = find(rootOf(source), "path");
+    expect(copy.attrs.fill).toBe(hostile);
   });
 
   it("keeps rounding and borders in thumbnails", () => {
     const items = [ROUNDED, BORDERED];
     const root = rootOf(renderThumbnail(makeConfig(), items));
     const paths = find(root, "path");
-    expect(paths).toHaveLength(3);
+    // The rounded tile, then the bordered tile's two duplicates and its ink.
+    expect(paths).toHaveLength(4);
     expect(paths[0].attrs.d).toContain(" C ");
-    // The bordered tile contributes its outline and its ink.
-    expect(paths[1].attrs.fill).toBe("none");
-    expect(paths[2].attrs.fill).not.toBe("none");
+    expect(paths[1].attrs.transform).toBe("translate(0 -3)");
+    expect(paths[2].attrs.transform).toBe("translate(-3 0)");
+    expect(paths[3].attrs.fill).not.toBe("none");
   });
 });
 

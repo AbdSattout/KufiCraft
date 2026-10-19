@@ -1,10 +1,10 @@
 /**
- * Tests for outside borders.
+ * Tests for the border duplicates.
  *
- * A border must sit **outside** the item's box: the inner edge of the stroke
- * lies on the box and no part of it reaches inside. The tests therefore check
- * the centre-line geometry (`box ± width / 2`) and the joined-corner geometry
- * (`box ± width`), and never just "a stroke exists".
+ * A border is not a shadow or a filter: every enabled side is one translated
+ * copy of the item's own shape, painted behind it. The tests therefore check
+ * the count (one copy per side), the exact translation (by the border width)
+ * and the resolved colour.
  */
 
 import { describe, expect, it } from "vitest";
@@ -16,117 +16,74 @@ import {
   BORDER_TOP,
   MAX_BORDER_WIDTH,
 } from "@/lib/canvas/model";
-import type { Rect } from "@/lib/canvas/geometry";
-import { borderOutline, borderPath } from "@/lib/canvas/border";
+import { borderCopies } from "@/lib/canvas/border";
 
-const RECT: Rect = { x: 10, y: 20, w: 30, h: 40 };
-
-describe("borderPath", () => {
-  it("puts a lone side's centre line half a stroke outside the box", () => {
-    // width 2 → the stroke covers exactly [box - 2, box], so the inner edge is
-    // the box outline itself.
-    expect(borderPath(RECT, BORDER_TOP, 2)).toBe("M 10 19 L 40 19");
-    expect(borderPath(RECT, BORDER_RIGHT, 2)).toBe("M 41 20 L 41 60");
-    expect(borderPath(RECT, BORDER_BOTTOM, 2)).toBe("M 10 61 L 40 61");
-    expect(borderPath(RECT, BORDER_LEFT, 2)).toBe("M 9 20 L 9 60");
+describe("borderCopies", () => {
+  it("makes one copy per side, translated by the border width", () => {
+    expect(borderCopies({ sides: BORDER_TOP, width: 2 }, "#000")).toEqual([
+      { dx: 0, dy: -2, color: "#000" },
+    ]);
+    expect(borderCopies({ sides: BORDER_RIGHT, width: 3 }, "#000")).toEqual([
+      { dx: 3, dy: 0, color: "#000" },
+    ]);
+    expect(borderCopies({ sides: BORDER_BOTTOM, width: 4 }, "#000")).toEqual([
+      { dx: 0, dy: 4, color: "#000" },
+    ]);
+    expect(borderCopies({ sides: BORDER_LEFT, width: 5 }, "#000")).toEqual([
+      { dx: -5, dy: 0, color: "#000" },
+    ]);
   });
 
-  it("joins enabled neighbours into an exact square outer corner", () => {
-    // All four sides, width 2: each bar reaches a full width past the box
-    // corner, so the outer corner is (box - 2 … box + width).
-    expect(borderPath(RECT, BORDER_ALL, 2)).toBe(
-      "M 8 19 L 42 19" +
-        " M 41 18 L 41 62" +
-        " M 8 61 L 42 61" +
-        " M 9 18 L 9 62",
-    );
+  it("uses four copies for four sides — never a combined outline", () => {
+    expect(borderCopies({ sides: BORDER_ALL, width: 2 }, "#000")).toEqual([
+      { dx: 0, dy: -2, color: "#000" },
+      { dx: 2, dy: 0, color: "#000" },
+      { dx: 0, dy: 2, color: "#000" },
+      { dx: -2, dy: 0, color: "#000" },
+    ]);
+    expect(
+      borderCopies({ sides: BORDER_TOP | BORDER_LEFT, width: 3 }, "#000"),
+    ).toEqual([
+      { dx: 0, dy: -3, color: "#000" },
+      { dx: -3, dy: 0, color: "#000" },
+    ]);
   });
 
-  it("stops a side on the box corner when its neighbour is off", () => {
-    // Top + right: the top bar ends at the right bar's outer edge, the right bar
-    // starts at the top bar's outer edge; no overshoot in either direction.
-    expect(borderPath(RECT, BORDER_TOP | BORDER_RIGHT, 2)).toBe(
-      "M 10 19 L 42 19 M 41 18 L 41 60",
-    );
-  });
-
-  it("scales both the offset and the corner extension with the width", () => {
-    for (const width of [1, 2, 4, MAX_BORDER_WIDTH]) {
-      const expected =
-        `M ${RECT.x - width} ${RECT.y - width / 2}` +
-        ` L ${RECT.x + RECT.w + width} ${RECT.y - width / 2}` +
-        ` M ${RECT.x + RECT.w + width / 2} ${RECT.y - width}` +
-        ` L ${RECT.x + RECT.w + width / 2} ${RECT.y + RECT.h + width}` +
-        ` M ${RECT.x - width} ${RECT.y + RECT.h + width / 2}` +
-        ` L ${RECT.x + RECT.w + width} ${RECT.y + RECT.h + width / 2}` +
-        ` M ${RECT.x - width / 2} ${RECT.y - width}` +
-        ` L ${RECT.x - width / 2} ${RECT.y + RECT.h + width}`;
-      expect(borderPath(RECT, BORDER_ALL, width)).toBe(expected);
-    }
-  });
-
-  it("returns an empty path when no side is on", () => {
-    expect(borderPath(RECT, 0, 2)).toBe("");
-  });
-});
-
-describe("borderOutline", () => {
   it("resolves the colour from the item, unless the border overrides it", () => {
     expect(
-      borderOutline(RECT, { sides: BORDER_TOP, width: 2 }, "#123456"),
-    ).toEqual({
-      path: "M 10 19 L 40 19",
-      width: 2,
-      color: "#123456",
-    });
+      borderCopies({ sides: BORDER_TOP, width: 2 }, "#123456"),
+    ).toEqual([{ dx: 0, dy: -2, color: "#123456" }]);
     expect(
-      borderOutline(
-        RECT,
+      borderCopies(
         { sides: BORDER_TOP, width: 2, color: "#ff0000" },
         "#123456",
-      )?.color,
+      )[0].color,
     ).toBe("#ff0000");
     // An empty override is not a colour: fall back to the item's own.
     expect(
-      borderOutline(
-        RECT,
+      borderCopies(
         { sides: BORDER_TOP, width: 2, color: "" },
         "#123456",
-      )?.color,
+      )[0].color,
     ).toBe("#123456");
   });
 
-  it("drops a border that paints nothing", () => {
-    expect(borderOutline(RECT, { sides: 0, width: 2 }, "#000")).toBeUndefined();
+  it("makes no copy when there is no side or no width", () => {
+    expect(borderCopies({ sides: 0, width: 2 }, "#000")).toEqual([]);
+    expect(borderCopies({ sides: Number.NaN, width: 2 }, "#000")).toEqual([]);
+    expect(borderCopies({ sides: BORDER_TOP, width: 0 }, "#000")).toEqual([]);
+    expect(borderCopies({ sides: BORDER_TOP, width: -2 }, "#000")).toEqual([]);
     expect(
-      borderOutline(RECT, { sides: Number.NaN, width: 2 }, "#000"),
-    ).toBeUndefined();
-    expect(
-      borderOutline(RECT, { sides: BORDER_TOP, width: 0 }, "#000"),
-    ).toBeUndefined();
-    expect(
-      borderOutline(RECT, { sides: BORDER_TOP, width: -2 }, "#000"),
-    ).toBeUndefined();
-    expect(
-      borderOutline(RECT, { sides: BORDER_TOP, width: Number.NaN }, "#000"),
-    ).toBeUndefined();
+      borderCopies({ sides: BORDER_TOP, width: Number.NaN }, "#000"),
+    ).toEqual([]);
   });
 
   it("masks unknown side bits and clamps an oversized width", () => {
-    const plain = borderOutline(RECT, { sides: BORDER_ALL, width: 2 }, "#000");
-    const noisy = borderOutline(
-      RECT,
-      { sides: BORDER_ALL | 16, width: 2 },
-      "#000",
-    );
+    const plain = borderCopies({ sides: BORDER_ALL, width: 2 }, "#000");
+    const noisy = borderCopies({ sides: BORDER_ALL | 16, width: 2 }, "#000");
     expect(noisy).toEqual(plain);
-
-    const wide = borderOutline(
-      RECT,
-      { sides: BORDER_TOP, width: 999 },
-      "#000",
-    );
-    expect(wide?.width).toBe(MAX_BORDER_WIDTH);
-    expect(wide?.path).toBe(borderPath(RECT, BORDER_TOP, MAX_BORDER_WIDTH));
+    expect(
+      borderCopies({ sides: BORDER_TOP, width: 999 }, "#000")[0].dy,
+    ).toBe(-MAX_BORDER_WIDTH);
   });
 });

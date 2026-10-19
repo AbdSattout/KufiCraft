@@ -127,6 +127,27 @@ export const DEFAULT_STYLE: DrawStyle = {
   border: { sides: 0, width: DEFAULT_BORDER_WIDTH },
 };
 
+/**
+ * The style the shape panel displays. With nothing selected it is the draw
+ * style; with a selection it is the first selected item's own rounding and
+ * border — the panel reflects what is on the board, while the **draw** style
+ * (`context.style`) stays what the tools paint with until an edit is made.
+ * An item without a field shows the off state: no rounding, no border.
+ */
+export function styleForSelection(
+  style: DrawStyle,
+  item: CanvasItem | undefined,
+): DrawStyle {
+  if (item === undefined) return style;
+  const rounding =
+    item.type === "arc" ? undefined : item.rounding;
+  return {
+    ...style,
+    rounding: rounding ?? { radius: 0, corners: CORNER_ALL },
+    border: item.border ?? { sides: 0, width: DEFAULT_BORDER_WIDTH },
+  };
+}
+
 /** Style of the next arc (the old app's direction radios + the size option). */
 export interface ArcStyle {
   direction: ArcDirection;
@@ -481,10 +502,11 @@ export function recolourItems(
 }
 
 /**
- * Applies a style patch to the listed items. Shape, rotation and rounding
- * belong to tiles (other types ignore them); a border is a stroke outside any
- * item type, so `{ border }` in a patch re-outlines a line, a polyline or a rib
- * just as well as a tile.
+ * Applies a style patch to the listed items. Shape and rotation belong to
+ * tiles; rounding belongs to tiles, line bars and polylines (an arc ignores
+ * it); a border is a translated duplicate behind any item type, so
+ * `{ border }` in a patch re-borders a line, a polyline or a rib just as well
+ * as a tile.
  */
 export function reshapeItems(
   items: readonly CanvasItem[],
@@ -554,6 +576,7 @@ export function arcBetween(
     to,
     direction: ctx.arc.direction,
     size: ctx.arc.size,
+    border: ctx.style.border.sides !== 0 ? ctx.style.border : undefined,
     color: ctx.config.ink,
   });
 }
@@ -612,9 +635,10 @@ export function linePreview(
   config: ProjectConfig,
   points: readonly LinePoint[],
   hover: LinePoint | null,
+  style: Pick<DrawStyle, "rounding" | "border"> = DEFAULT_STYLE,
 ): CanvasItem[] {
   const run = lineRun(points, hover);
-  return lineItems(config, run.points, run.closed);
+  return lineItems(config, run.points, run.closed, undefined, style);
 }
 
 /* ------------------------------------------------------------------ */

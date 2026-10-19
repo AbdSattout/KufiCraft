@@ -63,6 +63,7 @@ import {
   pruneSelection,
   recolourItems,
   reshapeItems,
+  styleForSelection,
   wheelSteps,
   zoomScrollOffset,
 } from "./interaction";
@@ -128,6 +129,11 @@ export interface EditorController {
   tool: ToolId;
   setTool: (tool: ToolId) => void;
   style: DrawStyle;
+  /**
+   * What the shape panel shows: the draw style, or the first selected item's
+   * rounding and border while a selection is active.
+   */
+  panelStyle: DrawStyle;
   arc: ArcStyle;
   setArcDirection: (direction: ArcDirection) => void;
   setArcSize: (size: ArcSize) => void;
@@ -135,11 +141,11 @@ export interface EditorController {
   inkSwatches: readonly string[];
   selectShape: (shape: ShapeId) => void;
   rotateShape: () => void;
-  /** Corner rounding: sets the draw style and re-rounds the selected tiles. */
+  /** Corner rounding: sets the draw style and re-rounds the selection. */
   setRounding: (rounding: ItemRounding) => void;
   /** Corner rounding while a slider is dragged — style only, no write. */
   previewRounding: (radius: number) => void;
-  /** Outside border: sets the draw style and re-borders the selection. */
+  /** Border duplicates: sets the draw style and re-borders the selection. */
   setBorder: (border: ItemBorder) => void;
   /** Border width while a slider is dragged — style only, no write. */
   previewBorderWidth: (width: number) => void;
@@ -318,6 +324,19 @@ export function useEditor(
     const kept = pruneSelection(config, items, selectionState);
     return kept.length === selectionState.length ? selectionState : kept;
   }, [config, items, selectionState]);
+
+  /**
+   * The panel follows the selection: a selected item's actual rounding and
+   * border are shown, so the controls never lie about what is on the board.
+   * With nothing selected the draw style is shown (initially both fields off).
+   */
+  const panelStyle = useMemo(() => {
+    const first =
+      selection.length === 0
+        ? undefined
+        : items.find((item) => item.key === selection[0]);
+    return styleForSelection(style, first);
+  }, [items, selection, style]);
 
   /**
    * A grid switch drops any armed gesture: it was aimed at the old geometry,
@@ -925,6 +944,7 @@ export function useEditor(
     tool,
     setTool: setToolStateAndReset,
     style,
+    panelStyle,
     arc,
     setArcDirection,
     setArcSize,

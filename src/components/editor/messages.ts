@@ -85,7 +85,7 @@ export const MESSAGES = {
   borderWidth: "سُمك الحد",
   borderColor: "لون الحدود",
   borderUseInk: "استخدام لون الحبر",
-  borderHint: "يُرسم الحد خارج الشكل، فلا يغطي الحبر.",
+  borderHint: "يُرسم الحد نسخةً خلف الشكل، فلا يغطي الحبر.",
   recolourSelection: "تلوين بلون الحبر",
   deleteSelection: "حذف التحديد",
   duplicateSelection: "تكرار التحديد",

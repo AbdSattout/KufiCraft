@@ -5,15 +5,19 @@
  *
  * One panel, four jobs: the palette feeds the next drawn tiles *and* reshapes
  * the current selection (docs/UI.md §Editor) — rotation cycles `r` in quarter
- * turns (`R` on the keyboard too), the rounding block sets the corners of the
- * tiles, and the border block outlines whatever is drawn; picking a shape is
+ * turns (`R` on the keyboard too), the rounding block sets the corners of
+ * tiles, line bars and polyline turns, and the border block duplicates
+ * whatever is drawn behind it; picking a shape is
  * the way back to the plain square, so the panel carries no separate reset
  * button.
  *
  * Rounding and the border work like the shape buttons: they set the **draw
  * style** (what the pen paints next) and, when a selection is live, re-style it
- * in the same click. The rounding slider is a per-item fraction of the shorter
- * side, so the panel shows it as a percentage of the model's `0…0.5`.
+ * in the same click. The displayed values follow the selection — the first
+ * selected item's own rounding and border while one is active, the draw style
+ * otherwise (initially: no rounding, no border). The rounding slider is a
+ * per-item fraction of the shorter side, so the panel shows it as a percentage
+ * of the model's `0…0.5`.
  *
  * The selection actions are revealed by the selection itself: with nothing
  * selected there is no “التحديد” block and no disabled buttons.
@@ -179,11 +183,11 @@ export interface ShapePanelProps {
   selectionCount: number;
   selectShape: (shape: ShapeId) => void;
   rotateShape: () => void;
-  /** Corner rounding of the next tiles (and of the selection, when there is one). */
+  /** Corner rounding of the next items (and of the selection, when there is one). */
   setRounding: (rounding: ItemRounding) => void;
   /** Live radius while the slider is dragged (style only, no write). */
   previewRounding: (radius: number) => void;
-  /** Outside border of the next items (and of the selection). */
+  /** Border of the next items (and of the selection). */
   setBorder: (border: ItemBorder) => void;
   /** Live width while the slider is dragged (style only, no write). */
   previewBorderWidth: (width: number) => void;

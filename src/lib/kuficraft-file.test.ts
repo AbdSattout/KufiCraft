@@ -530,19 +530,28 @@ describe("normalizeItem", () => {
     expect(broken).not.toHaveProperty("border");
   });
 
-  it("keeps a border on every item type but rounding only on tiles", () => {
+  it("keeps a border on every item type and rounding where it applies", () => {
     const config = sampleConfig();
     const border = { sides: BORDER_ALL, width: 2 };
     for (const item of sampleItems().slice(1)) {
       expect(normalizeItem({ ...item, border }, config)).toMatchObject({ border });
     }
-    const lineItem = sampleItems()[2];
+    // Rounding applies to tiles, line bars and polylines — not to an arc.
+    for (const item of sampleItems().slice(0, 4)) {
+      expect(
+        normalizeItem(
+          { ...item, rounding: { radius: 0.2, corners: CORNER_ALL } },
+          config,
+        ),
+      ).toMatchObject({ rounding: { radius: 0.2, corners: CORNER_ALL } });
+    }
+    const arcItem = sampleItems()[4];
     expect(
       normalizeItem(
-        { ...lineItem, rounding: { radius: 0.2, corners: CORNER_ALL } },
+        { ...arcItem, rounding: { radius: 0.2, corners: CORNER_ALL } },
         config,
       ),
-    ).toEqual(lineItem);
+    ).toEqual(arcItem);
   });
 
   it("round-trips style fields through export and parse", () => {
@@ -562,6 +571,7 @@ describe("normalizeItem", () => {
         key: lineKey({ column: 0, row: 1 }, { column: 4, row: 1 }),
         from: { column: 0, row: 1 },
         to: { column: 4, row: 1 },
+        rounding: { radius: 0.2, corners: CORNER_ALL },
         border: { sides: BORDER_BOTTOM, width: 2 },
       },
     ];

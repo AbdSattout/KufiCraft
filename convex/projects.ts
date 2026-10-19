@@ -122,7 +122,7 @@ function sanitizeItem(item: CanvasItem, config: ProjectConfig): CanvasItem | nul
       if (item.rotation !== undefined && item.rotation !== 0) {
         next.rotation = item.rotation;
       }
-      // Rounding belongs to tiles; a radius of zero is the absent state.
+      // A radius of zero is the absent state.
       const rounding =
         item.rounding === undefined ? undefined : sanitizeRounding(item.rounding);
       if (rounding !== undefined) next.rounding = rounding;
@@ -139,6 +139,10 @@ function sanitizeItem(item: CanvasItem, config: ProjectConfig): CanvasItem | nul
         from,
         to,
       };
+      if (item.rounding !== undefined) {
+        const rounding = sanitizeRounding(item.rounding);
+        if (rounding !== undefined) next.rounding = rounding;
+      }
       if (border !== undefined) next.border = border;
       if (color !== undefined) next.color = color;
       return next;
@@ -161,6 +165,10 @@ function sanitizeItem(item: CanvasItem, config: ProjectConfig): CanvasItem | nul
         points,
       };
       if (closed) next.closed = true;
+      if (item.rounding !== undefined) {
+        const rounding = sanitizeRounding(item.rounding);
+        if (rounding !== undefined) next.rounding = rounding;
+      }
       if (border !== undefined) next.border = border;
       if (color !== undefined) next.color = color;
       return next;

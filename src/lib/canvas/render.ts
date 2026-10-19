@@ -103,19 +103,19 @@ function renderSvgString(
         : roundPathNumbers(rendered.path, parts.precision);
     const color = escapeXml(itemOf(item).resolvedColor(config));
     const key = parts.includeKeys ? ` data-k="${escapeXml(item.key)}"` : "";
-    const outline = rendered.outline;
-    if (outline !== undefined) {
-      // The border is painted first: it is *outside* the item's box, so the ink
-      // always wins should the two ever meet.
-      const border =
-        parts.precision === undefined
-          ? outline.path
-          : roundPathNumbers(outline.path, parts.precision);
-      out.push(
-        `<path${key} d="${border}" fill="none" stroke="${escapeXml(outline.color)}"` +
-          ` stroke-width="${num(outline.width)}"` +
-          ` stroke-linecap="butt" stroke-linejoin="miter"/>`,
-      );
+    // A border is one translated duplicate of the same path per enabled side,
+    // painted first so the original ink covers all but the border's width.
+    for (const copy of rendered.borders ?? []) {
+      const transform = ` transform="translate(${num(copy.dx)} ${num(copy.dy)})"`;
+      if (rendered.mode === "stroke") {
+        out.push(
+          `<path${key} d="${d}"${transform} fill="none" stroke="${escapeXml(copy.color)}"` +
+            ` stroke-width="${num(rendered.width)}"` +
+            ` stroke-linecap="butt" stroke-linejoin="miter"/>`,
+        );
+      } else {
+        out.push(`<path${key} d="${d}"${transform} fill="${escapeXml(copy.color)}"/>`);
+      }
     }
     if (rendered.mode === "stroke") {
       // Butt caps and mitre joins: a rib ends flush with the ink edge, exactly

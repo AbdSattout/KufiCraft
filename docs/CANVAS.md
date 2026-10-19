@@ -220,6 +220,7 @@ which owns the geometry for that item and nothing else:
 | `key` | the identity above, derived from the geometry in the constructor |
 | `type` | the discriminant (`"tile" \| "line" \| "stroke" \| "arc"`) |
 | `render(config)` | `Rendered = { path, mode: "fill" \| "stroke", width }` |
+| `draw(config)` | `render` plus `borders`: one translated duplicate per enabled border side |
 | `bounds(config)` / `contains(config, point)` | hit-testing and marquee geometry |
 | `cellRange()` | the cell box the item occupies (move/duplicate maths) |
 | `moved(dColumn, dRow)` / `withColor(color)` | copy-on-write edits |
@@ -258,7 +259,7 @@ and export.
 | `grid.ts` | `pointToCell`, `pointToAnchor` → `Anchor`, `pointToLinePoint` → `LinePoint`, `linePointPosition`, `anchorToCell`, `cellCentre`, `isSameAxis`, `runOf(cells)` → `Run`, `cellsBetween`, `gridPaths` → `{ cellBorders, inkLines }`, `anchorPath` |
 | `shapes.ts` | `KufiShape` + the ten shapes (`shapeById`, `shapeLabel`, `shapePath`, `shapeOrderIndex`, `SHAPE_ORDER`); the **same** renderer draws the canvas fragment and the toolbar icon (`tileIconPath`) |
 | `rounding.ts` | `roundingRadius`, `rotateCornerMask`, `hasRounding`, `roundCorners` (per-corner rounding generated from a shape's own commands) |
-| `border.ts` | `borderPath`, `borderOutline` (an outside border on the sides of an item's box) |
+| `border.ts` | `borderCopies` (one translated duplicate of the item's shape per enabled border side) |
 | `items.ts` | the item classes and factories above, `itemRender`, `itemColor`, `itemBounds`, `itemContains`, `itemCellRange`, `tileIconPath`, `itemsBounds`, `itemIntersectsRect`, the per-grid rules (`isItemTypeAllowed`, `isItemAllowed`, `visibleItems`) |
 | `ops.ts` | `addItems`, `removeItems`, `paintItems`, `replaceItems`, `toOps(prev, next)` → backend batch, `penItems`, `lineItems` |
 | `render.ts` | `renderSvg(config, items, opts?)` → standalone SVG **string**, `renderThumbnail(config, items)` → compact string |
@@ -273,9 +274,9 @@ Every function is deterministic and side-effect free.
   reported positions (`anchorsAlongLine`, see §6). Consecutive identical anchors
   collapse, and a fragment is always a `tile` — the pen never merges a straight
   run into a bar.
-* **`lineItems(config, points, closed, color)`** — a run whose points are all
-  **centre** points — every point the pre-anchor model could make — follows the
-  reference rules unchanged: a run with **no diagonal segment** is either one
+* **`lineItems(config, points, closed, color, style?)`** — a run whose points are
+  all **centre** points — every point the pre-anchor model could make — follows
+  the reference rules unchanged: a run with **no diagonal segment** is either one
   `line` bar in a single span, or — when `config.straightLinesAsSquares` is on
   (default) — one square per cell along every segment, which is what the
   reference app's straight line produced. Anything with a diagonal (including a
@@ -286,7 +287,11 @@ Every function is deterministic and side-effect free.
   is always a stroked polyline through the anchors; it is merged to its two ends
   only when it is open, straight, on the square grid, every point agrees on the
   anchor and the run does not double back. A mixed-anchor run is never merged,
-  so no point a designer placed is dropped.
+  so no point a designer placed is dropped. The optional `style` carries the
+  draw style's `rounding` and `border` into the items; with rounding on, a run
+  is kept as **one** item — a `line` bar (its box corners round) or a `stroke`
+  (its turns round) — because rounding independently tiled cells would notch the
+  joins.
 * **`toOps(prev, next)`** — diffs two item lists into the backend batch
   (`remove` + `add`) around the longest common *content* prefix, so a stroke
   re-sends only the tail it touched, never the whole board.
@@ -306,14 +311,17 @@ Every function is deterministic and side-effect free.
 * The board draws `visibleItems(gridType, items)` (§3): a circular board leaves
   its line/arc items out of the canvas, the overlay, the exports and the
   thumbnail.
-* **Style is part of the item, not the renderer**: a tile may carry `rounding`
-  (radius as a fraction of the shorter side + a physical corner mask) and every
-  item may carry an outside `border` (side mask, width in viewBox units, optional
-  colour). `item.draw(config)` emits the border (`Rendered.outline`) **before**
-  `item.render(config)`, so the stroke sits outside the ink and can never cover
-  it; absent fields render exactly like a pre-style document. The geometry is
-  generated from the shape commands in `rounding.ts` / `border.ts` — never by
-  post-processing a path string.
+* **Style is part of the item, not the renderer**: a tile, a line bar and a
+  polyline may carry `rounding` (radius as a fraction of the shorter side plus a
+  physical corner mask) and **every** item may carry a `border` (side mask,
+  offset in viewBox units, optional colour). `item.draw(config)` paints one
+  **duplicate of the item's own path** per enabled side — translated by the
+  width on that side — **before** `item.render(config)`, so the duplicate sits
+  behind the ink and cannot cover it; absent fields render exactly like a
+  pre-style document. Rounding geometry is generated in `rounding.ts` (tiles,
+  line bars and polyline turns); the border duplicate is a translation applied
+  to the item's own path in the renderers, never a filter, a shadow or a
+  path-string rewrite.
 * **Butt caps and mitre joins** — a rib ends flush with the ink edge, exactly
   like the reference app. No `stroke-linecap="round"` anywhere in artwork.
 * `itemColor(config, item)` = `item.color ?? config.ink`.

@@ -547,7 +547,7 @@ class LineTool extends KufiTool {
     if (state.kind !== "line") return EMPTY_PREVIEW;
     const first = state.points[0];
     return {
-      items: linePreview(ctx.config, state.points, state.hover),
+      items: linePreview(ctx.config, state.points, state.hover, ctx.style),
       mode: "ghost",
       keys: [],
       marquee: null,
@@ -560,7 +560,7 @@ class LineTool extends KufiTool {
 
   /** Commits a finished run — the exact points and closing the preview showed. */
   private finish(ctx: ToolContext, run: LineRun): ToolOutcome {
-    const items = lineItems(ctx.config, run.points, run.closed);
+    const items = lineItems(ctx.config, run.points, run.closed, undefined, ctx.style);
     if (items.length === 0) return { state: NO_STATE };
     const next = addItems({ items: ctx.items }, items).items;
     if (next === ctx.items) return { state: NO_STATE };

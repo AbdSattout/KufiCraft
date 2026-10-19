@@ -873,6 +873,76 @@ describe("lineItems with anchored points", () => {
     });
   });
 
+  it("rounds a straight run as one bar and a turned run as a polyline", () => {
+    const rounding = { radius: 0.2, corners: CORNER_ALL };
+    // Rounding must not split the run into independently rounded cells: a
+    // straight run becomes one `line` bar, whose box corners then round.
+    const straight = lineItems(
+      config,
+      [{ column: 0, row: 4 }, { column: 2, row: 4 }],
+      false,
+      undefined,
+      { rounding },
+    );
+    expect(straight).toHaveLength(1);
+    expect(straight[0]).toMatchObject({ type: "line", rounding });
+    expect(itemRender(config, straight[0]).path).toContain(" C ");
+
+    // A run with a turn becomes one stroked polyline; the turn rounds.
+    const turned = lineItems(
+      config,
+      [
+        { column: 0, row: 0 },
+        { column: 2, row: 0 },
+        { column: 2, row: 2 },
+      ],
+      false,
+      undefined,
+      { rounding },
+    );
+    expect(turned).toHaveLength(1);
+    expect(turned[0]).toMatchObject({ type: "stroke", rounding });
+    expect(itemRender(config, turned[0]).path).toContain(" C ");
+
+    // Without rounding the default square-per-cell mode is untouched.
+    const plain = lineItems(config, [
+      { column: 0, row: 4 },
+      { column: 2, row: 4 },
+    ], false);
+    expect(plain.every((item) => item.type === "tile")).toBe(true);
+  });
+
+  it("carries the border style to tiles, bars and polylines", () => {
+    const border = { sides: BORDER_TOP, width: 2 };
+    const straight = lineItems(
+      config,
+      [{ column: 0, row: 4 }, { column: 2, row: 4 }],
+      false,
+      undefined,
+      { border },
+    );
+    expect(straight.every((item) => item.border === border)).toBe(true);
+
+    const bars = makeConfig({ straightLinesAsSquares: false });
+    const bar = lineItems(
+      bars,
+      [{ column: 0, row: 4 }, { column: 2, row: 4 }],
+      false,
+      undefined,
+      { border },
+    );
+    expect(bar[0]).toMatchObject({ type: "line", border });
+
+    const polyline = lineItems(
+      config,
+      [{ column: 0, row: 0 }, { column: 2, row: 2 }],
+      false,
+      undefined,
+      { border },
+    );
+    expect(polyline[0]).toMatchObject({ type: "stroke", border });
+  });
+
   it("draws the anchored points, not the cell centres", () => {
     const points = [linePoint(0, 0, { x: 0, y: 0 }), linePoint(2, 0, { x: 1, y: 1 })];
     const items = lineItems(config, points, false);

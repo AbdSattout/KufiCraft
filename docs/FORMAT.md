@@ -47,10 +47,10 @@ Two optional fields extend an item without changing its key or geometry — a fi
 that omits them renders **exactly** like a v2 file written before they existed.
 
 ```jsonc
-// tile only — rounded corners
+// tiles, line bars and polylines — rounded corners
 "rounding": { "radius": 0.15, "corners": 15 }
 
-// any item — an outside border on the sides of the item's box
+// any item — one duplicated offset shape per enabled side
 "border": { "sides": 5, "width": 2, "color": "#7c2d12" }
 ```
 
@@ -62,19 +62,31 @@ that omits them renders **exactly** like a v2 file written before they existed.
   `8` bottom-left, `15` (default) all four. A vertex at a box corner follows its
   own bit; interior vertices of a shape (e.g. the hamza notch) follow the radius
   alone. Bits outside `15` are dropped.
+* Rounding applies to every item with corners to round: a **tile** and a
+  straight **line** bar round the corners of their own box; a **polyline**
+  (`stroke`) rounds its interior turns from the same box-relative radius, with
+  the box being the run's ink bounds. A turn that happens to sit on a bounds
+  corner follows that corner's bit; the run's two ends stay square. An `arc`
+  has no corners and never carries the field.
 * The curve is generated from the shape's own geometry with the cubic
   midpoint-control construction of the reference `rounding.js` (Apache-2.0,
   Yona Appletree) — **not** an arc or a quadratic. Deliberate deviations: the
   reference's mutating “virtual close line” is replaced by trimming each edge
   exactly at the closing corner, and the radius is relative rather than a
   length.
-* `border.sides` is a bit mask of the sides of the item's box: `1` top,
+* `border.sides` is a bit mask of the sides an item is bordered on: `1` top,
   `2` right, `4` bottom, `8` left, `15` all four. `border.width` is in **viewBox
-  units** (`1…12`, default `2` when the field is present but broken). `color`
-  is optional; absent means the item's resolved colour (`color ?? config.ink`).
-* The border stroke lives **outside** the item: its inner edge touches the item's
-  box, so it never covers or erodes ink, and enabled neighbours make an exact
-  square outer corner. Each side is a separate subpath with butt caps.
+  units** (`1…12`, default `2` when the field is present but broken) and is the
+  **offset** of the duplicate. `color` is optional; absent means the item's
+  resolved colour (`color ?? config.ink`).
+* A border is **one duplicate of the item's own complete shape per enabled
+  side** — `1` side, `1` copy; `4` sides, `4` copies — translated `width` on
+  that side (top `y − w`, right `x + w`, bottom `y + w`, left `x − w`) and
+  painted **behind** the item in the border colour. The duplicate keeps the
+  item's own paint (fill or stroke), so the construction is identical for tiles,
+  lines, polylines and arcs, works without filters or shadows, and renders the
+  same in the SVG and PNG exports. The visible border is the sliver the original
+  does not cover, exactly `width` wide on that side.
 * Normalisation on read/write (backend and file import): radius clamped to
   `[0, 0.5]`, masks masked to the four real bits, width clamped to `[1, 12]`,
   colours capped at `MAX_COLOR_LENGTH`. A zero radius drops `rounding`; a

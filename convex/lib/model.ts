@@ -396,9 +396,11 @@ export interface Anchor extends Cell {
 }
 
 /**
- * Corner rounding of an item's box: the radius (a fraction of the shorter side,
- * `0…MAX_ROUNDING_RADIUS`) and which of the four box corners are rounded
- * (`CORNER_*` bits). Absent means square corners — exactly the old rendering.
+ * Corner rounding: the radius (a fraction of the shorter side of the item's
+ * box, `0…MAX_ROUNDING_RADIUS`) and which of the box's four corners are rounded
+ * (`CORNER_*` bits). Tiles and line bars round the box's own corners; a
+ * stroke's interior turns always round. Absent means square corners — exactly
+ * the old rendering.
  */
 export interface ItemRounding {
   radius: number;
@@ -406,9 +408,10 @@ export interface ItemRounding {
 }
 
 /**
- * A border drawn **outside** the item's box: which sides (`BORDER_*` bits), the
- * line width in viewBox units, and an optional colour. Absent means no border.
- * The stroke's inner edge touches the box, so it never covers the item's ink.
+ * A border drawn behind the item, as one translated duplicate of its own shape
+ * per enabled side: which sides (`BORDER_*` bits), the translation distance in
+ * viewBox units, and an optional colour. Absent means no border. The copy keeps
+ * the item's paint mode, so this works for every item type without filters.
  */
 export interface ItemBorder {
   sides: number;
@@ -470,9 +473,9 @@ export interface TileItem {
   shape?: ShapeId;
   /** Rotation in quarter turns; absent means 0. */
   rotation?: Rotation;
-  /** Corner rounding; absent means square corners. Tiles only. */
+  /** Corner rounding; absent means square corners. */
   rounding?: ItemRounding;
-  /** Outside border; absent means none. */
+  /** Border duplicates; absent means none. */
   border?: ItemBorder;
   /** Colour override; absent means `config.ink`. */
   color?: string;
@@ -489,6 +492,8 @@ export interface LineItem {
   key: string;
   from: Cell;
   to: Cell;
+  /** Corner rounding of the bar's box; absent means square corners. */
+  rounding?: ItemRounding;
   border?: ItemBorder;
   color?: string;
 }
@@ -504,6 +509,8 @@ export interface StrokeItem {
   points: LinePoint[];
   /** Closed polyline (`Z` in the path); absent means open. */
   closed?: boolean;
+  /** Rounding of the polyline's turns; absent means sharp corners. */
+  rounding?: ItemRounding;
   border?: ItemBorder;
   color?: string;
 }
@@ -735,6 +742,7 @@ export function itemSignature(item: CanvasItem): string {
         item.to.column,
         item.to.row,
         item.color ?? "",
+        roundingField(item.rounding),
         borderField(item.border),
       ].join("|");
     case "stroke":
@@ -743,6 +751,7 @@ export function itemSignature(item: CanvasItem): string {
         item.points.map(linePointKey).join(";"),
         item.closed ? 1 : 0,
         item.color ?? "",
+        roundingField(item.rounding),
         borderField(item.border),
       ].join("|");
     case "arc":
@@ -869,6 +878,7 @@ export const canvasItemValidator = v.union(
     key: v.string(),
     from: cellValidator,
     to: cellValidator,
+    rounding: v.optional(roundingValidator),
     border: v.optional(borderValidator),
     color: v.optional(v.string()),
   }),
@@ -877,6 +887,7 @@ export const canvasItemValidator = v.union(
     key: v.string(),
     points: v.array(linePointValidator),
     closed: v.optional(v.boolean()),
+    rounding: v.optional(roundingValidator),
     border: v.optional(borderValidator),
     color: v.optional(v.string()),
   }),

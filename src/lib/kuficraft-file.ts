@@ -278,6 +278,7 @@ export function normalizeItem(
     config.gridType === "circular" ? circularSectors(config) - 1 : maxColumn;
   const colour = itemColour(value.color);
   const border = itemBorder(value.border);
+  const rounding = itemRounding(value.rounding);
 
   switch (value.type) {
     case "tile": {
@@ -298,7 +299,6 @@ export function normalizeItem(
       if (isRotation(value.rotation) && value.rotation !== 0) {
         item.rotation = value.rotation;
       }
-      const rounding = itemRounding(value.rounding);
       if (rounding !== undefined) item.rounding = rounding;
       if (border !== undefined) item.border = border;
       if (colour !== undefined) item.color = colour;
@@ -314,6 +314,7 @@ export function normalizeItem(
         from,
         to,
       };
+      if (rounding !== undefined) item.rounding = rounding;
       if (border !== undefined) item.border = border;
       if (colour !== undefined) item.color = colour;
       return item;
@@ -338,6 +339,7 @@ export function normalizeItem(
         points,
       };
       if (closed) item.closed = true;
+      if (rounding !== undefined) item.rounding = rounding;
       if (border !== undefined) item.border = border;
       if (colour !== undefined) item.color = colour;
       return item;

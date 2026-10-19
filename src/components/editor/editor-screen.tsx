@@ -73,7 +73,7 @@ function Panels({ editor }: { editor: EditorController }) {
     <>
       {/* What you draw with, then the board it is drawn on. */}
       <ShapePanel
-        style={editor.style}
+        style={editor.panelStyle}
         inkColor={editor.config.ink}
         inkSwatches={editor.inkSwatches}
         selectionCount={editor.selection.length}

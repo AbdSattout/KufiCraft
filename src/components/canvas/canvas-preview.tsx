@@ -37,8 +37,8 @@ interface CanvasItemShapeProps {
 
 /**
  * One item as SVG: the class decides the paths and whether the item is stroked
- * (lines, polylines, arcs) or filled (tiles). An item with a border gets a
- * second element, drawn first, so the ink always wins.
+ * (lines, polylines, arcs) or filled (tiles). An item with a border gets one
+ * translated duplicate per enabled side, drawn first, so the ink always wins.
  */
 export const CanvasItemShape = memo(function CanvasItemShape({
   config,
@@ -46,26 +46,40 @@ export const CanvasItemShape = memo(function CanvasItemShape({
   className,
   opacity,
 }: CanvasItemShapeProps) {
-  const { path, mode, width, outline } = useMemo(
+  const { path, mode, width, borders } = useMemo(
     () => itemOf(item).draw(config),
     [config, item],
   );
   const color = useMemo(() => itemOf(item).resolvedColor(config), [config, item]);
   return (
     <>
-      {outline ? (
-        <path
-          data-key={`${item.key}:border`}
-          d={outline.path}
-          fill="none"
-          stroke={outline.color}
-          strokeWidth={outline.width}
-          strokeLinecap="butt"
-          strokeLinejoin="miter"
-          className={className}
-          opacity={opacity}
-        />
-      ) : null}
+      {borders?.map((copy, index) =>
+        mode === "stroke" ? (
+          <path
+            key={`${item.key}:border:${index}`}
+            data-key={`${item.key}:border:${index}`}
+            d={path}
+            transform={`translate(${copy.dx} ${copy.dy})`}
+            fill="none"
+            stroke={copy.color}
+            strokeWidth={width}
+            strokeLinecap="butt"
+            strokeLinejoin="miter"
+            className={className}
+            opacity={opacity}
+          />
+        ) : (
+          <path
+            key={`${item.key}:border:${index}`}
+            data-key={`${item.key}:border:${index}`}
+            d={path}
+            transform={`translate(${copy.dx} ${copy.dy})`}
+            fill={copy.color}
+            className={className}
+            opacity={opacity}
+          />
+        ),
+      )}
       {mode === "stroke" ? (
         <path
           data-key={item.key}

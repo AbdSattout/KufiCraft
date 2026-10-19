@@ -1581,7 +1581,26 @@ describe("item sanitisation", () => {
               key: lineKey({ column: 0, row: 1 }, { column: 4, row: 1 }),
               from: { column: 0, row: 1 },
               to: { column: 4, row: 1 },
+              rounding: { radius: 3, corners: CORNER_ALL | 32 },
               border: { sides: BORDER_LEFT, width: 2 },
+            },
+            {
+              type: "stroke",
+              key: strokeKey(
+                [
+                  { column: 0, row: 2 },
+                  { column: 2, row: 2 },
+                  { column: 2, row: 4 },
+                ],
+                false,
+              ),
+              points: [
+                { column: 0, row: 2 },
+                { column: 2, row: 2 },
+                { column: 2, row: 4 },
+              ],
+              rounding: { radius: 0.2, corners: CORNER_ALL },
+              border: { sides: BORDER_TOP, width: 3, color: "#00ff00" },
             },
           ],
         },
@@ -1598,8 +1617,14 @@ describe("item sanitisation", () => {
     });
     expect(doc.items[1]).not.toHaveProperty("rounding");
     expect(doc.items[1]).not.toHaveProperty("border");
+    // Line and stroke rounding survive the server, re-clamped and masked.
     expect(doc.items[2]).toMatchObject({
+      rounding: { radius: 0.5, corners: CORNER_ALL },
       border: { sides: BORDER_LEFT, width: 2 },
+    });
+    expect(doc.items[3]).toMatchObject({
+      rounding: { radius: 0.2, corners: CORNER_ALL },
+      border: { sides: BORDER_TOP, width: 3, color: "#00ff00" },
     });
   });
 
