@@ -54,7 +54,9 @@ no user-profile query, because an account has no profile — it is its passkey
   an item's `color` are CSS strings and are **truncated**, not rejected),
   `MAX_KEY_LENGTH = 64` (an item's `key` is **rejected** with the Arabic error
   when longer — truncating a key would silently merge distinct items; the
-  longest generated key is an arc's, 48 characters),
+  longest generated key is an arc's, 57 characters: an anchored arc appends a
+  ≤ 7-character digest of its endpoints instead of the raw fractions, precisely
+  so any stored fraction stays inside the cap),
   `ratio` is one of `RATIO_PRESETS` (`1:1` … `1:5`, the equal half-ink cell
   first, no space-less preset — `docs/CANVAS.md` §2), `base ∈ [4, 100]`, and the
   circular board's `circularSectors ∈ [MIN_CIRCULAR_SECTORS,
@@ -80,6 +82,13 @@ no user-profile query, because an account has no profile — it is its passkey
     `circularSectors(config) - 1` (the board's own count — default
     `CIRCULAR_SECTORS - 1 = 35`). `NaN` → `0`, `+Infinity` → the bound it points
     at (a bare `Math.min/max` propagates `NaN` and would store a non-value).
+  * an item's optional **point anchors** are repaired, never rejected: a stroke
+    point's `anchor` is clamped into `[0, 1]`, and a damaged one (wrong shape,
+    `NaN`, a stored centre) becomes the cell centre — while an **arc endpoint**
+    clamps the same way but keeps a stored centre and reads damage as *absence*,
+    the endpoint's legacy spring point (`docs/CANVAS.md` §5). An anchor-less
+    diagonal arc `half` has its `size` repaired to the `quarter` that was already
+    being drawn (same radius, same flags, no pixel moves).
   * an item colour is sliced to `MAX_COLOR_LENGTH`.
   * an item that does not match a v2 type is **dropped** (never stored): an
     unknown discriminant, a degenerate arc (`from` and `to` on the same cell) or

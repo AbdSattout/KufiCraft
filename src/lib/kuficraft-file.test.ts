@@ -501,6 +501,72 @@ describe("parseProjectFile — items", () => {
     ]);
   });
 
+  it("keeps an arc's anchors — the centre included — and repairs the legacy diagonal", () => {
+    const parsed = parseProjectFile(
+      rawFile({
+        items: [
+          {
+            type: "arc",
+            key: "bogus",
+            from: { column: 0, row: 2, anchor: { x: 0.5, y: 0.5 } },
+            to: { column: 4, row: 2, anchor: { x: 3, y: -1 } },
+            direction: "clockwise",
+            size: "quarter",
+          },
+          {
+            type: "arc",
+            key: "bogus",
+            from: { column: 0, row: 4, anchor: { x: "nope", y: 0 } },
+            to: { column: 4, row: 4 },
+            direction: "clockwise",
+            size: "nope",
+          },
+          {
+            type: "arc",
+            key: "bogus",
+            from: { column: 0, row: 6 },
+            to: { column: 4, row: 10 },
+            direction: "clockwise",
+            size: "half",
+          },
+        ],
+      }),
+    ).items;
+
+    // The centre is a value like any other on an arc endpoint; a damaged
+    // anchor is clamped or dropped, never a reason to lose the item.
+    expect(parsed[0]).toEqual({
+      type: "arc",
+      key: arcKey(
+        { column: 0, row: 2, anchor: { x: 0.5, y: 0.5 } },
+        { column: 4, row: 2, anchor: { x: 1, y: 0 } },
+        "clockwise",
+        "quarter",
+      ),
+      from: { column: 0, row: 2, anchor: { x: 0.5, y: 0.5 } },
+      to: { column: 4, row: 2, anchor: { x: 1, y: 0 } },
+      direction: "clockwise",
+      size: "quarter",
+    });
+    // A damaged anchor reads as absent — the endpoint's legacy spring point —
+    // and an unrecognised size means half.
+    expect(parsed[1]).toMatchObject({
+      from: { column: 0, row: 4 },
+      to: { column: 4, row: 4 },
+      size: "half",
+    });
+    // The legacy diagonal half is repaired to the quarter that draws the very
+    // same rib (`repairArcSize`).
+    expect(parsed[2]).toMatchObject({
+      from: { column: 0, row: 6 },
+      to: { column: 4, row: 10 },
+      size: "quarter",
+    });
+    expect(parsed[2].key).toBe(
+      arcKey({ column: 0, row: 6 }, { column: 4, row: 10 }, "clockwise", "quarter"),
+    );
+  });
+
   it("dedupes by key (first wins)", () => {
     const first = {
       type: "tile",

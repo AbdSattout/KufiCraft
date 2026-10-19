@@ -19,17 +19,20 @@ import {
   sanitizeRounding,
   snapRatio,
   arcKey,
+  arcPoint,
   fragmentPoint,
   lineKey,
   linePoint,
   normalizeAnchor,
+  normalizeArcAnchor,
+  normalizeArcSize,
+  repairArcSize,
   strokeKey,
   tileKey,
 } from "./lib/model";
 import type {
   ArcDirection,
   ArcItem,
-  ArcSize,
   CanvasItem,
   FragmentPoint,
   LineItem,
@@ -177,14 +180,30 @@ function sanitizeItem(item: CanvasItem, config: ProjectConfig): CanvasItem | nul
       return next;
     }
     case "arc": {
-      const from = fragment(item.from);
-      const to = fragment(item.to);
+      const from = arcPoint(
+        column(item.from.column),
+        row(item.from.row),
+        // The fragment the endpoint addresses (the validator bounds the zone).
+        item.from.zone,
+        // A damaged anchor is repaired into the fragment — or dropped, which
+        // an arc endpoint reads as its legacy spring point. The centre is a
+        // value like any other here; see `normalizeArcAnchor`.
+        normalizeArcAnchor(item.from.anchor),
+      );
+      const to = arcPoint(
+        column(item.to.column),
+        row(item.to.row),
+        item.to.zone,
+        normalizeArcAnchor(item.to.anchor),
+      );
       // A degenerate arc has no geometry; dropping it beats storing a no-op.
       if (from.column === to.column && from.row === to.row) return null;
       const direction: ArcDirection = ARC_DIRECTIONS.includes(item.direction)
         ? item.direction
         : "clockwise";
-      const size: ArcSize = item.size === "threeQuarter" ? "threeQuarter" : "half";
+      // A legacy anchor-less diagonal `half` becomes the `quarter` that draws
+      // exactly the same arc (`repairArcSize`, `docs/CANVAS.md` §5).
+      const size = repairArcSize(from, to, normalizeArcSize(item.size));
       const next: ArcItem = {
         type: "arc",
         key: key(arcKey(from, to, direction, size)),

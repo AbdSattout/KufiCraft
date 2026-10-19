@@ -165,6 +165,19 @@ export function ToolRail({
             )}
           >
             <Button
+              variant={arc.size === "quarter" ? "secondary" : "ghost"}
+              aria-pressed={arc.size === "quarter"}
+              aria-label={MESSAGES.arcQuarter}
+              title={MESSAGES.arcQuarter}
+              onClick={() => setArcSize("quarter")}
+              className="h-auto flex-col gap-0.5 px-1 py-1.5 text-[0.7rem]"
+            >
+              <span aria-hidden className="text-base leading-none">
+                ◜
+              </span>
+              <span>{MESSAGES.arcQuarterShort}</span>
+            </Button>
+            <Button
               variant={arc.size === "half" ? "secondary" : "ghost"}
               aria-pressed={arc.size === "half"}
               aria-label={MESSAGES.arcHalf}

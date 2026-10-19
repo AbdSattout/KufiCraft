@@ -7,8 +7,9 @@
  *   • viewport → viewBox mapping (`clientToViewBox`) including CSS scaling
  *     and RTL — the SVG is fitted with `preserveAspectRatio="xMidYMid meet"`,
  *     so the mapping is a uniform scale plus a centred letterbox offset;
- *   • anchoring (`anchorAt`, `linePointAt`, `anchorsAlongLine`) and hit
- *     testing (`hitTest`) — the item classes answer for their own geometry;
+ *   • anchoring (`anchorAt`, `linePointAt`, `arcPointAt`, `anchorsAlongLine`)
+ *     and hit testing (`hitTest`) — the item classes answer for their own
+ *     geometry;
  *   • the line tool's run resolver (`lineRun`): preview and commit resolve a
  *     gesture through it, so they can never disagree on an endpoint;
  *   • selection operations (move, recolour, reshape, duplicate, delete);
@@ -35,10 +36,10 @@ import type {
   Anchor,
   ArcDirection,
   ArcItem,
+  ArcPoint,
   ArcSize,
   CanvasItem,
   Cell,
-  FragmentPoint,
   ItemBorder,
   ItemRounding,
   LinePoint,
@@ -49,6 +50,7 @@ import type {
 import {
   cellCentre,
   pointToAnchor,
+  pointToArcPoint,
   pointToLinePoint,
 } from "@/lib/canvas/grid";
 import { shortestSectorDelta } from "@/lib/canvas/geometry";
@@ -244,6 +246,15 @@ export function anchorAt(config: ProjectConfig, point: Point): Anchor {
  */
 export function linePointAt(config: ProjectConfig, point: Point): LinePoint {
   return pointToLinePoint(config, clampToCanvas(point));
+}
+
+/**
+ * The arc tool's endpoint under `point`: the same nine-anchor resolution, but
+ * the resolved point keeps its anchor — including the centre, because an
+ * arc endpoint's absent value is the legacy spring point (`docs/CANVAS.md` §5).
+ */
+export function arcPointAt(config: ProjectConfig, point: Point): LinePoint {
+  return pointToArcPoint(config, clampToCanvas(point));
 }
 
 function sameCell(a: Cell, b: Cell): boolean {
@@ -571,11 +582,15 @@ export function deleteItems(
 /* Item builders shared by the tools                                   */
 /* ------------------------------------------------------------------ */
 
-/** Arc between two fragments, or `null` when the pair cannot carry one. */
+/**
+ * Arc between two endpoints, or `null` when the pair cannot carry one. The
+ * endpoints travel whole — fragment *and* anchor — into the item, so the
+ * preview and the click resolve to the same arc (`docs/CANVAS.md` §5).
+ */
 export function arcBetween(
   ctx: ToolContext,
-  from: FragmentPoint,
-  to: FragmentPoint,
+  from: ArcPoint,
+  to: ArcPoint,
 ): ArcItem | null {
   if (sameCell(from, to)) return null;
   if (!Arc.isSupported(from, to)) return null;

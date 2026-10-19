@@ -1417,7 +1417,9 @@ describe("item sanitisation", () => {
       "project should exist",
     );
     // Client-sent keys are ignored: every key is re-derived from the geometry
-    // *after* clamping, and the array keeps the order the op listed.
+    // *after* clamping, and the array keeps the order the op listed. The
+    // diagonal anchor-less `half` arc is repaired to the `quarter` that draws
+    // exactly the same rib (`repairArcSize`, docs/CANVAS.md §5).
     expect(doc.items.map((item) => item.key)).toEqual([
       tileKey(0, 0, 0),
       tileKey(100, 0, 0),
@@ -1428,7 +1430,7 @@ describe("item sanitisation", () => {
         { column: 0, row: 4 },
         { column: 3, row: 2 },
         "counterclockwise",
-        "half",
+        "quarter",
       ),
     ]);
     expect(doc.items[0]).toMatchObject({ column: 0, row: 0 });
@@ -1445,7 +1447,67 @@ describe("item sanitisation", () => {
       from: { column: 0, row: 4 },
       to: { column: 3, row: 2 },
       direction: "counterclockwise",
-      size: "half",
+      size: "quarter",
+    });
+  });
+
+  it("keeps an arc's anchors, clamping them, and repairs the legacy diagonal", async () => {
+    const t = newTest();
+    const asA = t.withIdentity(USER_A);
+    const projectId = await createProject(t, USER_A, "أقواس", { base: 10 });
+    await asA.mutation(api.projects.applyOps, {
+      projectId,
+      ops: [
+        {
+          type: "add",
+          items: [
+            {
+              type: "arc",
+              key: "client-key",
+              // The centre is a real value on an arc endpoint; the far corner
+              // is clamped into the ink region.
+              from: { column: 1, row: 1, anchor: { x: 0.5, y: 0.5 } },
+              to: { column: 4, row: 1, anchor: { x: 4, y: -1 } },
+              direction: "clockwise",
+              size: "quarter",
+            },
+            {
+              // A damaged anchor reads as absent — the endpoint's legacy
+              // spring point — and a diagonal anchor-less `half` is repaired
+              // to the `quarter` that draws the same rib.
+              type: "arc",
+              key: "client-key",
+              from: { column: 1, row: 3, anchor: { x: Number.NaN, y: 0 } },
+              to: { column: 5, row: 7 },
+              direction: "clockwise",
+              size: "half",
+            },
+          ],
+        },
+      ],
+    });
+
+    const doc = required(
+      await asA.query(api.projects.get, { projectId }),
+      "project should exist",
+    );
+    expect(doc.items[0]).toEqual({
+      type: "arc",
+      key: arcKey(
+        { column: 1, row: 1, anchor: { x: 0.5, y: 0.5 } },
+        { column: 4, row: 1, anchor: { x: 1, y: 0 } },
+        "clockwise",
+        "quarter",
+      ),
+      from: { column: 1, row: 1, anchor: { x: 0.5, y: 0.5 } },
+      to: { column: 4, row: 1, anchor: { x: 1, y: 0 } },
+      direction: "clockwise",
+      size: "quarter",
+    });
+    expect(doc.items[1]).toMatchObject({
+      from: { column: 1, row: 3 },
+      to: { column: 5, row: 7 },
+      size: "quarter",
     });
   });
 

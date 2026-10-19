@@ -6,13 +6,8 @@ import {
   linePoint,
   tileKey,
 } from "@/lib/canvas/model";
-import type {
-  Anchor,
-  CanvasItem,
-  ProjectConfig,
-  Zone,
-} from "@/lib/canvas/model";
-import { anchorPath, linePointPosition } from "@/lib/canvas/grid";
+import type { CanvasItem, ProjectConfig, Zone } from "@/lib/canvas/model";
+import { linePointPosition } from "@/lib/canvas/grid";
 import { inkUnit } from "@/lib/canvas/geometry";
 import { makeArc, makeLine, makeTile } from "@/lib/canvas/items";
 import {
@@ -447,7 +442,8 @@ describe("LineTool", () => {
     // The previewed run is the same squares the commit will paint.
     expect(preview.items).toHaveLength(3);
     expect(preview.items.every((item) => item.type === "tile")).toBe(true);
-    expect(preview.marker).toEqual({ column: 1, row: 1, zone: 0 });
+    // The marker is the actual first point, not its whole cell.
+    expect(preview.marker).toEqual({ column: 1, row: 1 });
   });
 
   it("keeps the first point's fragment in the run marker", () => {
@@ -510,7 +506,8 @@ describe("LineTool", () => {
     const moved = moveTool("line", ctx, clicked.state, input(anchorPointOf(5, 1, 0.5, 0)));
     const next = previewTool("line", ctx, moved.state);
     expect(next.dot).toEqual({ column: 5, row: 1, anchor: { x: 0.5, y: 0 } });
-    expect(next.marker).toEqual({ column: 2, row: 2, zone: 0 });
+    // … while the marker stays on the anchored first point.
+    expect(next.marker).toEqual({ column: 2, row: 2, anchor: { x: 1, y: 0 } });
   });
 
   it("previews exactly the run a click commits, anchors and all", () => {
@@ -552,11 +549,18 @@ describe("LineTool", () => {
 /* ------------------------------------------------------------------ */
 
 describe("ArcTool", () => {
-  it("arms on the first click, survives pointer-up and cancels on the origin", () => {
+  it("arms on the clicked point, survives pointer-up and cancels on the origin cell", () => {
     const ctx = context();
     const armed = beginTool("arc", ctx, NO_STATE, input(pointOf(1, 1)));
-    expect(expectArc(armed.state).from).toEqual({ column: 1, row: 1, zone: 0 });
-    expect(expectArc(armed.state).to).toEqual({ column: 1, row: 1, zone: 0 });
+    // The centre is a real choice for an arc endpoint, so the click is stored
+    // whole — cell *and* anchor.
+    const from = {
+      column: 1,
+      row: 1,
+      anchor: { x: 0.5, y: 0.5 },
+    };
+    expect(expectArc(armed.state).from).toEqual(from);
+    expect(expectArc(armed.state).to).toEqual(from);
 
     const up = endTool("arc", ctx, armed.state);
     expect(up.keep).toBe(true);
@@ -567,30 +571,104 @@ describe("ArcTool", () => {
     expect(cancelled.commit).toBeUndefined();
   });
 
-  it("tracks the end cell on hover and previews the arc plus the marker", () => {
+  it("cancels a second click on another anchor of the start cell", () => {
     const ctx = context();
-    const armed = beginTool("arc", ctx, NO_STATE, input(pointOf(1, 1))).state;
-    const moved = moveTool("arc", ctx, armed, input(pointOf(4, 1)));
-    expect(expectArc(moved.state).to).toEqual({ column: 4, row: 1, zone: 0 });
+    const armed = beginTool(
+      "arc",
+      ctx,
+      NO_STATE,
+      input(anchorPointOf(1, 1, 0, 0)),
+    ).state;
+    // A different anchor in the same cell is still a degenerate pair.
+    const out = beginTool("arc", ctx, armed, input(anchorPointOf(1, 1, 1, 1)));
+    expect(out.state).toBe(NO_STATE);
+    expect(out.commit).toBeUndefined();
+  });
+
+  it("stores the clicked anchors on the committed arc", () => {
+    const ctx = context();
+    const armed = beginTool(
+      "arc",
+      ctx,
+      NO_STATE,
+      input(anchorPointOf(1, 1, 0, 1)),
+    ).state;
+    const moved = moveTool("arc", ctx, armed, input(anchorPointOf(4, 1, 1, 1))).state;
+    const out = beginTool("arc", ctx, moved, input(anchorPointOf(4, 1, 1, 1)));
+
+    expect(out.state).toBe(NO_STATE);
+    expect(out.commit?.label).toBe("قوس");
+    expect(out.commit?.items[0]).toMatchObject({
+      type: "arc",
+      from: { column: 1, row: 1, anchor: { x: 0, y: 1 } },
+      to: { column: 4, row: 1, anchor: { x: 1, y: 1 } },
+    });
+  });
+
+  it("shows the pending start as a dot before the first click", () => {
+    const ctx = context();
+    const hovered = moveTool("arc", ctx, NO_STATE, input(anchorPointOf(2, 2, 1, 0)));
+    const state = expectArc(hovered.state);
+    expect(state.from).toBeNull();
+    expect(state.to).toEqual({ column: 2, row: 2, anchor: { x: 1, y: 0 } });
+
+    const preview = previewTool("arc", ctx, state);
+    expect(preview.items).toEqual([]);
+    expect(preview.marker).toBeNull();
+    expect(preview.dot).toEqual({ column: 2, row: 2, anchor: { x: 1, y: 0 } });
+
+    // The click arms exactly the dot the overlay showed.
+    const armed = beginTool("arc", ctx, state, input(anchorPointOf(2, 2, 1, 0)));
+    expect(expectArc(armed.state).from).toEqual(preview.dot);
+  });
+
+  it("tracks the end point on hover and previews the arc plus the two dots", () => {
+    const ctx = context();
+    const armed = beginTool(
+      "arc",
+      ctx,
+      NO_STATE,
+      input(anchorPointOf(1, 1, 0, 0)),
+    ).state;
+    const moved = moveTool("arc", ctx, armed, input(anchorPointOf(4, 1, 1, 0)));
+    expect(expectArc(moved.state).to).toEqual({
+      column: 4,
+      row: 1,
+      anchor: { x: 1, y: 0 },
+    });
 
     const preview = previewTool("arc", ctx, moved.state);
     expect(preview.mode).toBe("ghost");
-    expect(preview.marker).toEqual({ column: 1, row: 1, zone: 0 });
+    // The marker is the armed start point; the dot is the pending end.
+    expect(preview.marker).toEqual({ column: 1, row: 1, anchor: { x: 0, y: 0 } });
+    expect(preview.dot).toEqual({ column: 4, row: 1, anchor: { x: 1, y: 0 } });
     expect(preview.items).toHaveLength(1);
     expect(preview.items[0].type).toBe("arc");
   });
 
   it("arms on the fragment clicked and tracks its quadrant", () => {
     const ctx = context();
+    const centre = { x: 0.5, y: 0.5 };
     const armed = beginTool("arc", ctx, NO_STATE, input(fragmentPointOf(1, 1, 3)));
-    expect(expectArc(armed.state).from).toEqual({ column: 1, row: 1, zone: 3 });
+    expect(expectArc(armed.state).from).toEqual({
+      column: 1,
+      row: 1,
+      zone: 3,
+      anchor: centre,
+    });
     // Moving within the same cell but to another quadrant moves the end: a
     // point on a space fragment is not a point on the ink one.
     const moved = moveTool("arc", ctx, armed.state, input(fragmentPointOf(1, 1, 1)));
-    expect(expectArc(moved.state).to).toEqual({ column: 1, row: 1, zone: 1 });
+    expect(expectArc(moved.state).to).toEqual({
+      column: 1,
+      row: 1,
+      zone: 1,
+      anchor: centre,
+    });
   });
 
   it("commits an arc between space fragments, zones and all", () => {
+    const centre = { x: 0.5, y: 0.5 };
     const ctx = context();
     const armed = beginTool("arc", ctx, NO_STATE, input(fragmentPointOf(1, 1, 1))).state;
     const moved = moveTool("arc", ctx, armed, input(fragmentPointOf(4, 1, 1))).state;
@@ -601,13 +679,13 @@ describe("ArcTool", () => {
       {
         type: "arc",
         key: arcKey(
-          { column: 1, row: 1, zone: 1 },
-          { column: 4, row: 1, zone: 1 },
+          { column: 1, row: 1, zone: 1, anchor: centre },
+          { column: 4, row: 1, zone: 1, anchor: centre },
           "clockwise",
           "half",
         ),
-        from: { column: 1, row: 1, zone: 1 },
-        to: { column: 4, row: 1, zone: 1 },
+        from: { column: 1, row: 1, zone: 1, anchor: centre },
+        to: { column: 4, row: 1, zone: 1, anchor: centre },
         direction: "clockwise",
         size: "half",
         color: CONFIG.ink,
@@ -615,23 +693,22 @@ describe("ArcTool", () => {
     ]);
   });
 
-  it("commits on the second click with label قوس", () => {
+  it("previews exactly the arc a click commits, anchors and all", () => {
     const ctx = context();
-    const armed = beginTool("arc", ctx, NO_STATE, input(pointOf(1, 1))).state;
-    const moved = moveTool("arc", ctx, armed, input(pointOf(4, 1))).state;
-    const out = beginTool("arc", ctx, moved, input(pointOf(4, 1)));
+    const armed = beginTool(
+      "arc",
+      ctx,
+      NO_STATE,
+      input(anchorPointOf(1, 1, 0, 1)),
+    ).state;
+    const moved = moveTool("arc", ctx, armed, input(anchorPointOf(4, 1, 1, 1))).state;
+    const preview = previewTool("arc", ctx, moved);
+    const out = beginTool("arc", ctx, moved, input(anchorPointOf(4, 1, 1, 1)));
 
-    expect(out.state).toBe(NO_STATE);
-    expect(out.commit?.label).toBe("قوس");
-    expect(out.commit?.items).toHaveLength(1);
-    expect(out.commit?.items[0]).toMatchObject({
-      type: "arc",
-      from: { column: 1, row: 1 },
-      to: { column: 4, row: 1 },
-    });
+    expect(out.commit?.items).toEqual(preview.items);
   });
 
-  it("commits a same-cell drag that actually moved (drag gesture)", () => {
+  it("commits a drag from A to B on pointer-up", () => {
     const ctx = context();
     const armed = beginTool("arc", ctx, NO_STATE, input(pointOf(1, 1))).state;
     const moved = moveTool("arc", ctx, armed, input(pointOf(4, 1))).state;
@@ -660,9 +737,10 @@ describe("ArcTool", () => {
   });
 
   it("does not commit an arc whose key is already on the board", () => {
+    const centre = { x: 0.5, y: 0.5 };
     const existing = makeArc({
-      from: { column: 1, row: 1 },
-      to: { column: 4, row: 1 },
+      from: { column: 1, row: 1, anchor: centre },
+      to: { column: 4, row: 1, anchor: centre },
       direction: "clockwise",
       size: "half",
     });
@@ -674,15 +752,20 @@ describe("ArcTool", () => {
     expect(out.commit).toBeUndefined();
   });
 
-  it("commits a wire-legal arc from anchor-shaped tool state (the repro)", () => {
-    // The tool arms with `anchorAt` results — an `Anchor` is a cell **plus** a
-    // zone — and the second click two cells away commits. The ink zone is
-    // canonical storage of nothing, so the stored JSON holds exactly a `Cell`
-    // per endpoint: the leaked `zone` was what the old `cellValidator`
-    // rejected (`applyOps` → ArgumentValidationError).
+  it("commits a wire-legal arc from point-shaped tool state (the repro)", () => {
+    // The tool arms with the point `arcPointAt` resolved — cell, zone and
+    // anchor — and the second click two cells away commits. The stored JSON
+    // must hold exactly `{column, row, anchor}` per endpoint: the ink zone is
+    // canonical absence, so no `zone` leaks, and the centre anchor is kept
+    // because an absent anchor means the legacy spring point on an arc.
     const ctx = context();
     const armed = beginTool("arc", ctx, NO_STATE, input(pointOf(3, 33)));
-    expect(expectArc(armed.state).from).toEqual({ column: 3, row: 33, zone: 0 });
+    const centre = { x: 0.5, y: 0.5 };
+    expect(expectArc(armed.state).from).toEqual({
+      column: 3,
+      row: 33,
+      anchor: centre,
+    });
     const moved = moveTool("arc", ctx, armed.state, input(pointOf(3, 35)));
     const out = beginTool("arc", ctx, moved.state, input(pointOf(3, 35)));
 
@@ -690,9 +773,14 @@ describe("ArcTool", () => {
     expect(out.commit?.items).toEqual([
       {
         type: "arc",
-        key: arcKey({ column: 3, row: 33 }, { column: 3, row: 35 }, "clockwise", "half"),
-        from: { column: 3, row: 33 },
-        to: { column: 3, row: 35 },
+        key: arcKey(
+          { column: 3, row: 33, anchor: centre },
+          { column: 3, row: 35, anchor: centre },
+          "clockwise",
+          "half",
+        ),
+        from: { column: 3, row: 33, anchor: centre },
+        to: { column: 3, row: 35, anchor: centre },
         direction: "clockwise",
         size: "half",
         // The tool stamps the project's ink on what it draws.
@@ -888,33 +976,6 @@ describe("commits carry the whole board", () => {
     const out = endTool("eraser", ctx, started.state);
     expect(out.commit?.items).toContainEqual(board);
     expect(out.commit?.items.map((item) => item.key)).not.toContain(target.key);
-  });
-});
-
-/* ------------------------------------------------------------------ */
-/* anchorPath                                                          */
-/* ------------------------------------------------------------------ */
-
-describe("anchorPath", () => {
-  it("returns a fragment path for zone 0 and zone 3 on the square grid", () => {
-    expect(
-      anchorPath(CONFIG, { column: 2, row: 3, zone: 0 }).length,
-    ).toBeGreaterThan(0);
-    expect(
-      anchorPath(CONFIG, { column: 2, row: 3, zone: 3 }).length,
-    ).toBeGreaterThan(0);
-    expect(anchorPath(CONFIG, { column: 2, row: 3, zone: 3 })).not.toBe(
-      anchorPath(CONFIG, { column: 2, row: 3, zone: 0 }),
-    );
-  });
-
-  it("returns a slice path on the circular grid", () => {
-    const circular: ProjectConfig = { ...CONFIG, gridType: "circular" };
-    const anchor: Anchor = { column: 5, row: 2, zone: 0 };
-    expect(anchorPath(circular, anchor).length).toBeGreaterThan(0);
-    expect(
-      anchorPath(circular, { column: 5, row: 2, zone: 3 }).length,
-    ).toBeGreaterThan(0);
   });
 });
 

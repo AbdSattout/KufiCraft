@@ -26,12 +26,9 @@ import {
   circularSlice,
   inkUnit,
   polar,
-  rectPath,
-  slicePath,
   zoneRect,
 } from "@/lib/canvas/geometry";
 import {
-  anchorPath,
   anchorToCell,
   cellCentre,
   cellsBetween,
@@ -39,6 +36,7 @@ import {
   isSameAxis,
   linePointPosition,
   pointToAnchor,
+  pointToArcPoint,
   pointToCell,
   pointToLinePoint,
   runOf,
@@ -544,6 +542,59 @@ describe("line points on space fragments", () => {
   });
 });
 
+describe("pointToArcPoint", () => {
+  it("keeps the centre the line point drops", () => {
+    const cell = cellSize(SQUARE);
+    const ink = inkUnit(SQUARE);
+    const centre = { x: cell + ink / 2, y: 2 * cell + ink / 2 };
+    // The line point canonicalises the centre away…
+    expect(pointToLinePoint(SQUARE, centre)).toEqual({ column: 1, row: 2 });
+    // …the arc endpoint stores it: absence means the legacy spring point.
+    expect(pointToArcPoint(SQUARE, centre)).toEqual({
+      column: 1,
+      row: 2,
+      anchor: { x: 0.5, y: 0.5 },
+    });
+  });
+
+  it("resolves the same nine anchors the line point does", () => {
+    const cell = cellSize(SQUARE);
+    const ink = inkUnit(SQUARE);
+    // A fragment border is half-open, so an edge anchor is nudged a hair
+    // inside the ink square it belongs to (a real pointer never lands on it).
+    const along = (fraction: number) =>
+      fraction === 1 ? ink - 1e-6 : fraction * ink;
+    for (const anchor of ANCHOR_GRID) {
+      const point = {
+        x: cell + along(anchor.x),
+        y: 2 * cell + along(anchor.y),
+      };
+      expect(pointToArcPoint(SQUARE, point)).toEqual({
+        column: 1,
+        row: 2,
+        anchor,
+      });
+      expect(pointToLinePoint(SQUARE, point)).toEqual(
+        linePoint(1, 2, undefined, anchor),
+      );
+    }
+  });
+
+  it("keeps a pointer in the space strip on that space fragment", () => {
+    // The merged point model is zone-aware: an arc endpoint on the space strip
+    // stores `zone: 1`, never a clamped ink edge (that was the pre-zone rule).
+    const cell = cellSize(SQUARE);
+    const ink = inkUnit(SQUARE);
+    const spaceMiddle = ink + (cell - ink) / 2;
+    expect(pointToArcPoint(SQUARE, { x: spaceMiddle, y: 2 * cell })).toEqual({
+      column: 0,
+      row: 2,
+      zone: 1,
+      anchor: { x: 0.5, y: 0 },
+    });
+  });
+});
+
 /* ------------------------------------------------------------------ */
 /* runs                                                                */
 /* ------------------------------------------------------------------ */
@@ -619,40 +670,6 @@ describe("cellsBetween", () => {
       { column: 0, row: 0 },
       { column: 2, row: 3 },
     ]);
-  });
-});
-
-/* ------------------------------------------------------------------ */
-/* anchorPath                                                          */
-/* ------------------------------------------------------------------ */
-
-describe("anchorPath", () => {
-  it("draws the zone rect of a square anchor", () => {
-    const ink: Anchor = { column: 1, row: 2, zone: 0 };
-    expect(anchorPath(SQUARE, ink)).toBe(rectPath(zoneRect(SQUARE, 1, 2, 0)));
-    // base 10 → 100 drawn cells, so the cell is 1000/99.75 = 10.025063 and
-    // the ink square 7.518797.
-    expect(anchorPath(SQUARE, ink)).toBe(
-      "M 10.025063 20.050125 L 17.54386 20.050125 L 17.54386 27.568922 L 10.025063 27.568922 Z",
-    );
-    const corner: Anchor = { column: 1, row: 2, zone: 3 };
-    expect(anchorPath(SQUARE, corner)).toBe(rectPath(zoneRect(SQUARE, 1, 2, 3)));
-    expect(anchorPath(SQUARE, corner)).not.toBe(anchorPath(SQUARE, ink));
-  });
-
-  it("draws the annular slice of a circular anchor", () => {
-    const anchor: Anchor = { column: 2, row: 1, zone: 1 };
-    expect(anchorPath(CIRCULAR, anchor)).toBe(
-      slicePath(circularSlice(CIRCULAR, 2, 1, 1)),
-    );
-    expect(anchorPath(CIRCULAR, anchor)).not.toBe("");
-    for (const zone of [0, 3] as Zone[]) {
-      expect(anchorPath(CIRCULAR, { column: 2, row: 1, zone })).not.toBe("");
-    }
-    // The slice follows the board's own ring, last sector included.
-    expect(anchorPath(TWELVE, { column: 2, row: 11, zone: 0 })).toBe(
-      slicePath(circularSlice(TWELVE, 2, 11, 0)),
-    );
   });
 });
 

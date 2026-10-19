@@ -24,6 +24,7 @@
 import {
   DEFAULT_PROJECT_CONFIG,
   arcKey,
+  arcPoint,
   cellSize,
   compareFragments,
   fragmentPoint,
@@ -39,12 +40,14 @@ import {
 import type {
   ArcDirection,
   ArcItem,
+  ArcPoint,
   ArcSize,
   CanvasItem,
   CanvasItemType,
   Cell,
   FragmentPoint,
   GridType,
+  InkPoint,
   ItemBorder,
   ItemRounding,
   LineItem,
@@ -147,6 +150,16 @@ function plainFragment(point: FragmentPoint): FragmentPoint {
  */
 function plainLinePoint(point: LinePoint): LinePoint {
   return linePoint(point.column, point.row, point.zone, point.anchor);
+}
+
+/**
+ * An arc endpoint as it is **stored**: the cell plus the anchor when it has
+ * one — the centre included, because for an arc endpoint an absent anchor means
+ * the legacy spring point, not the centre. Same field-by-field copy as
+ * `plainLinePoint`, so no caller can leak a foreign key onto the wire.
+ */
+function plainArcPoint(point: ArcPoint): ArcPoint {
+  return arcPoint(point.column, point.row, point.zone, point.anchor);
 }
 
 /** Bounding box of an annular sector (corners + any cardinal angle inside). */
@@ -839,8 +852,8 @@ export class Stroke extends KufiItem {
 /* ------------------------------------------------------------------ */
 
 export interface ArcInit {
-  from: FragmentPoint;
-  to: FragmentPoint;
+  from: ArcPoint;
+  to: ArcPoint;
   direction: ArcDirection;
   size: ArcSize;
   border?: ItemBorder;
@@ -857,21 +870,31 @@ export interface ArcGeometry {
 }
 
 /**
- * A rib (قوس) between two fragments. The geometry is the old app's, ported
- * exactly (`kufi.js:285‑311` and `radius()`), but derived from a **canonical**
- * fragment order so the result no longer depends on which anchor was clicked
- * first; the click-order quirk became the explicit `direction` control.
+ * A rib (قوس) between two fragments. Each endpoint is an `ArcPoint`: its
+ * fragment plus the anchor the user picked inside it. An endpoint without an
+ * anchor falls back to the reference app's **spring point** (`kufi.js`
+ * 285‑311) on that endpoint's own fragment — that is what keeps every
+ * pre-anchor arc, ink or space, drawing exactly as before, and why the arc
+ * tool writes every click, the centre included.
+ *
+ * The geometry is uniform in the chord between the two endpoint positions:
+ * `quarter` and `threeQuarter` use `chord/√2` (`largeArc` 0 / 1), `half` the
+ * semicircle `chord/2`. Only the legacy anchor-less diagonal keeps the old
+ * `dColumn·cell + ink/2` radius (the read-time repair to `quarter` changes no
+ * pixel; `docs/CANVAS.md` §5). Endpoints are canonical by **fragment** (`from`
+ * is the lower by column, then row, then zone), so the picture never depends on
+ * which endpoint was clicked first; the reference app's click-order quirk
+ * became the explicit `direction` control.
  *
  * Each end springs off **its own fragment's** box, so a rib drawn from a space
- * fragment attaches to that square (ink ends reproduce the pre-fragment ribs
- * exactly, `docs/CANVAS.md` §5). A rib is a square-grid item: a circular board
- * neither creates nor draws one (`docs/CANVAS.md` §3, «Per-grid item rules»),
- * so the class carries no polar geometry.
+ * fragment attaches to that square. A rib is a square-grid item: a circular
+ * board neither creates nor draws one (`docs/CANVAS.md` §3, «Per-grid item
+ * rules»), so the class carries no polar geometry.
  */
 export class Arc extends KufiItem {
   readonly type = "arc" as const;
-  readonly from: FragmentPoint;
-  readonly to: FragmentPoint;
+  readonly from: ArcPoint;
+  readonly to: ArcPoint;
   readonly direction: ArcDirection;
   readonly size: ArcSize;
   readonly border?: ItemBorder;
@@ -883,8 +906,8 @@ export class Arc extends KufiItem {
       compareFragments(init.from, init.to) <= 0
         ? [init.from, init.to]
         : [init.to, init.from];
-    this.from = plainFragment(from);
-    this.to = plainFragment(to);
+    this.from = plainArcPoint(from);
+    this.to = plainArcPoint(to);
     this.direction = init.direction;
     this.size = init.size;
     this.border = init.border;
@@ -899,8 +922,8 @@ export class Arc extends KufiItem {
     const item: ArcItem = {
       type: "arc",
       key: this.key,
-      from: plainFragment(this.from),
-      to: plainFragment(this.to),
+      from: plainArcPoint(this.from),
+      to: plainArcPoint(this.to),
       direction: this.direction,
       size: this.size,
     };
@@ -924,59 +947,75 @@ export class Arc extends KufiItem {
     const clockwise = this.direction === "clockwise";
     const sweep: 0 | 1 = clockwise ? 1 : 0;
     // Each end springs off its own fragment: the ink square for zone 0 (the
-    // numbers the old app produced), the space square for a space end.
-    const from = zoneRect(config, this.from.column, this.from.row, zoneOf(this.from));
-    const to = zoneRect(config, this.to.column, this.to.row, zoneOf(this.to));
-    const fromHalfX = from.w / 2;
-    const fromHalfY = from.h / 2;
-    const toHalfX = to.w / 2;
-    const toHalfY = to.h / 2;
-    let start: Point;
-    let end: Point;
-
-    if (this.from.row === this.to.row) {
-      // Horizontal chord: clockwise springs off the bottom edge and rises.
-      start = { x: from.x + fromHalfX, y: from.y + (clockwise ? from.h : 0) };
-      end = { x: to.x + toHalfX, y: to.y + (clockwise ? to.h : 0) };
-    } else if (this.from.column === this.to.column) {
-      // Vertical chord: clockwise springs off the left edge and turns right.
-      start = { x: from.x + (clockwise ? 0 : from.w), y: from.y + fromHalfY };
-      end = { x: to.x + (clockwise ? 0 : to.w), y: to.y + toHalfY };
-    } else {
-      // 45° diagonal, canonical by column (`to` is right of `from`).
-      const down = this.to.row > this.from.row;
-      if (clockwise) {
-        start = down
-          ? { x: from.x, y: from.y + fromHalfY }
-          : { x: from.x + fromHalfX, y: from.y + from.h };
-        end = down
-          ? { x: to.x + toHalfX, y: to.y + to.h }
-          : { x: to.x + to.w, y: to.y + toHalfY };
-      } else {
-        start = down
-          ? { x: from.x + fromHalfX, y: from.y }
-          : { x: from.x, y: from.y + fromHalfY };
-        end = down
-          ? { x: to.x + to.w, y: to.y + toHalfY }
-          : { x: to.x + toHalfX, y: to.y };
-      }
-    }
+    // numbers the old app produced), the space square for a space end. A
+    // stored anchor is taken verbatim; an absent one is the reference app's
+    // spring point on that same fragment.
+    const anchored =
+      this.from.anchor !== undefined || this.to.anchor !== undefined;
+    const fallback = this.fallbackAnchors(clockwise);
+    const start = this.endpointPosition(config, this.from, fallback.start);
+    const end = this.endpointPosition(config, this.to, fallback.end);
 
     const chord = Math.hypot(end.x - start.x, end.y - start.y);
     const diagonal =
       this.from.row !== this.to.row && this.from.column !== this.to.column;
-    const dColumn = Math.abs(this.to.column - this.from.column);
-    // The radius rule is the board's (the reference `radius()`): the diagonal
-    // keeps `dColumn·cell + ink/2` so ink ends render exactly as before; only
-    // the spring points follow the fragments.
+    // The legacy anchor-less diagonal keeps the reference app's
+    // `dColumn·cell + ink/2` radius. For an ink end it is exactly `chord/√2`;
+    // for a space end it is the only expression that reproduces what the
+    // pre-anchor model drew, so it survives the read-time repair to `quarter`.
+    const legacyDiagonal = !anchored && diagonal;
     const radius =
       this.size === "threeQuarter"
         ? chord / Math.SQRT2
-        : diagonal
-          ? dColumn * base + ink / 2
-          : chord / 2;
+        : legacyDiagonal
+          ? Math.abs(this.to.column - this.from.column) * base + ink / 2
+          : this.size === "quarter"
+            ? chord / Math.SQRT2
+            : chord / 2;
     const largeArc: 0 | 1 = this.size === "threeQuarter" ? 1 : 0;
     return { start, end, radius, largeArc, sweep };
+  }
+
+  /** Position of one endpoint: its own anchor, or the legacy spring point. */
+  private endpointPosition(
+    config: ProjectConfig,
+    point: ArcPoint,
+    fallback: InkPoint,
+  ): Point {
+    return linePointPosition(config, {
+      column: point.column,
+      row: point.row,
+      zone: point.zone,
+      anchor: point.anchor ?? fallback,
+    });
+  }
+
+  /**
+   * The reference app's spring point for each endpoint, expressed as anchors
+   * of that endpoint's **own fragment**: horizontal chords spring off the
+   * bottom (clockwise) or top (counterclockwise) edge of the row, vertical
+   * chords off the left or right edge, and a 45° diagonal picks the edge
+   * midpoints that face the chord. These are exactly the positions `geometry`
+   * used before anchors existed, for ink and space fragments alike.
+   */
+  private fallbackAnchors(clockwise: boolean): { start: InkPoint; end: InkPoint } {
+    if (this.from.row === this.to.row) {
+      const y = clockwise ? 1 : 0;
+      return { start: { x: 0.5, y }, end: { x: 0.5, y } };
+    }
+    if (this.from.column === this.to.column) {
+      const x = clockwise ? 0 : 1;
+      return { start: { x, y: 0.5 }, end: { x, y: 0.5 } };
+    }
+    const down = this.to.row > this.from.row;
+    if (clockwise) {
+      return down
+        ? { start: { x: 0, y: 0.5 }, end: { x: 0.5, y: 1 } }
+        : { start: { x: 0.5, y: 1 }, end: { x: 1, y: 0.5 } };
+    }
+    return down
+      ? { start: { x: 0.5, y: 0 }, end: { x: 1, y: 0.5 } }
+      : { start: { x: 0, y: 0.5 }, end: { x: 0.5, y: 0 } };
   }
 
   render(config: ProjectConfig): Rendered {
@@ -1019,16 +1058,18 @@ export class Arc extends KufiItem {
 
   moved(columns: number, rows: number): Arc {
     return new Arc({
-      from: {
-        column: this.from.column + columns,
-        row: this.from.row + rows,
-        zone: this.from.zone,
-      },
-      to: {
-        column: this.to.column + columns,
-        row: this.to.row + rows,
-        zone: this.to.zone,
-      },
+      from: arcPoint(
+        this.from.column + columns,
+        this.from.row + rows,
+        this.from.zone,
+        this.from.anchor,
+      ),
+      to: arcPoint(
+        this.to.column + columns,
+        this.to.row + rows,
+        this.to.zone,
+        this.to.anchor,
+      ),
       direction: this.direction,
       size: this.size,
       border: this.border,

@@ -540,6 +540,28 @@ describe("arcBetween + linePreview", () => {
     );
   });
 
+  it("carries both endpoints' anchors into the stored arc", () => {
+    const ctx = context();
+    const arc = arcBetween(
+      ctx,
+      { column: 0, row: 0, anchor: { x: 0, y: 0 } },
+      { column: 4, row: 0, anchor: { x: 0.5, y: 0.5 } },
+    );
+    expect(arc).toMatchObject({
+      from: { column: 0, row: 0, anchor: { x: 0, y: 0 } },
+      to: { column: 4, row: 0, anchor: { x: 0.5, y: 0.5 } },
+    });
+    // The centre is stored here: absence would mean the legacy spring point.
+    expect(arc?.key).toBe(
+      arcKey(
+        { column: 0, row: 0, anchor: { x: 0, y: 0 } },
+        { column: 4, row: 0, anchor: { x: 0.5, y: 0.5 } },
+        "clockwise",
+        "half",
+      ),
+    );
+  });
+
   it("paints with the project ink colour", () => {
     const ctx = context({ config: { ...square, ink: "#ff0000" } });
     const arc = arcBetween(ctx, { column: 0, row: 0 }, { column: 0, row: 4 });

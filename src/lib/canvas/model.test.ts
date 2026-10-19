@@ -14,11 +14,13 @@ import {
   MAX_COLOR_LENGTH,
   MAX_RATIO,
   MAX_ROUNDING_RADIUS,
+  MAX_KEY_LENGTH,
   MIN_BORDER_WIDTH,
   MIN_RATIO,
   RATIO_PRESETS,
   anchorOf,
   arcKey,
+  arcPoint,
   clampBorderWidth,
   clampRoundingRadius,
   hasAnchor,
@@ -27,7 +29,10 @@ import {
   lineKey,
   linePoint,
   normalizeAnchor,
+  normalizeArcAnchor,
+  normalizeArcSize,
   ratioLabel,
+  repairArcSize,
   sameLinePoint,
   sanitizeBorder,
   sanitizeRounding,
@@ -384,6 +389,121 @@ describe("line points", () => {
   });
 });
 
+describe("arc points", () => {
+  it("keeps the centre — an arc endpoint's absent anchor is the spring point", () => {
+    expect(arcPoint(1, 1, undefined, CENTRE_ANCHOR)).toEqual({
+      column: 1,
+      row: 1,
+      anchor: { x: 0.5, y: 0.5 },
+    });
+    // Absent stays absent: it is not the centre here.
+    expect(arcPoint(1, 1)).toEqual({ column: 1, row: 1 });
+    // A space endpoint carries its fragment and its anchor together.
+    expect(arcPoint(2, 3, 2, CENTRE_ANCHOR)).toEqual({
+      column: 2,
+      row: 3,
+      zone: 2,
+      anchor: { x: 0.5, y: 0.5 },
+    });
+    const anchor = { x: 0, y: 1 };
+    const point = arcPoint(1, 1, undefined, anchor);
+    expect(point.anchor).toEqual(anchor);
+    expect(point.anchor).not.toBe(anchor); // copied, never aliased
+  });
+
+  it("reads a stored arc anchor, the centre surviving and damage falling back", () => {
+    expect(normalizeArcAnchor({ x: 0.5, y: 0.5 })).toEqual(CENTRE_ANCHOR);
+    expect(normalizeArcAnchor({ x: 4, y: -2 })).toEqual({ x: 1, y: 0 });
+    expect(normalizeArcAnchor({ x: 0, y: 1 })).toEqual({ x: 0, y: 1 });
+    expect(normalizeArcAnchor(undefined)).toBeUndefined();
+    expect(normalizeArcAnchor(null)).toBeUndefined();
+    expect(normalizeArcAnchor(4)).toBeUndefined();
+    expect(normalizeArcAnchor({ x: 0 })).toBeUndefined();
+    expect(normalizeArcAnchor({ x: Number.NaN, y: 0 })).toBeUndefined();
+    expect(normalizeArcAnchor({ x: Number.POSITIVE_INFINITY, y: 0 })).toBeUndefined();
+  });
+
+  it("keys an arc by its anchors, anchor-less keys unchanged", () => {
+    const from = { column: 0, row: 6 };
+    const to = { column: 4, row: 6 };
+    // A legacy arc (no anchors) keeps the pre-anchor key byte for byte.
+    expect(arcKey(from, to, "clockwise", "half")).toBe(
+      "arc:0:6>4:6|clockwise|half",
+    );
+    const centred = arcKey(
+      { ...from, anchor: CENTRE_ANCHOR },
+      { ...to, anchor: CENTRE_ANCHOR },
+      "clockwise",
+      "half",
+    );
+    expect(centred).not.toBe(arcKey(from, to, "clockwise", "half"));
+    expect(centred.startsWith("arc:0:6>4:6|clockwise|half|")).toBe(true);
+    // Different anchors on the same cells are different arcs.
+    const corners = arcKey(
+      { ...from, anchor: { x: 0, y: 0 } },
+      { ...to, anchor: { x: 1, y: 1 } },
+      "clockwise",
+      "half",
+    );
+    expect(corners).not.toBe(centred);
+    // Canonical in the cells, the anchors travelling with them.
+    expect(
+      arcKey(
+        { ...to, anchor: { x: 1, y: 1 } },
+        { ...from, anchor: { x: 0, y: 0 } },
+        "clockwise",
+        "half",
+      ),
+    ).toBe(corners);
+  });
+
+  it("keeps an anchored arc's key inside MAX_KEY_LENGTH whatever it carries", () => {
+    const far = {
+      column: 250,
+      row: 250,
+      anchor: { x: 0.123456789012345, y: 0.987654321098765 },
+    };
+    expect(
+      arcKey(
+        far,
+        { column: 249, row: 250, anchor: { x: 1, y: 0 } },
+        "counterclockwise",
+        "threeQuarter",
+      ).length,
+    ).toBeLessThanOrEqual(MAX_KEY_LENGTH);
+  });
+
+  it("repairs a legacy diagonal half to the quarter that draws the same arc", () => {
+    const from = { column: 0, row: 6 };
+    const to = { column: 4, row: 10 };
+    expect(repairArcSize(from, to, "half")).toBe("quarter");
+    // One anchor is enough to select the uniform chord maths: a half is a half.
+    expect(repairArcSize({ ...from, anchor: CENTRE_ANCHOR }, to, "half")).toBe(
+      "half",
+    );
+    expect(
+      repairArcSize(
+        { ...from, anchor: CENTRE_ANCHOR },
+        { ...to, anchor: { x: 1, y: 1 } },
+        "half",
+      ),
+    ).toBe("half");
+    // Row and column chords are already true halves.
+    expect(repairArcSize(from, { column: 4, row: 6 }, "half")).toBe("half");
+    expect(repairArcSize(from, { column: 0, row: 10 }, "half")).toBe("half");
+    expect(repairArcSize(from, to, "quarter")).toBe("quarter");
+    expect(repairArcSize(from, to, "threeQuarter")).toBe("threeQuarter");
+  });
+
+  it("reads a stored arc size, anything unrecognised meaning half", () => {
+    expect(normalizeArcSize("quarter")).toBe("quarter");
+    expect(normalizeArcSize("half")).toBe("half");
+    expect(normalizeArcSize("threeQuarter")).toBe("threeQuarter");
+    expect(normalizeArcSize(undefined)).toBe("half");
+    expect(normalizeArcSize("270")).toBe("half");
+  });
+});
+
 describe("itemSignature", () => {
   const tile: TileItem = {
     type: "tile",
@@ -477,6 +597,23 @@ describe("itemSignature", () => {
         points: [{ column: 0, row: 0 }, { column: 1, row: 1, zone: 3 }],
       }),
     ).not.toBe(itemSignature(stroke));
+  });
+
+  it("gives an arc's anchors their own signature slot", () => {
+    const from = { column: 0, row: 0, anchor: CENTRE_ANCHOR };
+    const to = { column: 3, row: 0, anchor: CENTRE_ANCHOR };
+    const centred: ArcItem = {
+      type: "arc",
+      key: arcKey(from, to, "clockwise", "half"),
+      from,
+      to,
+      direction: "clockwise",
+      size: "half",
+    };
+    expect(itemSignature(centred)).not.toBe(itemSignature(arc));
+    // Same cells, same controls, different anchor: still different items.
+    const cornered: ArcItem = { ...centred, to: { ...to, anchor: { x: 1, y: 4 } } };
+    expect(itemSignature(cornered)).not.toBe(itemSignature(centred));
   });
 
   it("distinguishes every item type and is deterministic", () => {

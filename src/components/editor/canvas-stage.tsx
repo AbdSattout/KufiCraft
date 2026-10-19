@@ -26,7 +26,7 @@ import { Minus, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CanvasPreview } from "@/components/canvas/canvas-preview";
 import { visibleItems } from "@/lib/canvas/items";
-import type { Anchor, CanvasItem, LinePoint, ProjectConfig } from "@/lib/canvas/model";
+import type { CanvasItem, LinePoint, ProjectConfig } from "@/lib/canvas/model";
 import type { Rect } from "@/lib/canvas/geometry";
 import { MAX_ZOOM, MIN_ZOOM } from "@/lib/editor-prefs";
 import { cn } from "@/lib/utils";
@@ -44,9 +44,9 @@ export interface CanvasStageProps {
   previewItems: readonly CanvasItem[];
   eraseItems: readonly CanvasItem[];
   marquee: Rect | null;
-  /** The armed start anchor of a click sequence (line / arc), or null. */
-  marker: Anchor | null;
-  /** The line tool's snap dot: the point the next click would store. */
+  /** The armed start point of a click sequence (line / arc), or null. */
+  marker: LinePoint | null;
+  /** The point the next click would store (the line / arc dot). */
   dot: LinePoint | null;
   previewMode: "solid" | "ghost";
   tool: ToolId;

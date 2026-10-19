@@ -34,12 +34,16 @@ import {
   MAX_NAME_LENGTH,
   MIN_CIRCULAR_SECTORS,
   arcKey,
+  arcPoint,
   circularSectors,
   fragmentPoint,
   lineKey,
   linePoint,
   maxGridIndex,
   normalizeAnchor,
+  normalizeArcAnchor,
+  normalizeArcSize,
+  repairArcSize,
   sanitizeBorder,
   sanitizeRounding,
   snapRatio,
@@ -53,6 +57,7 @@ import type {
   Cell,
   FragmentPoint,
   GridType,
+  InkPoint,
   ItemBorder,
   ItemRounding,
   LineItem,
@@ -209,6 +214,15 @@ function fragmentOf(
   const zone = zoneOf(value as Record<string, unknown>);
   if (zone === null) return null;
   return fragmentPoint(cell.column, cell.row, zone);
+}
+
+/**
+ * The anchor of a stored arc endpoint: optional, clamped into the endpoint's
+ * fragment, the centre included. Damaged input reads as absent — the
+ * endpoint's legacy spring point (`normalizeArcAnchor`; `docs/FORMAT.md`).
+ */
+function arcAnchorOf(value: unknown): InkPoint | undefined {
+  return isRecord(value) ? normalizeArcAnchor(value.anchor) : undefined;
 }
 
 /* ------------------------------------------------------------------ */
@@ -379,14 +393,35 @@ export function normalizeItem(
       return item;
     }
     case "arc": {
-      const from = fragmentOf(value.from, maxColumn, maxRow);
-      const to = fragmentOf(value.to, maxColumn, maxRow);
-      if (!from || !to) return null;
-      if (from.column === to.column && from.row === to.row) return null;
+      const fromFragment = fragmentOf(value.from, maxColumn, maxRow);
+      const toFragment = fragmentOf(value.to, maxColumn, maxRow);
+      if (!fromFragment || !toFragment) return null;
+      if (
+        fromFragment.column === toFragment.column &&
+        fromFragment.row === toFragment.row
+      ) {
+        return null;
+      }
+      // Endpoint anchors are optional and bounded to the endpoint's own
+      // fragment, the centre included; an unusable one falls back to the
+      // endpoint's legacy spring point instead of killing the item
+      // (`normalizeArcAnchor`). The zone stays structural.
+      const from = arcPoint(
+        fromFragment.column,
+        fromFragment.row,
+        fromFragment.zone,
+        arcAnchorOf(value.from),
+      );
+      const to = arcPoint(
+        toFragment.column,
+        toFragment.row,
+        toFragment.zone,
+        arcAnchorOf(value.to),
+      );
       const direction: ArcDirection = isDirection(value.direction)
         ? value.direction
         : "clockwise";
-      const size = value.size === "threeQuarter" ? "threeQuarter" : "half";
+      const size = repairArcSize(from, to, normalizeArcSize(value.size));
       const item: ArcItem = {
         type: "arc",
         key: arcKey(from, to, direction, size),

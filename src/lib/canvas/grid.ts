@@ -21,6 +21,7 @@
 import {
   VIEWBOX_SIZE,
   anchorOf,
+  arcPoint,
   cellSize,
   circularAngularUnit,
   circularSectors,
@@ -28,17 +29,7 @@ import {
   zoneOf,
 } from "./model";
 import type { Anchor, Cell, LinePoint, ProjectConfig, Zone } from "./model";
-import {
-  A,
-  M,
-  circularSlice,
-  cmdsToPath,
-  inkUnit,
-  polar,
-  rectPath,
-  slicePath,
-  zoneRect,
-} from "./geometry";
+import { A, M, cmdsToPath, circularSlice, inkUnit, polar, zoneRect } from "./geometry";
 import type { Point } from "./geometry";
 
 const CENTER = VIEWBOX_SIZE / 2;
@@ -174,14 +165,15 @@ export function linePointPosition(config: ProjectConfig, point: LinePoint): Poin
 }
 
 /**
- * The line tool's point under a pointer: the **fragment** under the cursor
+ * The nine-anchor resolution itself: the **fragment** under the cursor
  * (`pointToAnchor`) plus the anchor nearest the pointer inside that fragment,
  * snapped to the nine `ANCHOR_GRID` positions. Each axis is measured inside
  * the fragment's own box and the fraction is clamped to `[0, 1]`, so a click
  * on a space fragment lands on that space fragment — never on the cell's ink
- * square (docs/CANVAS.md §3).
+ * square (docs/CANVAS.md §3). The resolved anchor is returned verbatim; the
+ * two public readers below decide whether the centre is stored.
  */
-export function pointToLinePoint(config: ProjectConfig, point: Point): LinePoint {
+function pointToAnchorPoint(config: ProjectConfig, point: Point): LinePoint {
   const target = pointToAnchor(config, point);
   const zone = target.zone;
   if (config.gridType === "circular") {
@@ -191,18 +183,49 @@ export function pointToLinePoint(config: ProjectConfig, point: Point): LinePoint
     const angle = normalizeAngle(Math.atan2(dy, dx));
     const unit = circularAngularUnit(config);
     const slice = circularSlice(config, target.column, target.row, zone);
-    return linePoint(target.column, target.row, zone, {
-      x: anchorFraction(radius - slice.r1, slice.r2 - slice.r1),
-      y: zone & 2
-        ? anchorFraction(angle - slice.a1, slice.a2 - slice.a1)
-        : anchorFraction(angle - target.row * unit, unit),
-    });
+    return {
+      column: target.column,
+      row: target.row,
+      zone,
+      anchor: {
+        x: anchorFraction(radius - slice.r1, slice.r2 - slice.r1),
+        y: zone & 2
+          ? anchorFraction(angle - slice.a1, slice.a2 - slice.a1)
+          : anchorFraction(angle - target.row * unit, unit),
+      },
+    };
   }
   const box = zoneRect(config, target.column, target.row, zone);
-  return linePoint(target.column, target.row, zone, {
-    x: anchorFraction(point.x - box.x, box.w),
-    y: anchorFraction(point.y - box.y, box.h),
-  });
+  return {
+    column: target.column,
+    row: target.row,
+    zone,
+    anchor: {
+      x: anchorFraction(point.x - box.x, box.w),
+      y: anchorFraction(point.y - box.y, box.h),
+    },
+  };
+}
+
+/**
+ * The line tool's point under a pointer: the anchor resolution above, with the
+ * **centre dropped** — canonical storage of nothing (`docs/CANVAS.md` §3).
+ */
+export function pointToLinePoint(config: ProjectConfig, point: Point): LinePoint {
+  const resolved = pointToAnchorPoint(config, point);
+  return linePoint(resolved.column, resolved.row, resolved.zone, resolved.anchor);
+}
+
+/**
+ * The arc tool's endpoint under a pointer: the same nine anchors and the same
+ * fragment, but the resolved anchor is returned **verbatim, the centre
+ * included**. For an arc endpoint an absent anchor means the legacy spring
+ * point (`docs/CANVAS.md` §5), so a centre click must be stored to be
+ * meaningful — dropping it would silently move the endpoint onto the ink edge.
+ */
+export function pointToArcPoint(config: ProjectConfig, point: Point): LinePoint {
+  const resolved = pointToAnchorPoint(config, point);
+  return arcPoint(resolved.column, resolved.row, resolved.zone, resolved.anchor);
 }
 
 /**
@@ -348,21 +371,4 @@ function radialGrid(config: ProjectConfig): GridPaths {
 export function gridPaths(config: ProjectConfig): GridPaths {
   if (config.gridType === "circular") return radialGrid(config);
   return squareGrid(config);
-}
-
-/**
- * Path of one anchor's fragment.
- *
- * Exists so the editor can ring the cell a click-sequence tool has armed (the
- * line / arc tool's first click): the overlay strokes this path around the
- * pending start anchor before anything is committed. Square grid: the anchor's
- * zone rectangle; circular grid: its annular slice.
- */
-export function anchorPath(config: ProjectConfig, anchor: Anchor): string {
-  if (config.gridType === "circular") {
-    return slicePath(
-      circularSlice(config, anchor.column, anchor.row, anchor.zone),
-    );
-  }
-  return rectPath(zoneRect(config, anchor.column, anchor.row, anchor.zone));
 }

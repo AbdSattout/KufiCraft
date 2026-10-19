@@ -19,14 +19,14 @@
  * `@/lib/canvas/items`, so a tool never hand-writes geometry.
  */
 
-import { linePoint, sameLinePoint, zoneOf } from "@/lib/canvas/model";
+import { linePoint, sameLinePoint } from "@/lib/canvas/model";
 import type {
   Anchor,
   ArcItem,
+  ArcPoint,
   CanvasItem,
   CanvasItemType,
   Cell,
-  FragmentPoint,
   GridType,
   LinePoint,
 } from "@/lib/canvas/model";
@@ -39,6 +39,7 @@ import {
   anchorAt,
   anchorsAlongLine,
   arcBetween,
+  arcPointAt,
   clampDelta,
   hitTest,
   linePointAt,
@@ -77,7 +78,7 @@ export type ToolState =
   | { kind: "none" }
   | { kind: "pen"; anchors: Anchor[]; cursor: Anchor }
   | { kind: "erase"; keys: string[]; from: Anchor }
-  | { kind: "arc"; from: Anchor; to: Anchor }
+  | { kind: "arc"; from: LinePoint | null; to: LinePoint }
   | { kind: "line"; points: LinePoint[]; hover: LinePoint | null }
   | { kind: "marquee"; from: Point; to: Point; base: readonly string[] }
   | { kind: "move"; from: Cell; to: Cell; keys: readonly string[] };
@@ -113,9 +114,12 @@ export interface ToolPreview {
   keys: readonly string[];
   /** The marquee box, when the tool draws one. */
   marquee: Rect | null;
-  /** The armed start anchor of a click sequence (line / arc), to ring. */
-  marker: Anchor | null;
-  /** The line tool's snap dot: the point the next click would store. */
+  /**
+   * The armed start point of a click sequence (line / arc), painted as the
+   * snap dot — the actual stored point, not the whole cell.
+   */
+  marker: LinePoint | null;
+  /** The point the next click would store (the line / arc tool's hover). */
   dot: LinePoint | null;
 }
 
@@ -547,15 +551,12 @@ class LineTool extends KufiTool {
 
   override preview(ctx: ToolContext, state: ToolState): ToolPreview {
     if (state.kind !== "line") return EMPTY_PREVIEW;
-    const first = state.points[0];
     return {
       items: linePreview(ctx.config, state.points, state.hover, ctx.style),
       mode: "ghost",
       keys: [],
       marquee: null,
-      marker: first
-        ? { column: first.column, row: first.row, zone: zoneOf(first) }
-        : null,
+      marker: state.points[0] ?? null,
       dot: state.hover,
     };
   }
@@ -672,14 +673,18 @@ class EraserTool extends KufiTool {
 
 /**
  * The rib (قوس): from one **fragment** to another on the same row, the same
- * column or a 45° diagonal. Direction and size come from the tool's own
- * controls — docs/CANVAS.md §5 is the geometry, and the Arc item class owns the
- * maths. Clicks arm the fragment under the pointer (space fragments included);
- * the two ends spring off their own squares.
+ * column or a 45° diagonal. Each endpoint is a **user-picked point** — the
+ * same nine anchors the line tool uses (`arcPointAt`), on the fragment under
+ * the pointer and stored whole with the centre included, because for an arc
+ * endpoint an absent anchor means the legacy spring point (docs/CANVAS.md §5).
+ * Direction and size come from the tool's own controls; the Arc item class
+ * owns the maths.
  *
  * It takes **both** gestures: drag from A to B (pointer-down arms, pointer-up
  * commits), or click A then click B (the state survives pointer-up, so the
- * second click commits and a click on the origin cancels).
+ * second click commits and a click on the origin cancels). The overlay's dot
+ * marks the point the next click would store, and the armed start is painted
+ * as the same dot on its own point — never a whole-cell square.
  */
 class ArcTool extends KufiTool {
   readonly id = "arc" as const;
@@ -695,35 +700,42 @@ class ArcTool extends KufiTool {
   ];
 
   begin(ctx: ToolContext, state: ToolState, input: ToolInput): ToolOutcome {
-    const anchor = anchorAt(ctx.config, input.point);
-    if (state.kind !== "arc") {
-      // First click / pointer-down: arm the tool at this fragment.
-      return { state: { kind: "arc", from: anchor, to: anchor } };
+    const point = arcPointAt(ctx.config, input.point);
+    if (state.kind !== "arc" || state.from === null) {
+      // First click / pointer-down: arm the tool at this exact point.
+      return { state: { kind: "arc", from: point, to: point } };
     }
     // Second click: clicking the origin again cancels, otherwise commit now.
-    if (state.from.column === anchor.column && state.from.row === anchor.row) {
+    if (sameArcCell(state.from, point)) {
       return { state: NO_STATE };
     }
-    return this.commit(ctx, state.from, anchor);
+    return this.commit(ctx, state.from, point);
   }
 
   /**
-   * Tracks the end cell. The controller calls this on hover too (the tool is
-   * `persistent`), which is what lets click-click show the pending arc between
-   * the two clicks.
+   * Tracks the point under the cursor — on hover too (the tool is
+   * `persistent`), because the dot it produces is where the next click lands.
+   * Before the first click the state is hover-only (`from: null`), so the dot
+   * shows the pending start without a ghost arc.
    */
   move(ctx: ToolContext, state: ToolState, input: ToolInput): ToolOutcome {
-    if (state.kind !== "arc") return unchanged(state);
-    const anchor = anchorAt(ctx.config, input.point);
-    if (anchorKey(anchor) === anchorKey(state.to)) return unchanged(state);
-    return { state: { ...state, to: anchor } };
+    const point = arcPointAt(ctx.config, input.point);
+    const from = state.kind === "arc" ? state.from : null;
+    if (
+      state.kind === "arc" &&
+      state.from !== null &&
+      sameArcPoint(state.to, point)
+    ) {
+      return unchanged(state);
+    }
+    return { state: { kind: "arc", from, to: point } };
   }
 
   end(ctx: ToolContext, state: ToolState): ToolOutcome {
-    if (state.kind !== "arc") return { state: NO_STATE };
+    if (state.kind !== "arc" || state.from === null) return { state: NO_STATE };
     // A pointer-up on the armed cell is only the first click of a click
     // sequence, so the state survives and waits for the second click.
-    if (state.from.column === state.to.column && state.from.row === state.to.row) {
+    if (sameArcCell(state.from, state.to)) {
       return { state, keep: true };
     }
     return this.commit(ctx, state.from, state.to);
@@ -731,23 +743,20 @@ class ArcTool extends KufiTool {
 
   override preview(ctx: ToolContext, state: ToolState): ToolPreview {
     if (state.kind !== "arc") return EMPTY_PREVIEW;
-    const arc = this.between(ctx, state.from, state.to);
+    const arc =
+      state.from === null ? null : this.between(ctx, state.from, state.to);
     return {
       items: arc ? [arc] : [],
       mode: "ghost",
       keys: [],
       marquee: null,
       marker: state.from,
-      dot: null,
+      dot: state.to,
     };
   }
 
-  /** Commits the arc between two fragments, or nothing when the pair cannot. */
-  private commit(
-    ctx: ToolContext,
-    from: FragmentPoint,
-    to: FragmentPoint,
-  ): ToolOutcome {
+  /** Commits the arc between two points, or nothing when the pair cannot carry one. */
+  private commit(ctx: ToolContext, from: ArcPoint, to: ArcPoint): ToolOutcome {
     const arc = this.between(ctx, from, to);
     if (!arc) return { state: NO_STATE };
     const next = addItems({ items: ctx.items }, [arc]).items;
@@ -757,14 +766,33 @@ class ArcTool extends KufiTool {
 
   private between(
     ctx: ToolContext,
-    from: FragmentPoint,
-    to: FragmentPoint,
+    from: ArcPoint,
+    to: ArcPoint,
   ): ArcItem | null {
     // The Arc class owns the geometry; `arcBetween` only supplies the style.
-    if (from.column === to.column && from.row === to.row) return null;
+    if (sameArcCell(from, to)) return null;
     if (!Arc.isSupported(from, to)) return null;
     return arcBetween(ctx, from, to);
   }
+}
+
+/** Whether two arc endpoints sit in the same cell (always a degenerate pair). */
+function sameArcCell(a: ArcPoint, b: ArcPoint): boolean {
+  return a.column === b.column && a.row === b.row;
+}
+
+/**
+ * Whether two arc endpoints are the **same point**. Absence is a value on an
+ * arc (`ArcPoint`), so a point without an anchor is not the same as one on the
+ * centre — unlike `sameLinePoint`, which reads both as the centre.
+ */
+function sameArcPoint(a: ArcPoint, b: ArcPoint): boolean {
+  if (a.column !== b.column || a.row !== b.row) return false;
+  if ((a.zone ?? 0) !== (b.zone ?? 0)) return false;
+  if (a.anchor === undefined || b.anchor === undefined) {
+    return a.anchor === undefined && b.anchor === undefined;
+  }
+  return a.anchor.x === b.anchor.x && a.anchor.y === b.anchor.y;
 }
 
 /* ------------------------------------------------------------------ */

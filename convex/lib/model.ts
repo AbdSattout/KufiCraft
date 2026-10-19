@@ -378,15 +378,20 @@ export const SHAPE_IDS: readonly ShapeId[] = [
  */
 export type ArcDirection = "clockwise" | "counterclockwise";
 
-/** Arc extent: `half` = semicircle (the old app), `threeQuarter` = 270°. */
-export type ArcSize = "half" | "threeQuarter";
+/**
+ * Arc extent, always measured on the chord between the two endpoints:
+ * `quarter` = 90° (the angle the reference app's diagonal auto-switch
+ * produced), `half` = a semicircle (the old app's normal case),
+ * `threeQuarter` = 270°.
+ */
+export type ArcSize = "quarter" | "half" | "threeQuarter";
 
 export const ARC_DIRECTIONS: readonly ArcDirection[] = [
   "clockwise",
   "counterclockwise",
 ];
 
-export const ARC_SIZES: readonly ArcSize[] = ["half", "threeQuarter"];
+export const ARC_SIZES: readonly ArcSize[] = ["quarter", "half", "threeQuarter"];
 
 /** A whole cell: the anchor every line / arc / polyline point uses. */
 export interface Cell {
@@ -459,6 +464,18 @@ export interface FragmentPoint extends Cell {
 export interface LinePoint extends FragmentPoint {
   anchor?: InkPoint;
 }
+
+/**
+ * An **arc endpoint**: the same point type as a line point (a fragment plus an
+ * optional anchor), read the other way round. An absent `anchor` does **not**
+ * mean the centre here: it means the reference app's spring point for that
+ * endpoint (`docs/CANVAS.md` §5), which is what keeps every stored pre-anchor
+ * arc drawing exactly as it did. The centre is therefore a real, storable
+ * choice for an arc endpoint, and the arc tool always writes the anchor it
+ * clicked. The type is an alias — lines, strokes and arcs share one point
+ * model, so a zone and an anchor travel together everywhere.
+ */
+export type ArcPoint = LinePoint;
 
 /** The centre of a fragment: what an absent anchor normalises to. */
 export const CENTRE_ANCHOR: InkPoint = { x: 0.5, y: 0.5 };
@@ -537,14 +554,16 @@ export interface StrokeItem {
 
 /**
  * A rib (قوس) between two fragments on the same row, the same column or a
- * 45° diagonal. Rendered as a stroked arc of ink thickness, springing from
- * each fragment's own edges — `docs/CANVAS.md` §5 has the exact geometry.
+ * 45° diagonal. Rendered as a stroked arc of ink thickness between its two
+ * endpoints; `from`/`to` carry the fragment and the anchor the user picked
+ * inside it (an `ArcPoint`; an absent anchor means the reference app's spring
+ * point — see `docs/CANVAS.md` §5).
  */
 export interface ArcItem {
   type: "arc";
   key: string;
-  from: FragmentPoint;
-  to: FragmentPoint;
+  from: ArcPoint;
+  to: ArcPoint;
   direction: ArcDirection;
   size: ArcSize;
   border?: ItemBorder;
@@ -701,6 +720,40 @@ export function sameLinePoint(a: LinePoint, b: LinePoint): boolean {
   );
 }
 
+/**
+ * Builds an arc endpoint, keeping the anchor verbatim — including the centre.
+ * The counterpart of `linePoint`, which drops the centre; for an arc endpoint
+ * an absent anchor carries the legacy spring point instead (see `ArcPoint`),
+ * so nothing may be dropped here. The zone is canonicalised like every other
+ * fragment point (`zone: 0` is dropped).
+ */
+export function arcPoint(
+  column: number,
+  row: number,
+  zone?: Zone,
+  anchor?: InkPoint,
+): ArcPoint {
+  const point: ArcPoint = fragmentPoint(column, row, zone);
+  if (anchor !== undefined) point.anchor = { x: anchor.x, y: anchor.y };
+  return point;
+}
+
+/**
+ * Tolerant read of a stored **arc** anchor: a record with two finite numbers is
+ * clamped to the ink region and returned — **the centre included**, which for
+ * an arc endpoint is a value like any other. Absent or damaged input is
+ * `undefined`, which an arc reads as its legacy spring point, so every reader
+ * repairs instead of rejecting.
+ */
+export function normalizeArcAnchor(value: unknown): InkPoint | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const anchor = value as Record<string, unknown>;
+  const x = fraction(anchor.x);
+  const y = fraction(anchor.y);
+  if (x === undefined || y === undefined) return undefined;
+  return { x, y };
+}
+
 /** `"column:row"` — the compact cell notation the keys are built from. */
 function cellKey(cell: Cell): string {
   return `${cell.column}:${cell.row}`;
@@ -752,15 +805,64 @@ export function strokeKey(points: readonly LinePoint[], closed: boolean): string
   return `stroke:${digest(payload)}`;
 }
 
+/**
+ * Compact notation of one arc endpoint: the fragment plus the anchor
+ * **exactly as stored** — `linePointKey` without the centre-dropping, because
+ * for an arc endpoint the centre is a real value (an absent anchor means the
+ * legacy spring point).
+ */
+function arcPointKey(point: ArcPoint): string {
+  const anchor = point.anchor;
+  if (anchor === undefined) return fragmentKey(point);
+  return `${fragmentKey(point)}@${anchor.x},${anchor.y}`;
+}
+
+/**
+ * Tolerant read of a stored arc size: `quarter` and `threeQuarter` pass
+ * through, anything else — absent or unrecognised — means the old app's
+ * `half`.
+ */
+export function normalizeArcSize(value: unknown): ArcSize {
+  return value === "quarter" || value === "threeQuarter" ? value : "half";
+}
+
+/**
+ * The size a stored arc really means. A legacy **anchor-less diagonal** `half`
+ * was drawn at `chord/√2` by the reference app's auto-switch — exactly a
+ * quarter — so a reader upgrades it to the size that draws the same arc
+ * (`docs/CANVAS.md` §5). Any other arc keeps its size: an anchored diagonal
+ * `half` is a true semicircle.
+ */
+export function repairArcSize(
+  from: ArcPoint,
+  to: ArcPoint,
+  size: ArcSize,
+): ArcSize {
+  if (size !== "half") return size;
+  if (from.anchor !== undefined || to.anchor !== undefined) return size;
+  if (from.column === to.column || from.row === to.row) return size;
+  return "quarter";
+}
+
+/**
+ * Identity of a rib: its two fragments (canonicalised by column, row, then
+ * zone) plus the controls. An anchor-less arc keys exactly as it did before
+ * anchors and zones existed (`#zone` appears only for a space fragment); an arc
+ * with anchors appends a **digest** of its endpoints, because a stored anchor
+ * may be any fraction in `[0, 1]` and the key must stay inside
+ * `MAX_KEY_LENGTH` whatever it carries.
+ */
 export function arcKey(
-  from: FragmentPoint,
-  to: FragmentPoint,
+  from: ArcPoint,
+  to: ArcPoint,
   direction: ArcDirection,
   size: ArcSize,
 ): string {
   const [a, b] =
     compareFragments(from, to) <= 0 ? [from, to] : [to, from];
-  return `arc:${fragmentKey(a)}>${fragmentKey(b)}|${direction}|${size}`;
+  const base = `arc:${fragmentKey(a)}>${fragmentKey(b)}|${direction}|${size}`;
+  if (a.anchor === undefined && b.anchor === undefined) return base;
+  return `${base}|${digest(`${arcPointKey(a)}>${arcPointKey(b)}`)}`;
 }
 
 /**
@@ -816,8 +918,8 @@ export function itemSignature(item: CanvasItem): string {
     case "arc":
       return [
         item.key,
-        fragmentKey(item.from),
-        fragmentKey(item.to),
+        arcPointKey(item.from),
+        arcPointKey(item.to),
         item.direction,
         item.size,
         item.color ?? "",
@@ -879,6 +981,7 @@ export const arcDirectionValidator = v.union(
 );
 
 export const arcSizeValidator = v.union(
+  v.literal("quarter"),
   v.literal("half"),
   v.literal("threeQuarter"),
 );
@@ -916,12 +1019,13 @@ export const fragmentValidator = v.object({
 });
 
 /**
- * A line point: a fragment plus an optional anchor. The anchor is structurally
- * checked only — the two numbers are unbounded here on purpose: the tool emits
- * the nine `ANCHOR_GRID` positions, but a stored anchor is **repaired**
- * (clamped to `[0, 1]`, the centre dropped) by `sanitizeItem` on the way in
- * rather than rejected at the door, so a write that was valid before anchors
- * existed is still valid, whatever it carries.
+ * A point's anchor, shared by a line/arc point (and a stroke point). The
+ * anchor is structurally checked only — the two numbers are unbounded here on
+ * purpose: the tools emit the nine `ANCHOR_GRID` positions, but a stored
+ * anchor is **repaired** (clamped to `[0, 1]`; the centre dropped for a line
+ * point, kept for an arc endpoint) by `sanitizeItem` on the way in rather than
+ * rejected at the door, so a write that was valid before anchors existed is
+ * still valid, whatever it carries.
  */
 export const linePointValidator = v.object({
   column: v.number(),
@@ -964,8 +1068,8 @@ export const canvasItemValidator = v.union(
   v.object({
     type: v.literal("arc"),
     key: v.string(),
-    from: fragmentValidator,
-    to: fragmentValidator,
+    from: linePointValidator,
+    to: linePointValidator,
     direction: arcDirectionValidator,
     size: arcSizeValidator,
     border: v.optional(borderValidator),

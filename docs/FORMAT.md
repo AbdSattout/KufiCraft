@@ -46,6 +46,13 @@ apps never had (see “Legacy” below).
   `docs/CANVAS.md` §3). Absent means the fragment centre, and the centre is
   never written (`0.5, 0.5` is dropped on write), so a file from before anchors
   existed is unchanged.
+* An `arc` **endpoint** (`from` / `to`) takes the same optional `anchor`, read
+  the other way round: absent means the reference app's **spring point**, so the
+  centre is a real value and is written like any other (`docs/CANVAS.md` §5).
+  The arc tool writes both endpoints whole; a legacy arc — neither endpoint
+  anchored — keeps its exact old geometry, and an anchor-less diagonal `half`
+  is repaired on read to the `quarter` that was already being drawn (same
+  pixels; only that arc's key changes, on the next write).
 
 ### Style fields (`rounding`, `border`)
 
@@ -130,9 +137,14 @@ that omits them renders **exactly** like a v2 file written before they existed.
      and strokes with fewer than two points; the list is capped at `MAX_ITEMS`
      (excess dropped, with a warning toast). A point's optional `anchor` is
      **repaired, never rejected**: finite fractions clamp into `[0, 1]`, and
-     anything else (wrong shape, `NaN`, a stored centre) becomes the cell
-     centre — so a write that was valid before anchors existed can never be
-     refused for one;
+     anything else (wrong shape, `NaN`, a stored centre) becomes the cell centre
+     — so a write that was valid before anchors existed can never be refused for
+     one. An **arc endpoint** repairs the other way: its damaged anchor becomes
+     *absence* (the legacy spring point), and a stored centre is kept, because
+     for an arc the centre is a real value. A legacy diagonal `half` arc has its
+     `size` repaired to `quarter` — the reference app drew that half at
+     `chord/√2`, which is exactly a quarter (`docs/CANVAS.md` §5), so nothing on
+     screen moves;
   5. `name` is trimmed/collapsed like the backend and capped at
      `MAX_NAME_LENGTH`.
 * Implemented in **one module** — `src/lib/kuficraft-file.ts` — used by both the
@@ -156,7 +168,7 @@ file cannot smuggle values past the v2 rules:
 | --- | --- |
 | `tile` `{t,i,j,q,s,r,c}` | `{type:"tile", column, row, zone, shape, rotation, color}` |
 | `line` `{t,i1,j1,i2,j2,c}` | `{type:"line", from:{column,row}, to:{column,row}, color}` |
-| `arch` `{t,i1,j1,i2,j2,d,c}` | `{type:"arc", from, to, direction, size:"half", color}` — v1’s `d` bulge flag becomes the sweep direction (`d === 1` → `counterclockwise`) |
+| `arch` `{t,i1,j1,i2,j2,d,c}` | `{type:"arc", from, to, direction, size:"half", color}` — v1’s `d` bulge flag becomes the sweep direction (`d === 1` → `counterclockwise`); a diagonal arch is stored as the `quarter` it was already drawn as (`docs/CANVAS.md` §5) |
 | shapes `semi-hexagone` / `arc` | renamed `pentagon` / `curve` (`docs/CANVAS.md` §7) |
 | `ratio: 0.5` (the old “متساوية” grid) | is a legal `1:1` — the equal cell, half ink and half space |
 

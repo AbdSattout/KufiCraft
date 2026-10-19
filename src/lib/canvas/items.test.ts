@@ -30,6 +30,7 @@ import type {
   Anchor,
   ArcDirection,
   ArcItem,
+  ArcPoint,
   ArcSize,
   CanvasItem,
   CanvasItemType,
@@ -114,8 +115,8 @@ function line(from: Cell, to: Cell, color?: string): LineItem {
 }
 
 function arc(
-  from: Cell,
-  to: Cell,
+  from: ArcPoint,
+  to: ArcPoint,
   direction: ArcDirection = "clockwise",
   size: ArcSize = "half",
   color?: string,
@@ -195,6 +196,47 @@ describe("keys", () => {
     expect(arcBackward.toJSON()).toEqual(arcForward.toJSON());
   });
 
+  it("distinguishes an arc's anchors, the legacy key untouched", () => {
+    const from = { column: 0, row: 6 };
+    const to = { column: 4, row: 6 };
+    const legacy = arc(from, to);
+    // An anchor-less arc keys exactly as it did before anchors existed.
+    expect(legacy.key).toBe("arc:0:6>4:6|clockwise|half");
+
+    const centred = new Arc({
+      from: { ...from, anchor: { x: 0.5, y: 0.5 } },
+      to: { ...to, anchor: { x: 0.5, y: 0.5 } },
+      direction: "clockwise",
+      size: "half",
+    });
+    expect(centred.key).not.toBe(legacy.key);
+    // A different anchor is a different arc.
+    expect(
+      new Arc({
+        from: { ...from, anchor: { x: 0, y: 1 } },
+        to: { ...to, anchor: { x: 0.5, y: 0.5 } },
+        direction: "clockwise",
+        size: "half",
+      }).key,
+    ).not.toBe(centred.key);
+
+    // Endpoints canonicalise by cell; the anchors travel with their cell.
+    const forward = new Arc({
+      from: { ...from, anchor: { x: 0, y: 0 } },
+      to: { ...to, anchor: { x: 1, y: 1 } },
+      direction: "clockwise",
+      size: "half",
+    });
+    const backward = new Arc({
+      from: { ...to, anchor: { x: 1, y: 1 } },
+      to: { ...from, anchor: { x: 0, y: 0 } },
+      direction: "clockwise",
+      size: "half",
+    });
+    expect(backward.key).toBe(forward.key);
+    expect(backward.toJSON()).toEqual(forward.toJSON());
+  });
+
   it("distinguishes the stroke's closed flag", () => {
     const points = [{ column: 0, row: 0 }, { column: 2, row: 0 }, { column: 2, row: 2 }];
     expect(new Stroke({ points, closed: true }).key).toBe(strokeKey(points, true));
@@ -261,6 +303,23 @@ describe("parseItem / itemOf", () => {
     );
     // A centre anchor is storage-free: the point stays a plain cell.
     expect(json.points[1]).toEqual({ column: 2, row: 0 });
+    expect(parseItem(json).toJSON()).toEqual(json);
+  });
+
+  it("round-trips an arc's anchors, the centre included", () => {
+    const json = makeArc({
+      from: { column: 0, row: 6, anchor: { x: 0.5, y: 0.5 } },
+      to: { column: 4, row: 6, anchor: { x: 0, y: 1 } },
+      direction: "clockwise",
+      size: "quarter",
+    });
+    // Unlike a line point, the centre is stored: for an arc endpoint an absent
+    // anchor means the reference app's spring point (`ArcPoint`).
+    expect(json.from).toEqual({
+      column: 0,
+      row: 6,
+      anchor: { x: 0.5, y: 0.5 },
+    });
     expect(parseItem(json).toJSON()).toEqual(json);
   });
 });
@@ -357,6 +416,85 @@ describe("render", () => {
     expectPointNear(end, geometry.end, 1e-4);
     // Clockwise springs off the bottom ink edge of the row.
     expect(start.y).toBeCloseTo(6 * cellSize(SQUARE) + inkUnit(SQUARE), 6);
+  });
+
+  it("spans an anchored arc exactly between its two points", () => {
+    const cell = cellSize(SQUARE);
+    const ink = inkUnit(SQUARE);
+    const subject = new Arc({
+      from: { column: 0, row: 6, anchor: { x: 0, y: 0 } },
+      to: { column: 4, row: 6, anchor: { x: 1, y: 1 } },
+      direction: "clockwise",
+      size: "quarter",
+    });
+    const geometry = subject.geometry(SQUARE);
+    expectPointNear(geometry.start, { x: 0, y: 6 * cell }, 1e-9);
+    expectPointNear(geometry.end, { x: 4 * cell + ink, y: 6 * cell + ink }, 1e-9);
+    // The quarter's radius is the chord over √2, largeArc clear, sweep = cw.
+    const chord = Math.hypot(4 * cell + ink, ink);
+    expect(geometry.radius).toBeCloseTo(chord / Math.SQRT2, 9);
+    expect(geometry.largeArc).toBe(0);
+    expect(geometry.sweep).toBe(1);
+
+    const { start, end } = endpoints(itemRender(SQUARE, subject).path);
+    expectPointNear(start, geometry.start, 1e-4);
+    expectPointNear(end, geometry.end, 1e-4);
+  });
+
+  it("makes a diagonal half a true semicircle once its endpoints are anchored", () => {
+    const cell = cellSize(SQUARE);
+    const subject = new Arc({
+      from: { column: 0, row: 6, anchor: { x: 0.5, y: 0.5 } },
+      to: { column: 4, row: 10, anchor: { x: 0.5, y: 0.5 } },
+      direction: "clockwise",
+      size: "half",
+    });
+    const geometry = subject.geometry(SQUARE);
+    // Anchored endpoints select the uniform chord maths: radius `chord/2`,
+    // not the legacy diagonal `chord/√2`.
+    expect(geometry.radius).toBeCloseTo(Math.hypot(4 * cell, 4 * cell) / 2, 9);
+    expect(geometry.largeArc).toBe(0);
+  });
+
+  it("keeps the old radius on a legacy diagonal half, which reads as a quarter", () => {
+    const from = { column: 0, row: 6 };
+    const to = { column: 4, row: 10 };
+    const base = cellSize(SQUARE);
+    const ink = inkUnit(SQUARE);
+    const legacy = new Arc({ from, to, direction: "clockwise", size: "half" });
+    const legacyGeometry = legacy.geometry(SQUARE);
+    // The reference app's diagonal radius, `dColumn·cell + ink/2`, is exactly
+    // `chord/√2` — the quarter's radius (docs/CANVAS.md §5) — so the read-time
+    // repair to `quarter` changes no pixel.
+    expect(legacyGeometry.radius).toBeCloseTo(4 * base + ink / 2, 9);
+
+    const repaired = new Arc({
+      from,
+      to,
+      direction: "clockwise",
+      size: "quarter",
+    });
+    const repairedGeometry = repaired.geometry(SQUARE);
+    expect(repairedGeometry.start).toEqual(legacyGeometry.start);
+    expect(repairedGeometry.end).toEqual(legacyGeometry.end);
+    expect(repairedGeometry.radius).toBeCloseTo(legacyGeometry.radius, 9);
+    expect(repairedGeometry.largeArc).toBe(legacyGeometry.largeArc);
+    expect(repairedGeometry.sweep).toBe(legacyGeometry.sweep);
+  });
+
+  it("draws a threeQuarter arc with largeArc set and radius chord over √2", () => {
+    const cell = cellSize(SQUARE);
+    const ink = inkUnit(SQUARE);
+    const subject = new Arc({
+      from: { column: 0, row: 6, anchor: { x: 0, y: 0 } },
+      to: { column: 4, row: 6, anchor: { x: 1, y: 0 } },
+      direction: "counterclockwise",
+      size: "threeQuarter",
+    });
+    const geometry = subject.geometry(SQUARE);
+    expect(geometry.radius).toBeCloseTo((4 * cell + ink) / Math.SQRT2, 9);
+    expect(geometry.largeArc).toBe(1);
+    expect(geometry.sweep).toBe(0);
   });
 
   it("fills a circular tile's slice at the board's own sector angle", () => {
@@ -496,6 +634,24 @@ describe("cellRange / moved", () => {
     );
     expect(moveItem(arc({ column: 0, row: 6 }, { column: 4, row: 6 }), 0, 1)).toEqual(
       makeArc({ from: { column: 0, row: 7 }, to: { column: 4, row: 7 }, direction: "clockwise", size: "half" }),
+    );
+    // The anchors travel with the cells they sit in.
+    expect(
+      moveItem(
+        arc(
+          { column: 0, row: 6, anchor: { x: 0, y: 1 } },
+          { column: 4, row: 6, anchor: { x: 1, y: 0 } },
+        ),
+        1,
+        -1,
+      ),
+    ).toEqual(
+      makeArc({
+        from: { column: 1, row: 5, anchor: { x: 0, y: 1 } },
+        to: { column: 5, row: 5, anchor: { x: 1, y: 0 } },
+        direction: "clockwise",
+        size: "half",
+      }),
     );
     expect(moveItem(stroke([{ column: 0, row: 0 }, { column: 2, row: 2 }]), 2, 2)).toEqual(
       makeStroke([{ column: 2, row: 2 }, { column: 4, row: 4 }], false),

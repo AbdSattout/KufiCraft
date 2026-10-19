@@ -132,7 +132,7 @@ recolour behaviour), on the client (`paintItems`) and on the backend
 | `tile` | `column`, `row`, `zone`, `shape?`, `rotation?`, `color?` | `tile:<column>:<row>:<zone>` |
 | `line` | `from`, `to` (`FragmentPoint`), `color?` | `line:<f>><f>` (fragments canonical by column, then row, then zone) |
 | `stroke` | `points` (`LinePoint[]`), `closed?`, `color?` | `stroke:<digest>` (FNV-1a of the point list — a point list is unbounded, a key is not) |
-| `arc` | `from`, `to` (`FragmentPoint`), `direction`, `size`, `color?` | `arc:<f>><f>\|<direction>\|<size>` |
+| `arc` | `from`, `to` (`ArcPoint` — a fragment + optional `anchor`), `direction`, `size`, `color?` | `arc:<f>><f>\|<direction>\|<size>` (fragments canonical by column, then row, then zone); an arc with a stored anchor ends in `\|<digest>` of its endpoints — an anchor-less arc keys exactly as before |
 
 * `shape` is one of the ten `ShapeId`s (`SHAPE_IDS`), absent = `square`;
   `rotation` is quarter turns clockwise (`0…3`), absent = 0.
@@ -156,7 +156,12 @@ y-space, `3` = both). Every line / arc end and every stroke point addresses a
 ```
 FragmentPoint = Cell & { zone?: 0 | 1 | 2 | 3 }   // absent = 0 (ink)
 LinePoint     = FragmentPoint & { anchor?: InkPoint }
+ArcPoint      = LinePoint                          // one point model
 ```
+
+Lines, strokes and arcs share **one point type**. The only difference is how an
+absent `anchor` is read: a line/stroke point means the fragment centre, while an
+arc endpoint means the reference app's spring point (§5, «Arc geometry»).
 
 A space fragment is an ordinary square to everything that edits the board — the
 line and arc tools arm on it, its hover dot sits on it, hit-testing, marquee,
@@ -186,20 +191,31 @@ tiles paint their own fragment's box, and the line/arc geometry springs off it
 * **Keys.** `fragmentKey` appends `#<zone>` to a space fragment (`"2:3#1"`);
   `strokeKey` digests the point list with that fragment key and the anchor as
   before (`"2:0#1@1,1"`). Ink keys are exactly the pre-fragment strings; a space
-  point keys differently from the ink point in the same cell.
+  point keys differently from the ink point in the same cell. An arc appends a
+  ≤ 7-character digest only when it stores an anchor, so its key stays inside
+  `MAX_KEY_LENGTH` whatever fraction it carries (§ «Arc geometry»).
 * **Circular grid.** `x` is the fraction of the fragment's radial band. `y` is
   the fraction of the **whole sector** when the point is angularly ink
   (`zone & 2 === 0`) — the asymmetry that keeps `(0.5, 0.5)` exactly
   `cellCentre` on both grids, which back-compat demands — and of the **space
   slice** when the point is angularly space (`zone & 2 !== 0`), so a space point
   is a point on its own slice.
-* Readers **split** the two failure modes: a bad zone rejects the item (it
-  decides *where* the point is), while a bad anchor is **repaired** instead of
-  rejecting it — `normalizeAnchor` clamps a finite `{x, y}` into `[0, 1]`, and
-  anything else (wrong shape, `NaN`, a stored centre) becomes the fragment
-  centre, in `kuficraft-file.ts` and the backend's `sanitizeItem` alike, so a
-  document that was valid before anchors existed is never rejected for carrying
-  one.
+* Readers **split** the failure modes: a bad zone rejects the item (it decides
+  *where* the point is), while a bad anchor is **repaired** instead of rejecting
+  it — `normalizeAnchor` clamps a finite `{x, y}` into `[0, 1]`, and anything
+  else (wrong shape, `NaN`, a stored centre) becomes the fragment centre, in
+  `kuficraft-file.ts` and the backend's `sanitizeItem` alike, so a document that
+  was valid before anchors existed is never rejected for carrying one.
+* **An arc endpoint reads the anchor the other way round.** `Arc.from` /
+  `Arc.to` are `ArcPoint`s — the same point type, used by the arc. An **absent**
+  anchor means the reference app's *spring point* for that endpoint (§5), not
+  the centre, which is what keeps every pre-anchor arc drawing exactly as it
+  did. The centre is therefore a real, storable anchor for an arc: the arc tool
+  writes every click (`arcPoint` keeps what `linePoint` drops, `plainArcPoint`
+  copies it) and the readers clamp through `normalizeArcAnchor`, which never
+  drops the centre and turns damaged input into the spring-point fallback. An
+  arc **keys** by the anchors it stores, so an explicit centre and an absent
+  anchor are different ribs — as they are on screen.
 
 ### Per-grid item rules
 
@@ -227,16 +243,19 @@ has no equivalent. One rule, one place (`items.ts`):
 ### Stored shape (the wire contract)
 
 `toJSON()` emits **exactly** the fields of `canvasItemValidator`
-(`convex/lib/model.ts`) and nothing else: every line / arc end is copied through
+(`convex/lib/model.ts`) and nothing else: every line end is copied through
 `plainFragment` (`{column, row}` for the ink fragment, `{column, row, zone}` for
-a space fragment) and every stroke point through `plainLinePoint`, which does
-the same plus keeps a non-centre `anchor` while dropping the stored centre. Tool
-state holds an `Anchor` (a cell **plus** a required `zone`), which is assignable
-to a `FragmentPoint`; the backend sanitiser applies the same canonicalisation and
-re-derives the key from the fragments, so a zone-0 end is stored
-byte-identically to a pre-fragment one. The classes therefore copy their
-fragments in the constructor **and** in `toJSON()`; `items.test.ts` sweeps every
-item type (and the edit paths) against the validator's own field list.
+a space fragment), every stroke point through `plainLinePoint` (the same plus a
+non-centre `anchor`, the stored centre dropped), and every arc endpoint through
+`plainArcPoint` (the same copy, the centre **kept**). Tool state holds an
+`Anchor` (a cell **plus** a required `zone`), which is assignable to a
+`FragmentPoint`, and the arc tool resolves full points (`arcPointAt`), so its
+state carries the fragment and anchor the renderer needs. The backend sanitiser
+applies the same canonicalisation and re-derives the key from the fragments, so
+a zone-0, anchor-less end is stored byte-identically to a pre-fragment one. The
+classes therefore copy their fragments in the constructor **and** in
+`toJSON()`; `items.test.ts` sweeps every item type (and the edit paths) against
+the validator's own field list.
 
 ### Item classes (`src/lib/canvas/items.ts`)
 
@@ -285,7 +304,7 @@ and export.
 | --- | --- |
 | `model.ts` | re-export of `convex/lib/model.ts` |
 | `geometry.ts` | `Point`, `Rect`, frames (`baseFrame`, `quarterTurnFrame`, `composeFrames`, `mapCommands`), `zoneRect`, `cellRect`, `circularSlice`, `sectorPath`, `slicePath`, `inkUnit`, `arcCentre`, `distanceToSegment/Polyline/Arc`, rect helpers (`boundsOfPoints`, `expandRect`, `rectContains`, `rectsIntersect`, `unionRect`) |
-| `grid.ts` | `pointToCell`, `pointToAnchor` → `Anchor`, `pointToLinePoint` → `LinePoint`, `linePointPosition`, `anchorToCell`, `cellCentre`, `isSameAxis`, `runOf(cells)` → `Run`, `cellsBetween`, `gridPaths` → `{ cellBorders, inkLines }`, `anchorPath` |
+| `grid.ts` | `pointToCell`, `pointToAnchor` → `Anchor`, `pointToLinePoint` → `LinePoint`, `pointToArcPoint` → `LinePoint` (the centre kept), `linePointPosition`, `anchorToCell`, `cellCentre`, `isSameAxis`, `runOf(cells)` → `Run`, `cellsBetween`, `gridPaths` → `{ cellBorders, inkLines }` |
 | `shapes.ts` | `KufiShape` + the ten shapes (`shapeById`, `shapeLabel`, `shapePath`, `shapeOrderIndex`, `SHAPE_ORDER`); the **same** renderer draws the canvas fragment and the toolbar icon (`tileIconPath`) |
 | `rounding.ts` | `roundingRadius`, `rotateCornerMask`, `hasRounding`, `roundCorners` (per-corner rounding generated from a shape's own commands) |
 | `border.ts` | `borderCopies` (one translated duplicate of the item's shape per enabled border side) |
@@ -375,29 +394,60 @@ Every function is deterministic and side-effect free.
 ### Arc (قوس) geometry
 
 An `Arc` is a rib between two **fragments** on the same row, the same column or
-a 45° diagonal (`Arc.isSupported`). It is ported from the reference app
-(`kufi.js` lines 285‑311 and its `radius()`), but derived from a **canonical**
-fragment order (`from` is the lower fragment by column, then row, then zone) so
-the picture no longer depends on which click armed the tool; the reference app's
-click-order quirk became the explicit `direction` control
-(`clockwise` / `counterclockwise`, literally the SVG sweep flag 1 / 0).
+a 45° diagonal (`Arc.isSupported` — the *cells* decide, so the pair is still a
+chord; two fragments of the same cell are rejected). Each endpoint is an
+`ArcPoint` (§3): the fragment (cell + zone) plus the anchor the user picked
+inside it. The item is derived from a **canonical** fragment order (`from` is
+the lower by column, then row, then zone) so the picture never depends on which
+endpoint was clicked first; the reference app's click-order quirk became the
+explicit `direction` control (`clockwise` / `counterclockwise`, literally the
+SVG sweep flag 1 / 0).
 
-* **Each end springs off its own fragment** (`zoneRect`), so a space end springs
-  off the space square — the two ends need only share the row / column /
-  diagonal relation on their cells, not a zone.
+**Endpoint positions.** An endpoint with a stored anchor draws exactly there
+(`linePointPosition`, inside its own `zoneRect`). An endpoint **without** one
+falls back to the reference app's **spring point** (`kufi.js` 285‑311),
+expressed as fractions of that endpoint's own fragment:
+
 * **Horizontal chord** (`from.row === to.row`): `clockwise` springs off the
   fragment's **bottom** edge and rises, `counterclockwise` off the **top** edge
-  and falls; each end sits at its fragment's mid-width (the ink centre for ink
-  ends, the space centre for a space end).
+  and falls; the ends sit at the fragment's mid-width → both endpoints
+  `(0.5, 1)` / `(0.5, 0)`.
 * **Vertical chord** (`from.column === to.column`): `clockwise` springs off the
-  **left** edge and turns right, `counterclockwise` off the **right** edge.
-* **45° diagonal**: the four spring points are the fragments' corners that face
-  the chord, chosen by the sweep.
-* `size: "half"` → a semicircle over the chord: radius `chord/2` (or
-  `dColumn·cell + ink/2` on a diagonal — the board's cell pitch plus half an
-  ink, independent of the fragments' widths, so ink ends render exactly as
-  before), `largeArc = 0`.
-* `size: "threeQuarter"` → 270°: radius `chord/√2`, `largeArc = 1`.
+  **left** edge and turns right, `counterclockwise` off the **right** edge → both
+  endpoints `(0, 0.5)` / `(1, 0.5)`.
+* **45° diagonal**: the two fragment-edge midpoints facing the chord, chosen by
+  the sweep (down + `clockwise` → start `(0, 0.5)`, end `(0.5, 1)`; down +
+  `counterclockwise` → `(0.5, 0)` / `(1, 0.5)`).
+
+**Radius and flags**, on the chord between those two positions:
+
+| `size` | angle | radius | `largeArc` |
+| --- | --- | --- | --- |
+| `quarter` | 90° | `chord/√2` | 0 |
+| `half` | 180° | `chord/2` | 0 |
+| `threeQuarter` | 270° | `chord/√2` | 1 |
+
+`sweep` is 1 for `clockwise` and 0 for `counterclockwise` — one uniform rule for
+every chord, with no diagonal special case: the reference app's `radius()` picked
+`dColumn·cell + ink/2` for a diagonal half, and for ink endpoints that value
+**is** `chord/√2` (both chord components are `dColumn·cell + ink/2`), i.e. the
+`quarter`. The editor therefore offers `quarter` explicitly and lets a diagonal
+`half` be a real semicircle.
+
+**Legacy arcs.** An arc whose two endpoints carry **no** anchor is the reference
+app's arc and renders exactly as before: spring-point endpoints, and on a
+diagonal the old radius expression `dColumn·cell + ink/2` (bit for bit, not
+re-derived as `chord/√2`) — this includes a **space** endpoint, where the old
+expression is not `chord/√2` at all, so it must survive the repair below. Any
+arc with at least one stored anchor uses the uniform table above. Readers also
+*repair* the legacy shape instead of re-deriving it per render: `repairArcSize`
+turns an anchor-less diagonal `half` into `quarter` — the same radius, same
+flags, no pixel changes (the geometry keeps the legacy expression for any
+anchor-less diagonal) — in `kuficraft-file.ts` and in the backend's
+`sanitizeItem`, so the next write stores the arc that was already on screen.
+Every other legacy arc keeps its key byte-identically; only a repaired arc's
+`|quarter` changes the key, and only on the next write.
+
 * A rib is a **square-grid item**: a circular board hides every `arc` (§3), so
   the class carries no polar geometry. (Earlier rounds drew a circular arc at the
   mean radius between the two bands; that path is gone, not disabled.)
@@ -415,7 +465,7 @@ name. Adding a tool = one class + one registry line.
 | `pen` | قلم | `P` | press/drag colours the cells the pointer is moved over — one fragment per cell, and a fast drag fills the cells it flew over (`anchorsAlongLine`) |
 | `line` | خط | `L` | **square grid only** (`creates: ["line"]`). Click sequence: click A, click B… commits an open run; click the last point again ends it, click the first one closes it. A drag also works (pointer-up ends the *drag*, not the run). Every click snaps to one of the nine anchors of the **fragment** under the cursor (ink or space), and the overlay's dot shows the point the next click would store; a run with no diagonal segment is squares (`straightLinesAsSquares`, default) or one bar |
 | `eraser` | ممحاة | `E` | click/drag removes whatever the pointer touches; a fast drag sweeps the cells it flew over (hidden items are never touched) |
-| `arc` | قوس | `A` | **square grid only** (`creates: ["arc"]`). Press-drag-release A→B, **or** click A then click B (clicking the origin's cell again cancels — an arc needs two cells); each end springs off the fragment it was clicked on |
+| `arc` | قوس | `A` | **square grid only** (`creates: ["arc"]`). Press-drag-release A→B, **or** click A then click B (clicking the start cell again cancels). Each endpoint snaps to one of the nine anchors of the **fragment** under the cursor (`arcPointAt`) and stores it whole — the centre included, since an absent anchor means the legacy spring point (§5); the armed start is the same dot as the hover, and the ghost always shows the arc the click commits |
 | `hand` | يد | `H` | the one **view** tool: the pointer scrolls the canvas pane (`panScrollOffset`), `KufiTool.pans` tells the controller so, and a double click recentres the board (`centreScroll`) |
 
 * `KufiTool.creates` — the item types a tool produces. A grid that does not
@@ -482,7 +532,7 @@ retraces itself does not brush a chord.
 3. **The dot.** While the tool is armed (hover included — an empty run exists
    before the first click), `ToolPreview.dot` is exactly the point the next
    click would store, drawn as an open circle at that position; the preview's
-   marker ring still shows the run's first point.
+   marker is the run's first **point**, painted as the same dot (§6 «Preview»).
 4. **Repeats are allowed.** Line points are *not* deduplicated by cell: two
    points may share a cell as long as their fragment or anchor differs (a turn
    inside one cell — including ink to space), and a click on the exact
@@ -500,20 +550,45 @@ retraces itself does not brush a chord.
    the overlay can never show an endpoint (or a closing) the commit does not
    draw — the fix that ended the old preview/commit drift.
 
+### Arc rules
+
+1. **Two gestures, one resolution.** Drag A→B (pointer-down arms, pointer-up
+   commits) or click A then click B (the tool is `persistent`, so the state
+   survives pointer-up; clicking the **start cell** again cancels). Both paths
+   resolve their endpoints through `arcPointAt` → `pointToArcPoint` — the same
+   nine anchors as a line point, but the resolved anchor is kept verbatim, the
+   centre included: on an arc endpoint an absent anchor means the legacy spring
+   point (§5), so dropping the centre would silently move the click onto the ink
+   edge. Only anchors that are one of the nine half-multiples are produced; the
+   format accepts any fraction.
+2. **The dot.** On hover (including before the first click) `ToolPreview.dot`
+   is the pending endpoint; once armed, the start point is the `marker` dot and
+   `dot` is the pending end. Both are painted as the same small circle (§6
+   «Preview»), never as a whole-cell square.
+3. **Preview = commit.** The ghost and the commit both call `arcBetween`, which
+   hands the endpoints to the `Arc` class whole, so the arc the click stores is
+   the arc the overlay drew — anchors and all.
+4. **Degenerate pairs are refused.** A same-cell pair (whatever anchors), or
+   cells that share neither a row, a column nor a 45° diagonal, commits nothing
+   (`Arc.isSupported`; §5).
+
 ### Preview
 
 `ToolPreview = { items, mode: "solid" | "ghost", keys, marquee, marker, dot }`:
 
 * `items` — the pending items (the pen's real fragments, ghosted), `keys` — the
   items to ring (the eraser's sweep), `marquee` — the select box.
-* `marker: Anchor | null` — the armed start cell of a click sequence sized
-  through `anchorPath(config, anchor)`: the arc/line tool's first click stays
-  visible until it commits. The overlay paints it as a filled highlight with no
-  border.
-* `dot: LinePoint | null` — the line tool's snap dot, the point the next click
-  would store (§6 «Line rules»). The overlay paints it as an open circle of
-  `inkUnit/3` radius at the point's anchored position. `null` for every other
-  tool.
+* `marker: LinePoint | null` — the armed start **point** of a click sequence
+  (the line's first point, the arc's start point). The overlay paints it as the
+  same snap dot as `dot`, on the stored point itself, so the highlight shows
+  where the click actually landed instead of lighting up a whole cell. Kept
+  until the sequence commits or cancels.
+* `dot: LinePoint | null` — the point the next click would store: the line
+  tool's hover, the arc tool's pending end — and, before the arc's first click,
+  the pending start. The overlay paints it as an open circle of `inkUnit/8`
+  radius (the old dot was `inkUnit/3`) with a `1.5` px non-scaling ring, so it
+  stays crisp at every zoom and never hides the ink it sits on. `null` when the
+  tool has no pending point.
 
 ### Viewport: pan, zoom range and anchoring
 
@@ -593,6 +668,13 @@ The hand tool pans, the wheel zooms. The maths is pure, lives in
   byte-identical; on the circular grid the anchor's `y` spans the whole sector
   for an ink-angular point and the space slice for a space-angular one, a
   deliberate asymmetry that keeps `(0.5, 0.5)` on `cellCentre`.
+* An **arc endpoint** is the mirror image of a line point: its absent anchor is
+  the reference app's spring point, so the centre is a real value, the arc tool
+  stores every click (`arcPoint` / `plainArcPoint`, keyed by what it stores) and
+  a damaged anchor repairs *to the fallback* rather than to the centre. A legacy
+  anchor-less diagonal `half` is repaired on read to the `quarter` that drew it,
+  which changes no pixel; the geometry keeps the old diagonal expression for an
+  anchor-less arc, so a space endpoint also re-renders bit for bit (§5).
 * The pen paints **over** what is already there: same key → replaced in place,
   which is how recolouring a fragment works.
 * The ratio axis has **no space-less preset**. The port had made the old app's

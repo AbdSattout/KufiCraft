@@ -10,19 +10,18 @@
  * only ever re-renders this small node.
  *
  * Selected items are ringed in the theme's `--ring` colour (the artwork itself
- * is painted by the layer underneath), the armed start cell of a click
- * sequence gets a plain filled highlight with no border, the line tool's snap
- * dot marks the anchor the next click would store, and the eraser's sweep is
- * ringed in `--destructive`.
+ * is painted by the layer underneath), the armed start point of a click
+ * sequence and the point the next click would store are both drawn as the same
+ * small snap dot, and the eraser's sweep is ringed in `--destructive`.
  */
 
 import { memo } from "react";
 import { CanvasItemShape } from "@/components/canvas/canvas-preview";
 import { VIEWBOX_SIZE } from "@/lib/canvas/model";
-import type { Anchor, CanvasItem, LinePoint, ProjectConfig } from "@/lib/canvas/model";
+import type { CanvasItem, LinePoint, ProjectConfig } from "@/lib/canvas/model";
 import { inkUnit } from "@/lib/canvas/geometry";
 import type { Rect } from "@/lib/canvas/geometry";
-import { anchorPath, linePointPosition } from "@/lib/canvas/grid";
+import { linePointPosition } from "@/lib/canvas/grid";
 import { itemOf } from "@/lib/canvas/items";
 
 interface RingProps {
@@ -53,6 +52,33 @@ const Outline = memo(function Outline({
   );
 });
 
+/**
+ * The snap dot: the exact anchored point the armed start or the pending click
+ * occupies. `r` is an eighth of the ink extent — small enough to leave the ink
+ * it sits on readable — and `non-scaling-stroke` keeps the ring 1.5 screen px
+ * at every zoom, so the dot stays crisp and never swells into the cell.
+ */
+const SnapDot = memo(function SnapDot({
+  config,
+  point,
+}: {
+  config: ProjectConfig;
+  point: LinePoint;
+}) {
+  const { x, y } = linePointPosition(config, point);
+  return (
+    <circle
+      cx={x}
+      cy={y}
+      r={inkUnit(config) / 8}
+      fill="var(--background)"
+      stroke="var(--primary)"
+      strokeWidth={1.5}
+      vectorEffect="non-scaling-stroke"
+    />
+  );
+});
+
 export interface CanvasOverlayProps {
   config: ProjectConfig;
   /** Items of the current selection (already resolved from keys). */
@@ -62,11 +88,11 @@ export interface CanvasOverlayProps {
   /** Items the eraser has swept. */
   eraseItems: readonly CanvasItem[];
   marquee: Rect | null;
-  /** The armed start anchor of a click sequence, ringed before the preview. */
-  marker: Anchor | null;
+  /** The armed start point of a click sequence, drawn as a snap dot. */
+  marker: LinePoint | null;
   /**
-   * The line tool's snap dot: the anchored point the next click would store,
-   * drawn on top of the marker and the ghost so it is always visible.
+   * The point the next click would store, drawn as the same snap dot on top of
+   * the marker and the ghost so it is always visible.
    */
   dot: LinePoint | null;
   /** How the preview is painted: `solid` (the pen) or `ghost`. */
@@ -84,7 +110,6 @@ export const CanvasOverlay = memo(function CanvasOverlay({
   previewMode,
 }: CanvasOverlayProps) {
   const ghost = previewMode === "ghost";
-  const dotPoint = dot === null ? null : linePointPosition(config, dot);
 
   return (
     <svg
@@ -108,8 +133,9 @@ export const CanvasOverlay = memo(function CanvasOverlay({
       ) : null}
 
       {marker ? (
-        // The armed start cell: a plain, near-opaque highlight, no border.
-        <path d={anchorPath(config, marker)} fill="var(--primary)" fillOpacity={0.9} />
+        // The armed start point: the same dot the hover shows, on its own
+        // exact point (never a whole-cell square).
+        <SnapDot config={config} point={marker} />
       ) : null}
 
       {ghost
@@ -154,18 +180,10 @@ export const CanvasOverlay = memo(function CanvasOverlay({
         />
       ))}
 
-      {dotPoint ? (
-        // The anchor under the cursor: exactly the point the next click
-        // stores, painted last so the marker and the ghost stay behind it.
-        <circle
-          cx={dotPoint.x}
-          cy={dotPoint.y}
-          r={inkUnit(config) / 3}
-          fill="var(--background)"
-          stroke="var(--primary)"
-          strokeWidth={2}
-          vectorEffect="non-scaling-stroke"
-        />
+      {dot ? (
+        // The point under the cursor: exactly what the next click stores,
+        // painted last so the marker and the ghost stay behind it.
+        <SnapDot config={config} point={dot} />
       ) : null}
     </svg>
   );

@@ -26,7 +26,6 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import { toast } from "sonner";
 import { MAX_ITEMS } from "@/lib/canvas/model";
 import type {
-  Anchor,
   ArcDirection,
   ArcSize,
   CanvasItem,
@@ -196,9 +195,9 @@ export interface EditorController {
   previewItems: readonly CanvasItem[];
   previewKeys: readonly string[];
   marquee: Rect | null;
-  /** The armed start anchor of a click sequence (line / arc), or null. */
-  previewMarker: Anchor | null;
-  /** The line tool's snap dot: the point the next click would store. */
+  /** The armed start point of a click sequence (line / arc), or null. */
+  previewMarker: LinePoint | null;
+  /** The point the next click would store (the line / arc dot). */
   previewDot: LinePoint | null;
   previewMode: "solid" | "ghost";
 
