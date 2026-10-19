@@ -751,6 +751,34 @@ describe("EraserTool", () => {
     expect(out.commit?.items).toEqual([]);
   });
 
+  it("sweeps a fast drag through the fragment its zone names", () => {
+    // A fast drag between two space fragments; the middle cell is never
+    // reported. The sweep must brush the space fragment (zone 3), not the ink
+    // square that shares the cell.
+    const start = makeTile({ column: 1, row: 2, zone: 3 });
+    const middle = makeTile({ column: 3, row: 2, zone: 3 });
+    const end = makeTile({ column: 5, row: 2, zone: 3 });
+    const inkBystander = makeTile({ column: 3, row: 2, zone: 0 });
+    const ctx = context([start, middle, end, inkBystander], { tool: "eraser" });
+
+    const begun = beginTool(
+      "eraser",
+      ctx,
+      NO_STATE,
+      input(fragmentPointOf(1, 2, 3)),
+    );
+    const swept = moveTool(
+      "eraser",
+      ctx,
+      begun.state,
+      input(fragmentPointOf(5, 2, 3)),
+    );
+    const out = endTool("eraser", ctx, swept.state);
+
+    // The dragged space run is gone; the ink square of the swept cell is not.
+    expect(out.commit?.items).toEqual([inkBystander]);
+  });
+
   it("sweeps from the live pointer when the drag retraces itself", () => {
     const row = [1, 2, 3, 4, 5].map((column) =>
       makeTile({ column, row: 2, zone: 0 }),

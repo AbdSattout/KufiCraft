@@ -457,9 +457,11 @@ name. Adding a tool = one class + one registry line.
 5. Nothing merges: a straight run stays a row of `tile` fragments, never a bar.
 
 The **eraser** sweeps the same way: the reported position is hit-tested exactly,
-and every cell a fast drag flew over is hit-tested at its centre, so a quick
-sweep does not skip the items it passed between two events. Its sweep runs from
-the live pointer too, so a sweep that retraces itself does not brush a chord.
+and every cell a fast drag flew over is hit-tested at the centre of the
+fragment the sweep carries (the target anchor's zone), so a quick sweep does
+not skip the items it passed between two events — in the ink square or in a
+space fragment. Its sweep runs from the live pointer too, so a sweep that
+retraces itself does not brush a chord.
 
 ### Line rules
 

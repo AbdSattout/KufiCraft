@@ -19,7 +19,7 @@
  * `@/lib/canvas/items`, so a tool never hand-writes geometry.
  */
 
-import { sameLinePoint, zoneOf } from "@/lib/canvas/model";
+import { linePoint, sameLinePoint, zoneOf } from "@/lib/canvas/model";
 import type {
   Anchor,
   ArcItem,
@@ -33,12 +33,12 @@ import type {
 import type { Point, Rect } from "@/lib/canvas/geometry";
 import { addItems, lineItems, paintItems, penItems, removeItems } from "@/lib/canvas/ops";
 import { Arc, isItemTypeAllowed } from "@/lib/canvas/items";
+import { linePointPosition } from "@/lib/canvas/grid";
 import {
   anchorKey,
   anchorAt,
   anchorsAlongLine,
   arcBetween,
-  cellCentre,
   clampDelta,
   hitTest,
   linePointAt,
@@ -577,8 +577,9 @@ class LineTool extends KufiTool {
 /**
  * The eraser removes whatever the pointer touches. The reported position is
  * exact, and the cells a fast drag flew over between two reported positions are
- * swept at their centre (in the same spirit as the pen's gap fill), so a quick
- * sweep does not skip the items it passed over. The sweep also runs from the
+ * swept at the centre of the fragment the sweep carries (the target anchor's
+ * zone, in the same spirit as the pen's gap fill), so a quick sweep does not
+ * skip the items it passed over — ink or space. The sweep also runs from the
  * pointer's **live** cell (`from`), so a sweep that retraces itself does not
  * brush the chord its stale end would draw.
  */
@@ -611,10 +612,17 @@ class EraserTool extends KufiTool {
     const hit = hitTest(ctx.config, ctx.items, input.point);
     if (hit) keys.add(hit.key);
     for (const step of anchorsAlongLine(ctx.config, state.from, anchor)) {
+      // The sweep carries the target anchor's zone (`anchorsAlongLine`), so
+      // sample **that fragment's** centre: a fast drag over a space fragment
+      // must brush it exactly like an ink one, and must not brush the ink
+      // square beside it.
       const brushed = hitTest(
         ctx.config,
         ctx.items,
-        cellCentre(ctx.config, step),
+        linePointPosition(
+          ctx.config,
+          linePoint(step.column, step.row, step.zone),
+        ),
       );
       if (brushed) keys.add(brushed.key);
     }
