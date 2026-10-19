@@ -161,6 +161,93 @@ describe("exportProjectFile", () => {
     expect(parsed.droppedItems).toBe(0);
   });
 
+  it("round-trips fragment zones, canonicalising the ink zone", () => {
+    const inkPoint: LinePoint = { column: 0, row: 0 };
+    const spacePoint: LinePoint = {
+      column: 2,
+      row: 2,
+      zone: 3,
+      anchor: { x: 0.5, y: 0 },
+    };
+    const items: CanvasItem[] = [
+      {
+        type: "line",
+        key: "bogus",
+        from: { column: 1, row: 2, zone: 1 },
+        to: { column: 4, row: 2, zone: 3 },
+      },
+      {
+        type: "arc",
+        key: "bogus",
+        from: { column: 2, row: 2, zone: 0 },
+        to: { column: 4, row: 2, zone: 2 },
+        direction: "clockwise",
+        size: "half",
+      },
+      {
+        type: "stroke",
+        key: "bogus",
+        points: [
+          { column: 0, row: 0, zone: 0 },
+          { column: 2, row: 2, zone: 3, anchor: { x: 0.5, y: 0 } },
+        ],
+      },
+    ];
+    const parsed = parseProjectFile(
+      exportProjectFile({ name: "x", config: sampleConfig(), items }, FIXED_AT),
+    );
+    expect(parsed.items).toEqual([
+      {
+        type: "line",
+        key: lineKey(
+          { column: 1, row: 2, zone: 1 },
+          { column: 4, row: 2, zone: 3 },
+        ),
+        from: { column: 1, row: 2, zone: 1 },
+        to: { column: 4, row: 2, zone: 3 },
+      },
+      {
+        type: "arc",
+        key: arcKey(
+          { column: 2, row: 2 },
+          { column: 4, row: 2, zone: 2 },
+          "clockwise",
+          "half",
+        ),
+        from: { column: 2, row: 2 },
+        to: { column: 4, row: 2, zone: 2 },
+        direction: "clockwise",
+        size: "half",
+      },
+      {
+        type: "stroke",
+        key: strokeKey([inkPoint, spacePoint], false),
+        points: [inkPoint, spacePoint],
+      },
+    ]);
+  });
+
+  it("skips an item carrying an invalid fragment zone", () => {
+    const parsed = parseProjectFile(
+      rawFile({
+        items: [
+          {
+            type: "line",
+            key: "bogus",
+            from: { column: 1, row: 2, zone: 7 },
+            to: { column: 4, row: 2, zone: 1 },
+          },
+          { type: "tile", key: "bogus", column: 0, row: 0, zone: 0 },
+        ],
+      }),
+    );
+    // A bad zone is structural — it decides where the point is — so the item
+    // is skipped rather than silently moved to the ink fragment.
+    expect(parsed.items).toEqual([
+      { type: "tile", key: tileKey(0, 0, 0), column: 0, row: 0, zone: 0 },
+    ]);
+  });
+
   it("round-trips an anchored stroke, dropping a stored centre", () => {
     const items: CanvasItem[] = [
       {

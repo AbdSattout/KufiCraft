@@ -1,7 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_PROJECT_CONFIG, arcKey, cellSize, tileKey } from "@/lib/canvas/model";
-import type { Anchor, CanvasItem, ProjectConfig } from "@/lib/canvas/model";
-import { anchorPath } from "@/lib/canvas/grid";
+import {
+  DEFAULT_PROJECT_CONFIG,
+  arcKey,
+  cellSize,
+  linePoint,
+  tileKey,
+} from "@/lib/canvas/model";
+import type {
+  Anchor,
+  CanvasItem,
+  ProjectConfig,
+  Zone,
+} from "@/lib/canvas/model";
+import { anchorPath, linePointPosition } from "@/lib/canvas/grid";
 import { inkUnit } from "@/lib/canvas/geometry";
 import { makeArc, makeLine, makeTile } from "@/lib/canvas/items";
 import {
@@ -74,10 +85,27 @@ function anchorPointOf(
 ): { x: number; y: number } {
   const cell = cellSize(CONFIG);
   const ink = inkUnit(CONFIG);
-  return {
-    x: column * cell + x * ink,
-    y: row * cell + y * ink,
+  // A real pointer never lands exactly on a fragment border, and the zone
+  // convention is half-open: an edge anchor is nudged a hair inside the
+  // fragment it belongs to, so the click still addresses the ink square.
+  const along = (fraction: number, index: number) => {
+    if (fraction === 1) return ink - 1e-6;
+    if (fraction === 0 && index > 0) return 1e-6;
+    return fraction * ink;
   };
+  return {
+    x: column * cell + along(x, column),
+    y: row * cell + along(y, row),
+  };
+}
+
+/** A pointer at the **centre** of fragment `zone` of cell `(column, row)`. */
+function fragmentPointOf(
+  column: number,
+  row: number,
+  zone: Zone,
+): { x: number; y: number } {
+  return linePointPosition(CONFIG, linePoint(column, row, zone));
 }
 
 function input(point: { x: number; y: number }, shift = false) {
@@ -355,6 +383,34 @@ describe("LineTool", () => {
     });
   });
 
+  it("draws on space fragments exactly as on ink ones", () => {
+    const ctx = context();
+    let state = beginTool("line", ctx, NO_STATE, input(fragmentPointOf(1, 1, 1))).state;
+    state = beginTool("line", ctx, state, input(fragmentPointOf(3, 1, 1))).state;
+    const out = beginTool("line", ctx, state, input(fragmentPointOf(3, 1, 1)));
+
+    expect(out.state).toBe(NO_STATE);
+    // The same squares the ink run draws — on the x-space stripe the designer
+    // clicked, with the in-between cell taking the run's target zone.
+    expect(out.commit?.items).toEqual([
+      makeTile({ column: 1, row: 1, zone: 1, color: CONFIG.ink }),
+      makeTile({ column: 2, row: 1, zone: 1, color: CONFIG.ink }),
+      makeTile({ column: 3, row: 1, zone: 1, color: CONFIG.ink }),
+    ]);
+  });
+
+  it("keeps each clicked fragment's zone in a mixed run", () => {
+    const ctx = context();
+    let state = beginTool("line", ctx, NO_STATE, input(pointOf(1, 1))).state;
+    state = beginTool("line", ctx, state, input(fragmentPointOf(3, 1, 1))).state;
+    const out = beginTool("line", ctx, state, input(fragmentPointOf(3, 1, 1)));
+    expect(out.commit?.items.map((item) => item.key)).toEqual([
+      tileKey(1, 1, 0),
+      tileKey(2, 1, 1),
+      tileKey(3, 1, 1),
+    ]);
+  });
+
   it("outlines a closed rectangle with squares", () => {
     const ctx = context();
     let state = beginTool("line", ctx, NO_STATE, input(pointOf(1, 1))).state;
@@ -392,6 +448,20 @@ describe("LineTool", () => {
     expect(preview.items).toHaveLength(3);
     expect(preview.items.every((item) => item.type === "tile")).toBe(true);
     expect(preview.marker).toEqual({ column: 1, row: 1, zone: 0 });
+  });
+
+  it("keeps the first point's fragment in the run marker", () => {
+    const ctx = context();
+    const first = beginTool(
+      "line",
+      ctx,
+      NO_STATE,
+      input(fragmentPointOf(2, 2, 3)),
+    ).state;
+    const hovered = moveTool("line", ctx, first, input(fragmentPointOf(4, 2, 3)));
+    const preview = previewTool("line", ctx, hovered.state);
+    expect(preview.marker).toEqual({ column: 2, row: 2, zone: 3 });
+    expect(preview.dot).toEqual({ column: 4, row: 2, zone: 3 });
   });
 
   it("stores the clicked anchor of the cell under the cursor", () => {
@@ -510,6 +580,41 @@ describe("ArcTool", () => {
     expect(preview.items[0].type).toBe("arc");
   });
 
+  it("arms on the fragment clicked and tracks its quadrant", () => {
+    const ctx = context();
+    const armed = beginTool("arc", ctx, NO_STATE, input(fragmentPointOf(1, 1, 3)));
+    expect(expectArc(armed.state).from).toEqual({ column: 1, row: 1, zone: 3 });
+    // Moving within the same cell but to another quadrant moves the end: a
+    // point on a space fragment is not a point on the ink one.
+    const moved = moveTool("arc", ctx, armed.state, input(fragmentPointOf(1, 1, 1)));
+    expect(expectArc(moved.state).to).toEqual({ column: 1, row: 1, zone: 1 });
+  });
+
+  it("commits an arc between space fragments, zones and all", () => {
+    const ctx = context();
+    const armed = beginTool("arc", ctx, NO_STATE, input(fragmentPointOf(1, 1, 1))).state;
+    const moved = moveTool("arc", ctx, armed, input(fragmentPointOf(4, 1, 1))).state;
+    const out = beginTool("arc", ctx, moved, input(fragmentPointOf(4, 1, 1)));
+
+    expect(out.state).toBe(NO_STATE);
+    expect(out.commit?.items).toEqual([
+      {
+        type: "arc",
+        key: arcKey(
+          { column: 1, row: 1, zone: 1 },
+          { column: 4, row: 1, zone: 1 },
+          "clockwise",
+          "half",
+        ),
+        from: { column: 1, row: 1, zone: 1 },
+        to: { column: 4, row: 1, zone: 1 },
+        direction: "clockwise",
+        size: "half",
+        color: CONFIG.ink,
+      },
+    ]);
+  });
+
   it("commits on the second click with label قوس", () => {
     const ctx = context();
     const armed = beginTool("arc", ctx, NO_STATE, input(pointOf(1, 1))).state;
@@ -570,10 +675,11 @@ describe("ArcTool", () => {
   });
 
   it("commits a wire-legal arc from anchor-shaped tool state (the repro)", () => {
-    // The tool arms with `inkAnchorAt` results — an `Anchor` is a cell **plus**
-    // a zone — and the second click two cells away commits. The stored JSON
-    // must hold exactly a `Cell` per endpoint: the leaked `zone` was what the
-    // server's `cellValidator` rejected (`applyOps` → ArgumentValidationError).
+    // The tool arms with `anchorAt` results — an `Anchor` is a cell **plus** a
+    // zone — and the second click two cells away commits. The ink zone is
+    // canonical storage of nothing, so the stored JSON holds exactly a `Cell`
+    // per endpoint: the leaked `zone` was what the old `cellValidator`
+    // rejected (`applyOps` → ArgumentValidationError).
     const ctx = context();
     const armed = beginTool("arc", ctx, NO_STATE, input(pointOf(3, 33)));
     expect(expectArc(armed.state).from).toEqual({ column: 3, row: 33, zone: 0 });
@@ -617,6 +723,15 @@ describe("EraserTool", () => {
     const out = endTool("eraser", ctx, again.state);
     expect(out.state).toBe(NO_STATE);
     expect(out.commit?.label).toBe("مسح");
+    expect(out.commit?.items).toEqual([]);
+    expect(out.commit?.selection).toEqual([]);
+  });
+
+  it("erases a space fragment clicked on its own square", () => {
+    const space = makeTile({ column: 2, row: 2, zone: 3 });
+    const ctx = context([space], { tool: "eraser", selection: [space.key] });
+    const start = beginTool("eraser", ctx, NO_STATE, input(fragmentPointOf(2, 2, 3)));
+    const out = endTool("eraser", ctx, start.state);
     expect(out.commit?.items).toEqual([]);
     expect(out.commit?.selection).toEqual([]);
   });

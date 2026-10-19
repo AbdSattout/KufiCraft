@@ -789,10 +789,10 @@ describe("lineItems", () => {
 
 describe("lineItems with anchored points", () => {
   const config = makeConfig();
-  const corner = linePoint(0, 4, { x: 0, y: 0 });
+  const corner = linePoint(0, 4, undefined, { x: 0, y: 0 });
 
   it("merges a straight run whose anchors agree to its two ends", () => {
-    const points = [corner, linePoint(1, 4, { x: 0, y: 0 }), linePoint(2, 4, { x: 0, y: 0 })];
+    const points = [corner, linePoint(1, 4, undefined, { x: 0, y: 0 }), linePoint(2, 4, undefined, { x: 0, y: 0 })];
     // The clicks between the ends draw nothing new on a collinear run, so the
     // item keeps just the ends — with their anchors.
     expect(lineItems(config, points, false)).toEqual([
@@ -803,7 +803,7 @@ describe("lineItems with anchored points", () => {
   it("keeps a run that doubles back whole", () => {
     // Merging to the ends would cut the ink short: this run reaches (3, 4)
     // and turns back, so the span is not its two ends.
-    const points = [corner, linePoint(3, 4, { x: 0, y: 0 }), linePoint(1, 4, { x: 0, y: 0 })];
+    const points = [corner, linePoint(3, 4, undefined, { x: 0, y: 0 }), linePoint(1, 4, undefined, { x: 0, y: 0 })];
     const items = lineItems(config, points, false);
     expect(items).toHaveLength(1);
     expect((items[0] as StrokeItem).points).toEqual(points);
@@ -812,8 +812,8 @@ describe("lineItems with anchored points", () => {
   it("never merges a run whose anchors differ", () => {
     const points = [
       corner,
-      linePoint(2, 4, { x: 0, y: 0 }),
-      linePoint(2, 4, { x: 1, y: 1 }),
+      linePoint(2, 4, undefined, { x: 0, y: 0 }),
+      linePoint(2, 4, undefined, { x: 1, y: 1 }),
     ];
     const items = lineItems(config, points, false);
     expect((items[0] as StrokeItem).points).toEqual(points);
@@ -822,8 +822,8 @@ describe("lineItems with anchored points", () => {
   it("keeps a closed anchored run whole, closing segment included", () => {
     const points = [
       corner,
-      linePoint(2, 4, { x: 0, y: 0 }),
-      linePoint(2, 2, { x: 1, y: 1 }),
+      linePoint(2, 4, undefined, { x: 0, y: 0 }),
+      linePoint(2, 2, undefined, { x: 1, y: 1 }),
     ];
     const items = lineItems(config, points, true);
     expect(items).toEqual([makeStroke(points, true, config.ink)]);
@@ -833,7 +833,7 @@ describe("lineItems with anchored points", () => {
     // A bar or a tile cannot express a point inside a cell, so the anchored
     // run is a stroke whatever `straightLinesAsSquares` says — and it keeps
     // both endpoints as they were clicked.
-    const points = [linePoint(0, 4, { x: 0.5, y: 0 }), linePoint(2, 4, { x: 0.5, y: 0 })];
+    const points = [linePoint(0, 4, undefined, { x: 0.5, y: 0 }), linePoint(2, 4, undefined, { x: 0.5, y: 0 })];
     const items = lineItems(makeConfig({ straightLinesAsSquares: true }), points, false);
     expect(items).toHaveLength(1);
     expect(items[0].type).toBe("stroke");
@@ -844,15 +844,15 @@ describe("lineItems with anchored points", () => {
     // A "row" of the circular grid is an arc, not a line: nothing merges.
     const circular = makeConfig({ gridType: "circular" });
     const points = [
-      linePoint(3, 0, { x: 0.5, y: 0.5 }),
-      linePoint(5, 0, { x: 0.5, y: 0.5 }),
+      linePoint(3, 0, undefined, { x: 0.5, y: 0.5 }),
+      linePoint(5, 0, undefined, { x: 0.5, y: 0.5 }),
     ];
     const items = lineItems(circular, points, false);
     expect((items[0] as StrokeItem).points).toEqual(points);
   });
 
   it("stores two points of one cell once per anchor", () => {
-    const points = [linePoint(1, 1, { x: 0, y: 0 }), linePoint(1, 1, { x: 1, y: 1 })];
+    const points = [linePoint(1, 1, undefined, { x: 0, y: 0 }), linePoint(1, 1, undefined, { x: 1, y: 1 })];
     const items = lineItems(config, points, false);
     expect(items).toHaveLength(1);
     expect(items[0].type).toBe("stroke");
@@ -860,7 +860,7 @@ describe("lineItems with anchored points", () => {
   });
 
   it("keeps a repeated point: a zero-length segment draws nothing", () => {
-    const point = linePoint(1, 1, { x: 0, y: 0 });
+    const point = linePoint(1, 1, undefined, { x: 0, y: 0 });
     const items = lineItems(config, [point, point], false);
     expect(items).toHaveLength(1);
     // Both ends of the path are the same position — anchor (0,0) of cell
@@ -944,7 +944,7 @@ describe("lineItems with anchored points", () => {
   });
 
   it("draws the anchored points, not the cell centres", () => {
-    const points = [linePoint(0, 0, { x: 0, y: 0 }), linePoint(2, 0, { x: 1, y: 1 })];
+    const points = [linePoint(0, 0, undefined, { x: 0, y: 0 }), linePoint(2, 0, undefined, { x: 1, y: 1 })];
     const items = lineItems(config, points, false);
     // No end nudges either: both ends are where they were clicked — the ink
     // origin of (0, 0) and the far ink corner of (2, 0).
@@ -955,6 +955,98 @@ describe("lineItems with anchored points", () => {
       mode: "stroke",
       width: ink,
     });
+  });
+
+  /* ---------------------------------------------------------------- */
+  /* space fragments are first class                                   */
+  /* ---------------------------------------------------------------- */
+
+  /** The same config with the bar option off, for the bar cases below. */
+  const barConfig = makeConfig({ straightLinesAsSquares: false });
+
+  it("draws squares over the space fragments a run was clicked on", () => {
+    // The same run as the ink one above, clicked on the x-space stripe: one
+    // square per cell, in that stripe's zone (the in-between cell takes the
+    // target's zone).
+    const spaceRun = [linePoint(0, 4, 1), linePoint(2, 4, 1)];
+    expect(lineItems(config, spaceRun, false)).toEqual([
+      {
+        type: "tile",
+        key: tileKey(0, 4, 1),
+        column: 0,
+        row: 4,
+        zone: 1,
+        color: config.ink,
+      },
+      {
+        type: "tile",
+        key: tileKey(1, 4, 1),
+        column: 1,
+        row: 4,
+        zone: 1,
+        color: config.ink,
+      },
+      {
+        type: "tile",
+        key: tileKey(2, 4, 1),
+        column: 2,
+        row: 4,
+        zone: 1,
+        color: config.ink,
+      },
+    ]);
+    // …and a mixed run keeps each clicked fragment's zone.
+    expect(
+      lineItems(
+        config,
+        [linePoint(0, 4), linePoint(1, 4, 1), linePoint(2, 4)],
+        false,
+      ).map((item) => item.key),
+    ).toEqual([tileKey(0, 4, 0), tileKey(1, 4, 1), tileKey(2, 4, 0)]);
+  });
+
+  it("draws the same space run as one bar over its fragments", () => {
+    const from = { column: 0, row: 4, zone: 1 as Zone };
+    const to = { column: 2, row: 4, zone: 1 as Zone };
+    expect(lineItems(barConfig, [from, to], false)).toEqual([
+      {
+        type: "line",
+        key: lineKey(from, to),
+        from,
+        to,
+        color: barConfig.ink,
+      },
+    ]);
+  });
+
+  it("strokes two fragments of one cell — no run spans less than a cell", () => {
+    // A bar or a row of squares needs a cell boundary to span; two fragments
+    // of the same cell are two positions inside it, which only a stroke can
+    // express (ink points could never do this; space points can).
+    for (const run of [
+      [linePoint(1, 1), linePoint(1, 1, 3)],
+      [linePoint(1, 1, 1), linePoint(1, 1, 3)],
+    ]) {
+      for (const option of [config, barConfig]) {
+        const items = lineItems(option, run, false);
+        expect(items).toHaveLength(1);
+        expect(items[0].type).toBe("stroke");
+        expect((items[0] as StrokeItem).points).toEqual(run);
+      }
+    }
+  });
+
+  it("never merges a run across fragments — a zone moves the point", () => {
+    // Same anchor fraction, three cells, but the middle point sits on the
+    // x-space stripe: the path turns, so merging to the two ends would cut the
+    // ink short and drop a point the designer placed.
+    const points = [
+      linePoint(0, 0, undefined, { x: 0, y: 0 }),
+      linePoint(1, 0, 1, { x: 0, y: 0 }),
+      linePoint(2, 0, undefined, { x: 0, y: 0 }),
+    ];
+    const items = lineItems(config, points, false);
+    expect((items[0] as StrokeItem).points).toEqual(points);
   });
 });
 

@@ -19,6 +19,7 @@ import {
   sanitizeRounding,
   snapRatio,
   arcKey,
+  fragmentPoint,
   lineKey,
   linePoint,
   normalizeAnchor,
@@ -30,7 +31,7 @@ import type {
   ArcItem,
   ArcSize,
   CanvasItem,
-  Cell,
+  FragmentPoint,
   LineItem,
   LinePoint,
   ProjectConfig,
@@ -96,10 +97,10 @@ function sanitizeItem(item: CanvasItem, config: ProjectConfig): CanvasItem | nul
     config.gridType === "circular" ? circularSectors(config) - 1 : maxColumn;
   const column = (value: number) => sanitizeIndex(value, maxColumn);
   const row = (value: number) => sanitizeIndex(value, maxRow);
-  const cell = (value: Cell): Cell => ({
-    column: column(value.column),
-    row: row(value.row),
-  });
+  // A fragment end keeps its zone (validated to 0…3); the ink zone is
+  // canonical storage of nothing and is dropped.
+  const fragment = (value: FragmentPoint): FragmentPoint =>
+    fragmentPoint(column(value.column), row(value.row), value.zone);
   const color = capColor(item.color);
   const key = (value: string) => requireKey(value);
   // A border is the one style every item type can carry; `undefined` stays
@@ -131,8 +132,8 @@ function sanitizeItem(item: CanvasItem, config: ProjectConfig): CanvasItem | nul
       return next;
     }
     case "line": {
-      const from = cell(item.from);
-      const to = cell(item.to);
+      const from = fragment(item.from);
+      const to = fragment(item.to);
       const next: LineItem = {
         type: "line",
         key: key(lineKey(from, to)),
@@ -152,8 +153,10 @@ function sanitizeItem(item: CanvasItem, config: ProjectConfig): CanvasItem | nul
         linePoint(
           column(point.column),
           row(point.row),
-          // A damaged anchor is repaired into the ink region — or into the
-          // cell centre — never rejected; see `normalizeAnchor`.
+          // The fragment the point addresses (the validator bounds the zone);
+          // a damaged anchor is repaired into the fragment's centre — never
+          // rejected; see `normalizeAnchor`.
+          point.zone,
           normalizeAnchor(point.anchor),
         ),
       );
@@ -174,8 +177,8 @@ function sanitizeItem(item: CanvasItem, config: ProjectConfig): CanvasItem | nul
       return next;
     }
     case "arc": {
-      const from = cell(item.from);
-      const to = cell(item.to);
+      const from = fragment(item.from);
+      const to = fragment(item.to);
       // A degenerate arc has no geometry; dropping it beats storing a no-op.
       if (from.column === to.column && from.row === to.row) return null;
       const direction: ArcDirection = ARC_DIRECTIONS.includes(item.direction)

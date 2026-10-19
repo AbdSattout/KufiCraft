@@ -19,13 +19,14 @@
  * `@/lib/canvas/items`, so a tool never hand-writes geometry.
  */
 
-import { sameLinePoint } from "@/lib/canvas/model";
+import { sameLinePoint, zoneOf } from "@/lib/canvas/model";
 import type {
   Anchor,
   ArcItem,
   CanvasItem,
   CanvasItemType,
   Cell,
+  FragmentPoint,
   GridType,
   LinePoint,
 } from "@/lib/canvas/model";
@@ -40,7 +41,6 @@ import {
   cellCentre,
   clampDelta,
   hitTest,
-  inkAnchorAt,
   linePointAt,
   linePreview,
   lineRun,
@@ -340,8 +340,10 @@ class SelectTool extends KufiTool {
   }
 }
 
+/** The cell under a pointer — moves are cell-quantised (zones ride along). */
 function cellAt(ctx: ToolContext, point: Point): Cell {
-  return inkAnchorAt(ctx.config, point);
+  const anchor = anchorAt(ctx.config, point);
+  return { column: anchor.column, row: anchor.row };
 }
 
 function moveDelta(
@@ -552,7 +554,7 @@ class LineTool extends KufiTool {
       keys: [],
       marquee: null,
       marker: first
-        ? { column: first.column, row: first.row, zone: 0 }
+        ? { column: first.column, row: first.row, zone: zoneOf(first) }
         : null,
       dot: state.hover,
     };
@@ -661,9 +663,11 @@ class EraserTool extends KufiTool {
 /* ------------------------------------------------------------------ */
 
 /**
- * The rib (قوس): from one ink cell to another on the same row, the same column
- * or a 45° diagonal. Direction and size come from the tool's own controls —
- * docs/CANVAS.md §5 is the geometry, and the Arc item class owns the maths.
+ * The rib (قوس): from one **fragment** to another on the same row, the same
+ * column or a 45° diagonal. Direction and size come from the tool's own
+ * controls — docs/CANVAS.md §5 is the geometry, and the Arc item class owns the
+ * maths. Clicks arm the fragment under the pointer (space fragments included);
+ * the two ends spring off their own squares.
  *
  * It takes **both** gestures: drag from A to B (pointer-down arms, pointer-up
  * commits), or click A then click B (the state survives pointer-up, so the
@@ -683,9 +687,9 @@ class ArcTool extends KufiTool {
   ];
 
   begin(ctx: ToolContext, state: ToolState, input: ToolInput): ToolOutcome {
-    const anchor = inkAnchorAt(ctx.config, input.point);
+    const anchor = anchorAt(ctx.config, input.point);
     if (state.kind !== "arc") {
-      // First click / pointer-down: arm the tool at this cell.
+      // First click / pointer-down: arm the tool at this fragment.
       return { state: { kind: "arc", from: anchor, to: anchor } };
     }
     // Second click: clicking the origin again cancels, otherwise commit now.
@@ -702,10 +706,8 @@ class ArcTool extends KufiTool {
    */
   move(ctx: ToolContext, state: ToolState, input: ToolInput): ToolOutcome {
     if (state.kind !== "arc") return unchanged(state);
-    const anchor = inkAnchorAt(ctx.config, input.point);
-    if (anchor.column === state.to.column && anchor.row === state.to.row) {
-      return unchanged(state);
-    }
+    const anchor = anchorAt(ctx.config, input.point);
+    if (anchorKey(anchor) === anchorKey(state.to)) return unchanged(state);
     return { state: { ...state, to: anchor } };
   }
 
@@ -732,8 +734,12 @@ class ArcTool extends KufiTool {
     };
   }
 
-  /** Commits the arc between two cells, or nothing when the pair cannot carry one. */
-  private commit(ctx: ToolContext, from: Cell, to: Cell): ToolOutcome {
+  /** Commits the arc between two fragments, or nothing when the pair cannot. */
+  private commit(
+    ctx: ToolContext,
+    from: FragmentPoint,
+    to: FragmentPoint,
+  ): ToolOutcome {
     const arc = this.between(ctx, from, to);
     if (!arc) return { state: NO_STATE };
     const next = addItems({ items: ctx.items }, [arc]).items;
@@ -743,8 +749,8 @@ class ArcTool extends KufiTool {
 
   private between(
     ctx: ToolContext,
-    from: Cell,
-    to: Cell,
+    from: FragmentPoint,
+    to: FragmentPoint,
   ): ArcItem | null {
     // The Arc class owns the geometry; `arcBetween` only supplies the style.
     if (from.column === to.column && from.row === to.row) return null;

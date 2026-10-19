@@ -9,8 +9,8 @@
  *   • `bounds`/`contains`/`cellRange` — the geometry the editor needs;
  *   • `toJSON()` — the exact JSON that is stored (`docs/FORMAT.md`), with the
  *     same class rebuilt by `itemOf`; its key set is exactly the shared
- *     `canvasItemValidator`'s, and every whole cell is copied to
- *     `{column, row}` (a tool's `Anchor` carries a `zone` the server rejects).
+ *     `canvasItemValidator`'s, and every fragment is copied through
+ *     `fragmentPoint` (`{column, row}`, plus `zone` only for a space fragment).
  *
  * The JSON is the transport format (Convex documents, `.kuficraft` files), so
  * the editor keeps plain objects in React state and wraps them through
@@ -25,7 +25,8 @@ import {
   DEFAULT_PROJECT_CONFIG,
   arcKey,
   cellSize,
-  compareCells,
+  compareFragments,
+  fragmentPoint,
   hasAnchor,
   lineKey,
   linePoint,
@@ -33,6 +34,7 @@ import {
   sanitizeRounding,
   strokeKey,
   tileKey,
+  zoneOf,
 } from "./model";
 import type {
   ArcDirection,
@@ -41,6 +43,7 @@ import type {
   CanvasItem,
   CanvasItemType,
   Cell,
+  FragmentPoint,
   GridType,
   ItemBorder,
   ItemRounding,
@@ -125,26 +128,25 @@ function rectFrom(points: readonly Point[], pad: number): Rect {
 }
 
 /**
- * A whole-cell anchor as it is **stored**: exactly `{column, row}`.
- *
- * Tool state carries an `Anchor` (cell + zone), and the backend's
- * `cellValidator` is `{column, row}` only — a `line`/`arc` that kept the
- * caller's object shipped a `zone` and Convex rejected the whole batch. Every
- * item class copies its cells through here (constructor **and** `toJSON`), so
- * no caller can leak one; `docs/CANVAS.md` §3.
+ * A fragment end as it is **stored**: exactly `{column, row}` for the ink
+ * fragment, `{column, row, zone}` for a space fragment (`fragmentPoint` drops
+ * the canonical ink zone). Every item class copies its ends through here
+ * (constructor **and** `toJSON`), so no caller can leak a foreign key onto the
+ * wire; `docs/CANVAS.md` §3.
  */
-function plainCell(cell: Cell): Cell {
-  return { column: cell.column, row: cell.row };
+function plainFragment(point: FragmentPoint): FragmentPoint {
+  return fragmentPoint(point.column, point.row, point.zone);
 }
 
 /**
- * A line point as it is **stored**: the cell plus the anchor when it has one
- * (the centre is never stored — `linePoint` drops it). Fields are copied one
- * by one, like `plainCell`, so a caller's object can never leak a foreign key
- * (`anchor`'s own extras included) onto the wire; `docs/CANVAS.md` §3.
+ * A line point as it is **stored**: the fragment plus the anchor when it has
+ * one (the ink zone and the centre anchor are never stored — `linePoint`
+ * drops both). Fields are copied one by one, like `plainFragment`, so a
+ * caller's object can never leak a foreign key (`anchor`'s own extras
+ * included) onto the wire; `docs/CANVAS.md` §3.
  */
 function plainLinePoint(point: LinePoint): LinePoint {
-  return linePoint(point.column, point.row, point.anchor);
+  return linePoint(point.column, point.row, point.zone, point.anchor);
 }
 
 /** Bounding box of an annular sector (corners + any cardinal angle inside). */
@@ -456,18 +458,21 @@ export function sameBorder(
 /* ------------------------------------------------------------------ */
 
 export interface LineInit {
-  from: Cell;
-  to: Cell;
+  from: FragmentPoint;
+  to: FragmentPoint;
   rounding?: ItemRounding;
   border?: ItemBorder;
   color?: string;
 }
 
 /**
- * An axis-aligned run of ink cells drawn as **one bar of ink thickness** —
- * the old line tool's two-point case. The old app emitted the bar as a run of
- * ink/space fragments; the union of those fragments is exactly this rectangle,
- * and one item is easier to erase and cheaper to store.
+ * An axis-aligned run of fragments drawn as **one bar** — the old line tool's
+ * two-point case. The old app emitted the bar as a run of ink/space fragments;
+ * the union of those fragments is exactly this rectangle, and one item is
+ * easier to erase and cheaper to store. Ink fragments give the pre-fragment
+ * bar exactly (`[column·base, …, + ink]`, ink thick); a space fragment moves
+ * the bar's end or cross-section to its own square, the same rule the pen and
+ * the line tool's squares use (`docs/CANVAS.md` §5).
  *
  * A line is a square-grid item: a circular board neither creates nor draws one
  * (`docs/CANVAS.md` §3, «Per-grid item rules»), so the class carries no polar
@@ -475,8 +480,8 @@ export interface LineInit {
  */
 export class Line extends KufiItem {
   readonly type = "line" as const;
-  readonly from: Cell;
-  readonly to: Cell;
+  readonly from: FragmentPoint;
+  readonly to: FragmentPoint;
   readonly rounding?: ItemRounding;
   readonly border?: ItemBorder;
   readonly color?: string;
@@ -484,11 +489,11 @@ export class Line extends KufiItem {
   constructor(init: LineInit) {
     super();
     const [from, to] =
-      compareCells(init.from, init.to) <= 0
+      compareFragments(init.from, init.to) <= 0
         ? [init.from, init.to]
         : [init.to, init.from];
-    this.from = plainCell(from);
-    this.to = plainCell(to);
+    this.from = plainFragment(from);
+    this.to = plainFragment(to);
     this.rounding = init.rounding;
     this.border = init.border;
     this.color = init.color;
@@ -502,8 +507,8 @@ export class Line extends KufiItem {
     const item: LineItem = {
       type: "line",
       key: this.key,
-      from: plainCell(this.from),
-      to: plainCell(this.to),
+      from: plainFragment(this.from),
+      to: plainFragment(this.to),
     };
     if (this.rounding !== undefined && this.rounding.radius > 0) {
       item.rounding = this.rounding;
@@ -513,27 +518,31 @@ export class Line extends KufiItem {
     return item;
   }
 
-  /** The bar rectangle on a square grid (ink thick, anchored at the ink edge). */
+  /**
+   * The bar rectangle on a square grid.
+   *
+   * The canonical `from` end (lower column — or lower row on a vertical run)
+   * supplies the bar's cross-section: its own stripe, ink or space. The length
+   * runs from that fragment's start to the `to` fragment's end. For two ink
+   * ends this is exactly the pre-fragment bar: `x = min·base`,
+   * `w = (max − min)·base + ink`, `h = ink`.
+   */
   bar(config: ProjectConfig): Rect {
-    const base = cellSize(config);
-    const ink = inkUnit(config);
+    const from = zoneRect(config, this.from.column, this.from.row, zoneOf(this.from));
+    const to = zoneRect(config, this.to.column, this.to.row, zoneOf(this.to));
     if (this.from.row === this.to.row) {
-      const min = Math.min(this.from.column, this.to.column);
-      const max = Math.max(this.from.column, this.to.column);
       return {
-        x: min * base,
-        y: this.from.row * base,
-        w: (max - min) * base + ink,
-        h: ink,
+        x: from.x,
+        y: from.y,
+        w: to.x + to.w - from.x,
+        h: from.h,
       };
     }
-    const min = Math.min(this.from.row, this.to.row);
-    const max = Math.max(this.from.row, this.to.row);
     return {
-      x: this.from.column * base,
-      y: min * base,
-      w: ink,
-      h: (max - min) * base + ink,
+      x: from.x,
+      y: from.y,
+      w: from.w,
+      h: to.y + to.h - from.y,
     };
   }
 
@@ -585,8 +594,16 @@ export class Line extends KufiItem {
 
   moved(columns: number, rows: number): Line {
     return new Line({
-      from: { column: this.from.column + columns, row: this.from.row + rows },
-      to: { column: this.to.column + columns, row: this.to.row + rows },
+      from: {
+        column: this.from.column + columns,
+        row: this.from.row + rows,
+        zone: this.from.zone,
+      },
+      to: {
+        column: this.to.column + columns,
+        row: this.to.row + rows,
+        zone: this.to.zone,
+      },
       rounding: this.rounding,
       border: this.border,
       color: this.color,
@@ -720,10 +737,19 @@ export class Stroke extends KufiItem {
       const next = positions[index === 0 ? index + 1 : index];
       const dx = next.x - previous.x;
       const dy = next.y - previous.y;
-      const out = expandRect(
-        { x: point.x, y: point.y, w: 0, h: 0 },
-        ink / 2,
-      );
+      // The nudge reaches the end point's **own fragment** edge: half its own
+      // square, so a centre point of a space fragment is nudged onto that
+      // space square exactly like an ink one (zone 0 → ±ink/2, unchanged).
+      // The circular grid has no rect fragment; it keeps the ink half.
+      const out =
+        config.gridType === "square"
+          ? zoneRect(
+              config,
+              this.points[index].column,
+              this.points[index].row,
+              zoneOf(this.points[index]),
+            )
+          : expandRect({ x: point.x, y: point.y, w: 0, h: 0 }, ink / 2);
       if (dx !== 0 && dy === 0) {
         return {
           x: dx > 0
@@ -762,7 +788,12 @@ export class Stroke extends KufiItem {
   moved(columns: number, rows: number): Stroke {
     return new Stroke({
       points: this.points.map((point) =>
-        linePoint(point.column + columns, point.row + rows, point.anchor),
+        linePoint(
+          point.column + columns,
+          point.row + rows,
+          point.zone,
+          point.anchor,
+        ),
       ),
       closed: this.closed,
       rounding: this.rounding,
@@ -808,8 +839,8 @@ export class Stroke extends KufiItem {
 /* ------------------------------------------------------------------ */
 
 export interface ArcInit {
-  from: Cell;
-  to: Cell;
+  from: FragmentPoint;
+  to: FragmentPoint;
   direction: ArcDirection;
   size: ArcSize;
   border?: ItemBorder;
@@ -826,19 +857,21 @@ export interface ArcGeometry {
 }
 
 /**
- * A rib (قوس) between two ink cells. The geometry is the old app's, ported
+ * A rib (قوس) between two fragments. The geometry is the old app's, ported
  * exactly (`kufi.js:285‑311` and `radius()`), but derived from a **canonical**
- * cell order so the result no longer depends on which anchor was clicked
+ * fragment order so the result no longer depends on which anchor was clicked
  * first; the click-order quirk became the explicit `direction` control.
  *
- * A rib is a square-grid item: a circular board neither creates nor draws one
- * (`docs/CANVAS.md` §3, «Per-grid item rules»), so the class carries no polar
- * geometry.
+ * Each end springs off **its own fragment's** box, so a rib drawn from a space
+ * fragment attaches to that square (ink ends reproduce the pre-fragment ribs
+ * exactly, `docs/CANVAS.md` §5). A rib is a square-grid item: a circular board
+ * neither creates nor draws one (`docs/CANVAS.md` §3, «Per-grid item rules»),
+ * so the class carries no polar geometry.
  */
 export class Arc extends KufiItem {
   readonly type = "arc" as const;
-  readonly from: Cell;
-  readonly to: Cell;
+  readonly from: FragmentPoint;
+  readonly to: FragmentPoint;
   readonly direction: ArcDirection;
   readonly size: ArcSize;
   readonly border?: ItemBorder;
@@ -847,11 +880,11 @@ export class Arc extends KufiItem {
   constructor(init: ArcInit) {
     super();
     const [from, to] =
-      compareCells(init.from, init.to) <= 0
+      compareFragments(init.from, init.to) <= 0
         ? [init.from, init.to]
         : [init.to, init.from];
-    this.from = plainCell(from);
-    this.to = plainCell(to);
+    this.from = plainFragment(from);
+    this.to = plainFragment(to);
     this.direction = init.direction;
     this.size = init.size;
     this.border = init.border;
@@ -866,8 +899,8 @@ export class Arc extends KufiItem {
     const item: ArcItem = {
       type: "arc",
       key: this.key,
-      from: plainCell(this.from),
-      to: plainCell(this.to),
+      from: plainFragment(this.from),
+      to: plainFragment(this.to),
       direction: this.direction,
       size: this.size,
     };
@@ -890,41 +923,42 @@ export class Arc extends KufiItem {
     const ink = inkUnit(config);
     const clockwise = this.direction === "clockwise";
     const sweep: 0 | 1 = clockwise ? 1 : 0;
-    const x1 = this.from.column * base;
-    const y1 = this.from.row * base;
-    const x2 = this.to.column * base;
-    const y2 = this.to.row * base;
-    const half = ink / 2;
+    // Each end springs off its own fragment: the ink square for zone 0 (the
+    // numbers the old app produced), the space square for a space end.
+    const from = zoneRect(config, this.from.column, this.from.row, zoneOf(this.from));
+    const to = zoneRect(config, this.to.column, this.to.row, zoneOf(this.to));
+    const fromHalfX = from.w / 2;
+    const fromHalfY = from.h / 2;
+    const toHalfX = to.w / 2;
+    const toHalfY = to.h / 2;
     let start: Point;
     let end: Point;
 
     if (this.from.row === this.to.row) {
       // Horizontal chord: clockwise springs off the bottom edge and rises.
-      const y = y1 + (clockwise ? ink : 0);
-      start = { x: x1 + half, y };
-      end = { x: x2 + half, y };
+      start = { x: from.x + fromHalfX, y: from.y + (clockwise ? from.h : 0) };
+      end = { x: to.x + toHalfX, y: to.y + (clockwise ? to.h : 0) };
     } else if (this.from.column === this.to.column) {
       // Vertical chord: clockwise springs off the left edge and turns right.
-      const x = x1 + (clockwise ? 0 : ink);
-      start = { x, y: y1 + half };
-      end = { x, y: y2 + half };
+      start = { x: from.x + (clockwise ? 0 : from.w), y: from.y + fromHalfY };
+      end = { x: to.x + (clockwise ? 0 : to.w), y: to.y + toHalfY };
     } else {
       // 45° diagonal, canonical by column (`to` is right of `from`).
       const down = this.to.row > this.from.row;
       if (clockwise) {
         start = down
-          ? { x: x1, y: y1 + half }
-          : { x: x1 + half, y: y1 + ink };
+          ? { x: from.x, y: from.y + fromHalfY }
+          : { x: from.x + fromHalfX, y: from.y + from.h };
         end = down
-          ? { x: x2 + half, y: y2 + ink }
-          : { x: x2 + ink, y: y2 + half };
+          ? { x: to.x + toHalfX, y: to.y + to.h }
+          : { x: to.x + to.w, y: to.y + toHalfY };
       } else {
         start = down
-          ? { x: x1 + half, y: y1 }
-          : { x: x1, y: y1 + half };
+          ? { x: from.x + fromHalfX, y: from.y }
+          : { x: from.x, y: from.y + fromHalfY };
         end = down
-          ? { x: x2 + ink, y: y2 + half }
-          : { x: x2 + half, y: y2 };
+          ? { x: to.x + to.w, y: to.y + toHalfY }
+          : { x: to.x + toHalfX, y: to.y };
       }
     }
 
@@ -932,6 +966,9 @@ export class Arc extends KufiItem {
     const diagonal =
       this.from.row !== this.to.row && this.from.column !== this.to.column;
     const dColumn = Math.abs(this.to.column - this.from.column);
+    // The radius rule is the board's (the reference `radius()`): the diagonal
+    // keeps `dColumn·cell + ink/2` so ink ends render exactly as before; only
+    // the spring points follow the fragments.
     const radius =
       this.size === "threeQuarter"
         ? chord / Math.SQRT2
@@ -982,8 +1019,16 @@ export class Arc extends KufiItem {
 
   moved(columns: number, rows: number): Arc {
     return new Arc({
-      from: { column: this.from.column + columns, row: this.from.row + rows },
-      to: { column: this.to.column + columns, row: this.to.row + rows },
+      from: {
+        column: this.from.column + columns,
+        row: this.from.row + rows,
+        zone: this.from.zone,
+      },
+      to: {
+        column: this.to.column + columns,
+        row: this.to.row + rows,
+        zone: this.to.zone,
+      },
       direction: this.direction,
       size: this.size,
       border: this.border,
@@ -1241,8 +1286,8 @@ export interface StrokeStyle {
 }
 
 export function makeLine(
-  from: Cell,
-  to: Cell,
+  from: FragmentPoint,
+  to: FragmentPoint,
   color?: string,
   style: StrokeStyle = {},
 ): LineItem {

@@ -14,11 +14,16 @@
  * `replace` per stroke would mean megabytes on a dense board.
  */
 
-import { anchorOf, hasAnchor, itemSignature } from "./model";
+import {
+  anchorOf,
+  hasAnchor,
+  itemSignature,
+  linePoint,
+  zoneOf,
+} from "./model";
 import type {
   Anchor,
   CanvasItem,
-  Cell,
   ItemBorder,
   ItemRounding,
   LinePoint,
@@ -326,19 +331,26 @@ export function penItems(
 /**
  * Line tool → items.
  *
- * A run whose points all sit on their cell centre — every point the
+ * A run whose points all sit on their fragment centre — every point the
  * pre-anchor tool could make — follows the reference app's rules unchanged: a
- * run with **no diagonal segment** is either one solid `line` bar (the two
- * endpoints) or, when `config.straightLinesAsSquares` is on (its default), one
- * square per cell along every segment. Anything with a diagonal part becomes
- * one stroked polyline, exactly like the old app.
+ * run with **no diagonal segment** that spans at least one cell boundary is
+ * either one solid `line` bar (the two endpoints) or, when
+ * `config.straightLinesAsSquares` is on (its default), one square per cell
+ * along every segment. Anything with a diagonal part becomes one stroked
+ * polyline, exactly like the old app.
  *
- * An anchored point sits **inside** its cell, which neither a bar nor a tile
- * can express, so a run containing one is always a stroked polyline through
- * the anchors. A straight run whose anchors all agree is collinear and merges
- * to its two ends — the clicks between them draw nothing new — but a run with
- * **mixed** anchors is never merged, so no point a designer placed is dropped
- * (`docs/CANVAS.md` §4).
+ * Fragments are first class here (`docs/CANVAS.md` §4): each point's own
+ * fragment decides where its square or bar end sits, so a run clicked on space
+ * fragments draws squares / a bar over those space squares exactly like an ink
+ * run. Two fragments of the **same** cell are two positions inside it, which
+ * only a stroke can express — no bar or square run can span less than a cell.
+ *
+ * An anchored point sits **inside** its fragment, which neither a bar nor a
+ * tile can express, so a run containing one is always a stroked polyline
+ * through the anchors. A straight run whose anchors **and zones** all agree is
+ * collinear and merges to its two ends — the clicks between them draw nothing
+ * new — but a run with mixed anchors or zones is never merged, so no point a
+ * designer placed is dropped (`docs/CANVAS.md` §4).
  */
 export function lineItems(
   config: ProjectConfig,
@@ -352,21 +364,35 @@ export function lineItems(
   const rounding = activeRounding(style.rounding);
   const border = activeBorder(style.border);
   if (!points.some(hasAnchor)) {
-    const unique = dedupeCells(points, closed);
+    const unique = dedupeFragments(points, closed);
     if (unique.length < 2) return [];
+    const run = runOf(unique);
+    // A bar / squares run is a **cell** run: it has to span at least one cell
+    // boundary. Two fragments of one cell (only possible since points carry a
+    // zone) are two positions inside it, which a stroke expresses.
+    const first = unique[0];
+    const spansCells = unique.some(
+      (point) => point.column !== first.column || point.row !== first.row,
+    );
     // A rounded run must stay one item: rounding cells independently would
     // notch the joins. With rounding on, a straight run is a `Line` bar (its
     // box corners round) and a run with turns is a `Stroke` (its turns round).
     if (
       rounding === undefined &&
       config.gridType === "square" &&
+      spansCells &&
       config.straightLinesAsSquares
     ) {
-      const squared = straightRunSquares(config, unique, closed, lineColor, border);
+      const squared = straightRunSquares(
+        config,
+        unique,
+        closed,
+        lineColor,
+        border,
+      );
       if (squared !== null) return squared;
     }
-    const run = runOf(unique);
-    if (!closed && run.axis !== null && config.gridType === "square") {
+    if (!closed && spansCells && run.axis !== null && config.gridType === "square") {
       return [
         makeLine(unique[0], unique[unique.length - 1], lineColor, {
           rounding,
@@ -394,7 +420,9 @@ export function lineItems(
  * The merged stroke spans from the run's first to its last point, which is
  * what the run draws only when it is straight on the **square** grid (on the
  * circular grid a "row" is an arc, not a line), every point carries the same
- * anchor (so the path is collinear), the run advances in a single direction
+ * anchor **and zone** (so the path is collinear — an anchor is a fraction of
+ * its own fragment, so a different zone moves the point), the run advances in
+ * a single direction
  * (a run that doubles back reaches past its last point, and merging would cut
  * the ink short) and the run is open (a closed run is not its endpoints).
  * Runs that fail any test are kept whole, point for point.
@@ -409,8 +437,10 @@ function mergesToEnds(
   if (run.axis === null) return false;
   const along: "column" | "row" = run.axis === "row" ? "column" : "row";
   const first = anchorOf(points[0]);
+  const zone = zoneOf(points[0]);
   let direction = 0;
   for (let index = 0; index < points.length; index++) {
+    if (zoneOf(points[index]) !== zone) return false;
     const anchor = anchorOf(points[index]);
     if (anchor.x !== first.x || anchor.y !== first.y) return false;
     if (index === 0) continue;
@@ -427,22 +457,28 @@ function mergesToEnds(
  * reference app's `line()` (which emitted a `square` shape per cell whenever a
  * straight line was drawn). Returns `null` as soon as a segment is diagonal,
  * leaving the run to the polyline path.
+ *
+ * Each square sits on a **fragment**: the segment's own points keep their
+ * zones, and a cell in between takes the target point's zone — the same spread
+ * `anchorsAlongLine` uses for in-between anchors. A cell is painted once, by
+ * the first segment that reaches it, so a closed run's junction keeps the
+ * zone it was clicked in.
  */
 function straightRunSquares(
   config: ProjectConfig,
-  cells: readonly Cell[],
+  points: readonly LinePoint[],
   closed: boolean,
   color: string,
   border?: ItemBorder,
 ): CanvasItem[] | null {
-  const segments: [Cell, Cell][] = [];
-  for (let index = 1; index < cells.length; index++) {
-    segments.push([cells[index - 1], cells[index]]);
+  const segments: [LinePoint, LinePoint][] = [];
+  for (let index = 1; index < points.length; index++) {
+    segments.push([points[index - 1], points[index]]);
   }
-  if (closed && cells.length > 2) {
-    segments.push([cells[cells.length - 1], cells[0]]);
+  if (closed && points.length > 2) {
+    segments.push([points[points.length - 1], points[0]]);
   }
-  const along: Cell[] = [];
+  const along: LinePoint[] = [];
   const seen = new Set<string>();
   for (const [from, to] of segments) {
     if (from.column !== to.column && from.row !== to.row) return null;
@@ -457,31 +493,46 @@ function straightRunSquares(
       const id = `${cell.column}:${cell.row}`;
       if (seen.has(id)) continue;
       seen.add(id);
-      along.push(cell);
+      const source = offset === 0 ? from : to;
+      along.push(linePoint(cell.column, cell.row, source.zone));
     }
   }
-  return along.map((cell) =>
-    tileFor(config, { column: cell.column, row: cell.row, zone: 0 }, {
-      color,
-      border,
-    }),
+  return along.map((point) =>
+    tileFor(
+      config,
+      { column: point.column, row: point.row, zone: zoneOf(point) },
+      { color, border },
+    ),
   );
 }
 
-/** Drops immediate repeats (and the closing repeat of `closed`). */
-function dedupeCells(points: readonly Cell[], closed: boolean): Cell[] {
-  const unique: Cell[] = [];
-  for (const cell of points) {
+/**
+ * Drops immediate repeats (and the closing repeat of `closed`) — the same
+ * cell **and** zone. Two fragments of one cell are two different points, so
+ * only an identical fragment collapses.
+ */
+function dedupeFragments(
+  points: readonly LinePoint[],
+  closed: boolean,
+): LinePoint[] {
+  const unique: LinePoint[] = [];
+  for (const point of points) {
     const last = unique[unique.length - 1];
-    if (last === undefined || last.column !== cell.column || last.row !== cell.row) {
-      unique.push({ column: cell.column, row: cell.row });
+    if (
+      last === undefined ||
+      last.column !== point.column ||
+      last.row !== point.row ||
+      zoneOf(last) !== zoneOf(point)
+    ) {
+      unique.push(linePoint(point.column, point.row, point.zone));
     }
   }
   if (
     closed &&
     unique.length > 1 &&
     unique[0].column === unique[unique.length - 1].column &&
-    unique[0].row === unique[unique.length - 1].row
+    unique[0].row === unique[unique.length - 1].row &&
+    zoneOf(unique[0]) === zoneOf(unique[unique.length - 1])
   ) {
     unique.pop();
   }

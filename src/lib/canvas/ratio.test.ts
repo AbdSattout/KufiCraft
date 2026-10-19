@@ -17,10 +17,17 @@ import {
   MIN_RATIO,
   RATIO_PRESETS,
   cellSize,
+  linePoint,
   ratioLabel,
   snapRatio,
 } from "@/lib/canvas/model";
-import type { Cell, GridType, ProjectConfig, Zone } from "@/lib/canvas/model";
+import type {
+  Cell,
+  GridType,
+  ProjectConfig,
+  TileItem,
+  Zone,
+} from "@/lib/canvas/model";
 import {
   CENTER,
   circularSlice,
@@ -29,7 +36,13 @@ import {
   zoneRect,
 } from "@/lib/canvas/geometry";
 import type { Rect } from "@/lib/canvas/geometry";
-import { pointToAnchor } from "@/lib/canvas/grid";
+import {
+  linePointPosition,
+  pointToAnchor,
+  pointToLinePoint,
+} from "@/lib/canvas/grid";
+import { itemBounds, makeTile, moveItem } from "@/lib/canvas/items";
+import { lineItems } from "@/lib/canvas/ops";
 
 const ZONES: readonly Zone[] = [0, 1, 2, 3];
 const EPS = 1e-9;
@@ -276,6 +289,71 @@ describe("a fragment's zone is visible at every ratio", () => {
           preset: preset.label,
           zone,
           anchor: { column: 3, row: 6, zone },
+        });
+      }
+    }
+  });
+});
+
+describe("a space fragment is a normal square", () => {
+  it("addresses every quadrant and maps it back to its own square", () => {
+    for (const { preset, config } of ALL) {
+      for (const zone of ZONES) {
+        const rect = zoneRect(config, 0, 0, zone);
+        const centre = { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 };
+        const point = pointToLinePoint(config, centre);
+        expect({ preset: preset.label, zone, point }).toEqual({
+          preset: preset.label,
+          zone,
+          point: linePoint(0, 0, zone),
+        });
+        const position = linePointPosition(config, point);
+        expect(position.x).toBeCloseTo(centre.x, 12);
+        expect(position.y).toBeCloseTo(centre.y, 12);
+      }
+    }
+  });
+
+  it("draws a line through a space stripe exactly as through the ink one", () => {
+    for (const { preset, config } of ALL) {
+      for (const zone of ZONES) {
+        // The same straight run through consecutive cells, once per quadrant.
+        // The tool resolves it by cells and zones, never by the ratio: one
+        // square per cell, each on the stripe that was clicked.
+        const items = lineItems(
+          config,
+          [linePoint(0, 2, zone), linePoint(2, 2, zone)],
+          false,
+        );
+        expect({ preset: preset.label, zone, type: items[0]?.type }).toEqual({
+          preset: preset.label,
+          zone,
+          type: "tile",
+        });
+        for (const item of items) {
+          const tile = item as TileItem;
+          expect({ preset: preset.label, column: tile.column, zone: tile.zone }).toEqual({
+            preset: preset.label,
+            column: tile.column,
+            zone,
+          });
+          expect(itemBounds(config, item)).toEqual(
+            zoneRect(config, tile.column, 2, zone),
+          );
+        }
+      }
+    }
+  });
+
+  it("moves a space-fragment item without changing its fragment", () => {
+    for (const { preset } of ALL) {
+      for (const zone of [1, 2, 3] as Zone[]) {
+        const tile = makeTile({ column: 1, row: 1, zone });
+        const moved = moveItem(tile, 1, 0) as TileItem;
+        expect({ preset: preset.label, zone, moved }).toEqual({
+          preset: preset.label,
+          zone,
+          moved: { ...tile, column: 2, key: `tile:2:1:${zone}` },
         });
       }
     }

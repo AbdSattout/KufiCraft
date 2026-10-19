@@ -374,14 +374,20 @@ describe("pointToLinePoint", () => {
         // one ulp. A real pointer is never exactly on a border; the origin
         // is nudged the same hair inside its own cell.
         const point = linePointPosition(SQUARE, { ...cell, anchor });
-        const nudge = (index: number, edge: number) =>
-          index > 0 && edge === 0 ? 1e-6 : 0;
+        // The zone convention is half-open, so a point exactly on a fragment
+        // border addresses the neighbouring (space) square: a real pointer
+        // never is, so an edge anchor is nudged a hair inside its fragment.
+        const nudge = (index: number, edge: number) => {
+          if (edge === 1) return -1e-6;
+          if (edge === 0 && index > 0) return 1e-6;
+          return 0;
+        };
         expect(
           pointToLinePoint(SQUARE, {
             x: point.x + nudge(cell.column, anchor.x),
             y: point.y + nudge(cell.row, anchor.y),
           }),
-        ).toEqual(linePoint(cell.column, cell.row, anchor));
+        ).toEqual(linePoint(cell.column, cell.row, undefined, anchor));
       }
     }
   });
@@ -397,11 +403,11 @@ describe("pointToLinePoint", () => {
       const anchor = { x, y: 0.5 };
       expect(
         pointToLinePoint(config, linePointPosition(config, { column: 3, row: 6, anchor })),
-      ).toEqual(linePoint(3, 6, anchor));
+      ).toEqual(linePoint(3, 6, undefined, anchor));
     }
   });
 
-  it("snaps to the nearest anchor, and clamps inside the ink region", () => {
+  it("snaps to the nearest anchor inside the fragment under the cursor", () => {
     const cell = cellSize(SQUARE);
     const ink = inkUnit(SQUARE);
     // 1/8 into the ink: the nearest anchor is the origin.
@@ -413,15 +419,17 @@ describe("pointToLinePoint", () => {
     // 3/8: the nearest is the middle — which the model canonicalises to the
     // point without an anchor, exactly as it always stored a centre point.
     expect(pointToLinePoint(SQUARE, { x: (3 * ink) / 8, y: (3 * ink) / 8 })).toEqual(
-      linePoint(0, 0, { x: 0.5, y: 0.5 }),
+      linePoint(0, 0, undefined, { x: 0.5, y: 0.5 }),
     );
-    // The space strip has no anchor of its own: the pointer snaps to the
-    // nearest ink edge of the cell it is in.
+    // The space strip is a fragment of its own: the pointer snaps to one of
+    // its nine anchors, measured inside that square — it does not snap across
+    // into the ink edge.
     const spaceMiddle = ink + (cell - ink) / 2;
     expect(pointToLinePoint(SQUARE, { x: spaceMiddle, y: 2 * cell })).toEqual({
       column: 0,
       row: 2,
-      anchor: { x: 1, y: 0 },
+      zone: 1,
+      anchor: { x: 0.5, y: 0 },
     });
     // …and a point exactly on a cell border belongs to the higher cell.
     expect(pointToLinePoint(SQUARE, { x: cell, y: 2 * cell })).toEqual({
@@ -453,12 +461,11 @@ describe("pointToLinePoint", () => {
     expect(pointToLinePoint(config, cellCentre(config, { column: 3, row: 6 }))).toEqual(
       { column: 3, row: 6 },
     );
-    // 0.9 of the sector past its start rounds to the sector's end.
-    expect(pointToLinePoint(config, at(67.5, 6.9))).toEqual({
-      column: 3,
-      row: 6,
-      anchor: { x: 0.5, y: 1 },
-    });
+    // 0.9 of the sector is past the ink's angular share: the point is on the
+    // space slice, so `y` is measured inside *that* slice (0.6 of it → ½).
+    expect(pointToLinePoint(config, at(67.5, 6.9))).toEqual(
+      linePoint(3, 6, 2),
+    );
   });
 
   it("takes the mid-angle from the board's own sector count", () => {
@@ -471,6 +478,69 @@ describe("pointToLinePoint", () => {
     );
     expect(centre.x).toBeCloseTo(expected.x, 9);
     expect(centre.y).toBeCloseTo(expected.y, 9);
+  });
+});
+
+describe("line points on space fragments", () => {
+  it("maps a square point onto its own fragment's box", () => {
+    // Every fragment, ink or space: the anchor's fractions are measured inside
+    // that fragment's own rect. Ink points reproduce the pre-fragment pixels.
+    for (const zone of [0, 1, 2, 3] as Zone[]) {
+      const rect = zoneRect(SQUARE, 4, 7, zone);
+      const position = linePointPosition(
+        SQUARE,
+        linePoint(4, 7, zone, { x: 0.5, y: 1 }),
+      );
+      expect(position.x).toBeCloseTo(rect.x + rect.w / 2, 12);
+      expect(position.y).toBeCloseTo(rect.y + rect.h, 12);
+    }
+    // …and the addressing from a fragment's centre names that fragment again.
+    for (const zone of [0, 1, 2, 3] as Zone[]) {
+      const rect = zoneRect(SQUARE, 4, 7, zone);
+      const centre = { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 };
+      expect(pointToLinePoint(SQUARE, centre)).toEqual(linePoint(4, 7, zone));
+    }
+  });
+
+  it("maps a circular point onto its own slice", () => {
+    const unit = circularAngularUnit(CIRCULAR);
+    for (const zone of [0, 1, 2, 3] as Zone[]) {
+      const slice = circularSlice(CIRCULAR, 3, 6, zone);
+      const position = linePointPosition(CIRCULAR, linePoint(3, 6, zone));
+      // The radius spans the fragment's radial band…
+      const radius = (slice.r1 + slice.r2) / 2;
+      // …and the angle spans the whole sector for an ink-angular point (the
+      // pre-fragment rule) or the space slice for a space-angular one.
+      const angle =
+        (zone & 2) !== 0 ? (slice.a1 + slice.a2) / 2 : 6.5 * unit;
+      const expected = polar(CENTER, CENTER, radius, angle);
+      expect(position.x).toBeCloseTo(expected.x, 12);
+      expect(position.y).toBeCloseTo(expected.y, 12);
+      expect(pointToLinePoint(CIRCULAR, position)).toEqual(
+        linePoint(3, 6, zone),
+      );
+    }
+  });
+
+  it("keeps an anchored space point on its own square at the equal 1:1", () => {
+    // All four quadrants are congruent here, so this is where a snap across
+    // into the ink half would be most visible (and was the reported bug).
+    for (const zone of [0, 1, 2, 3] as Zone[]) {
+      const rect = zoneRect(EQUAL, 0, 0, zone);
+      const point = linePoint(0, 0, zone, { x: 0, y: 1 });
+      const position = linePointPosition(EQUAL, point);
+      expect(position.x).toBeCloseTo(rect.x, 12);
+      expect(position.y).toBeCloseTo(rect.y + rect.h, 12);
+    }
+    for (const zone of [0, 1, 2, 3] as Zone[]) {
+      const rect = zoneRect(EQUAL, 0, 0, zone);
+      expect(
+        pointToLinePoint(EQUAL, {
+          x: rect.x + rect.w / 2,
+          y: rect.y + rect.h / 2,
+        }),
+      ).toEqual(linePoint(0, 0, zone));
+    }
   });
 });
 

@@ -1136,43 +1136,89 @@ describe("applyOps", () => {
     expect(after).toEqual(before);
   });
 
-  it("rejects a cell carrying a zone, so the client must normalise", async () => {
+  it("accepts fragment zones on arc ends and drops the canonical ink zone", async () => {
     const t = newTest();
     const asA = t.withIdentity(USER_A);
     const projectId = await createProject(t, USER_A);
-    // The reported crash, as it reached the wire: the arc tool armed with an
-    // `Anchor` (a cell **plus** a zone) and `toJSON` passed it through, while
-    // `cellValidator` is `{column, row}` only — ArgumentValidationError.
-    const leaked = {
+    // A tool hands the item an `Anchor` (a cell **plus** a zone). A space
+    // zone is stored — the arc springs off that space square — and zone 0 is
+    // dropped, the ink fragment's canonical absent state.
+    const arc = {
       type: "arc",
-      key: arcKey(
-        { column: 3, row: 33 },
-        { column: 3, row: 35 },
-        "clockwise",
-        "half",
-      ),
+      key: "stale",
       from: { column: 3, row: 33, zone: 0 },
-      to: { column: 3, row: 35, zone: 0 },
+      to: { column: 3, row: 35, zone: 2 },
       direction: "clockwise",
       size: "half",
       color: "#9f1239",
     } as unknown as CanvasItem;
-
-    // The validator stays strict. `convex-test` words its failure as
-    // "Expected one of object, object, object" and echoes the offending value
-    // (`zone` and all); the cloud reports `ArgumentValidationError` for the
-    // same batch. Either way the document is untouched — that is the contract
-    // the client side must meet.
-    const attempt = asA.mutation(api.projects.applyOps, {
+    await asA.mutation(api.projects.applyOps, {
       projectId,
-      ops: [{ type: "add", items: [leaked] }],
+      ops: [{ type: "add", items: [arc] }],
     });
-    await expect(attempt).rejects.toThrow(/zone/);
     const doc = required(
       await asA.query(api.projects.get, { projectId }),
       "project should exist",
     );
-    expect(doc.items).toEqual([]);
+    expect(doc.items).toEqual([
+      {
+        ...arc,
+        key: arcKey(
+          { column: 3, row: 33 },
+          { column: 3, row: 35, zone: 2 },
+          "clockwise",
+          "half",
+        ),
+        from: { column: 3, row: 33 },
+      },
+    ]);
+
+    // A zone outside 0…3 is still a validation error — the document is
+    // untouched.
+    const invalid = {
+      ...arc,
+      to: { column: 3, row: 35, zone: 9 },
+    } as unknown as CanvasItem;
+    await expect(
+      asA.mutation(api.projects.applyOps, {
+        projectId,
+        ops: [{ type: "add", items: [invalid] }],
+      }),
+    ).rejects.toThrow();
+    expect(
+      required(await asA.query(api.projects.get, { projectId }), "project")
+        .items,
+    ).toHaveLength(1);
+  });
+
+  it("canonicalises a stroke point's zone the same way", async () => {
+    const t = newTest();
+    const asA = t.withIdentity(USER_A);
+    const projectId = await createProject(t, USER_A);
+    const stroke = {
+      type: "stroke",
+      key: "stale",
+      points: [
+        { column: 0, row: 0, zone: 0 },
+        { column: 2, row: 2, zone: 3, anchor: { x: 0.5, y: 0 } },
+      ],
+      closed: false,
+    } as unknown as CanvasItem;
+    await asA.mutation(api.projects.applyOps, {
+      projectId,
+      ops: [{ type: "add", items: [stroke] }],
+    });
+    const doc = required(
+      await asA.query(api.projects.get, { projectId }),
+      "project should exist",
+    );
+    expect(doc.items).toHaveLength(1);
+    const stored = doc.items[0];
+    if (stored?.type !== "stroke") throw new Error("expected a stroke");
+    expect(stored.points).toEqual([
+      { column: 0, row: 0 },
+      { column: 2, row: 2, zone: 3, anchor: { x: 0.5, y: 0 } },
+    ]);
   });
 });
 

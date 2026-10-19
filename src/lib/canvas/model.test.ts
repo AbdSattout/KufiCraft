@@ -217,23 +217,95 @@ describe("line points", () => {
   });
 
   it("normalises the centre away, whichever way it is written", () => {
-    const centre = linePoint(2, 3, { x: 0.5, y: 0.5 });
+    const centre = linePoint(2, 3, undefined, { x: 0.5, y: 0.5 });
     expect(centre).toEqual({ column: 2, row: 3 });
     expect(linePoint(2, 3)).toEqual(centre);
     expect(centre).not.toHaveProperty("anchor");
   });
 
+  it("canonicalises the ink zone away and keeps a space zone", () => {
+    // Zone 0 is the ink fragment: canonical storage of nothing, so a stored
+    // point is byte-identical to the pre-fragment one.
+    expect(linePoint(2, 3, 0)).toEqual({ column: 2, row: 3 });
+    expect(linePoint(2, 3, 0, CENTRE_ANCHOR)).toEqual({ column: 2, row: 3 });
+    // A space fragment keeps its zone; the centre is still dropped.
+    expect(linePoint(2, 3, 2)).toEqual({ column: 2, row: 3, zone: 2 });
+    expect(linePoint(2, 3, 2, CENTRE_ANCHOR)).toEqual({
+      column: 2,
+      row: 3,
+      zone: 2,
+    });
+    expect(linePoint(2, 3, 2, { x: 0, y: 1 })).toEqual({
+      column: 2,
+      row: 3,
+      zone: 2,
+      anchor: { x: 0, y: 1 },
+    });
+  });
+
+  it("keys a space fragment distinctly and leaves the ink key untouched", () => {
+    // Ink keys are exactly the pre-fragment strings (old documents re-key to
+    // themselves); a space end adds `#<zone>` where it appears.
+    expect(lineKey({ column: 2, row: 3 }, { column: 4, row: 3 })).toBe(
+      "line:2:3>4:3",
+    );
+    expect(
+      lineKey(
+        { column: 2, row: 3, zone: 1 },
+        { column: 4, row: 3, zone: 1 },
+      ),
+    ).toBe("line:2:3#1>4:3#1");
+    expect(
+      arcKey(
+        { column: 2, row: 3, zone: 2 },
+        { column: 4, row: 3 },
+        "clockwise",
+        "half",
+      ),
+    ).toBe("arc:2:3#2>4:3|clockwise|half");
+    const inkStroke = [
+      { column: 2, row: 3 },
+      { column: 4, row: 3 },
+    ];
+    expect(
+      strokeKey(
+        [
+          { column: 2, row: 3, zone: 0 },
+          { column: 4, row: 3 },
+        ],
+        false,
+      ),
+    ).toBe(strokeKey(inkStroke, false));
+    expect(
+      strokeKey(
+        [
+          { column: 2, row: 3, zone: 3, anchor: { x: 0.5, y: 0 } },
+          { column: 4, row: 3 },
+        ],
+        false,
+      ),
+    ).not.toBe(strokeKey(inkStroke, false));
+  });
+
+  it("compares two points by cell, zone and anchor together", () => {
+    // Same cell and anchor, different fragments: two different points.
+    expect(sameLinePoint(linePoint(1, 1), linePoint(1, 1, 2))).toBe(false);
+    expect(sameLinePoint(linePoint(1, 1, 2), linePoint(1, 1, 2))).toBe(true);
+    // An absent zone and zone 0 are the same fragment.
+    expect(sameLinePoint(linePoint(1, 1), linePoint(1, 1, 0))).toBe(true);
+  });
+
   it("keeps a non-centre anchor, copying it rather than aliasing it", () => {
     const anchor = { x: 0, y: 1 };
-    const point = linePoint(2, 3, anchor);
+    const point = linePoint(2, 3, undefined, anchor);
     expect(point).toEqual({ column: 2, row: 3, anchor: { x: 0, y: 1 } });
     expect(point.anchor).not.toBe(anchor);
   });
 
   it("reads a point's anchor, absent meaning the centre", () => {
     const bare = linePoint(1, 1);
-    const centred = linePoint(1, 1, { x: 0.5, y: 0.5 });
-    const corner = linePoint(1, 1, { x: 1, y: 0 });
+    const centred = linePoint(1, 1, undefined, { x: 0.5, y: 0.5 });
+    const corner = linePoint(1, 1, undefined, { x: 1, y: 0 });
     expect(anchorOf(bare)).toEqual(CENTRE_ANCHOR);
     expect(hasAnchor(bare)).toBe(false);
     expect(hasAnchor(centred)).toBe(false);
@@ -243,12 +315,12 @@ describe("line points", () => {
   });
 
   it("compares two points by cell and anchor together", () => {
-    const corner = linePoint(1, 1, { x: 0, y: 0 });
-    expect(sameLinePoint(corner, linePoint(1, 1, { x: 0, y: 0 }))).toBe(true);
+    const corner = linePoint(1, 1, undefined, { x: 0, y: 0 });
+    expect(sameLinePoint(corner, linePoint(1, 1, undefined, { x: 0, y: 0 }))).toBe(true);
     // The same cell, written with an explicit centre, is still the centre.
-    expect(sameLinePoint(linePoint(1, 1), linePoint(1, 1, CENTRE_ANCHOR))).toBe(true);
-    expect(sameLinePoint(corner, linePoint(1, 1, { x: 1, y: 0 }))).toBe(false);
-    expect(sameLinePoint(corner, linePoint(1, 2, { x: 0, y: 0 }))).toBe(false);
+    expect(sameLinePoint(linePoint(1, 1), linePoint(1, 1, undefined, CENTRE_ANCHOR))).toBe(true);
+    expect(sameLinePoint(corner, linePoint(1, 1, undefined, { x: 1, y: 0 }))).toBe(false);
+    expect(sameLinePoint(corner, linePoint(1, 2, undefined, { x: 0, y: 0 }))).toBe(false);
   });
 
   it("repairs a stored anchor: clamps it, drops what is not a point", () => {
@@ -273,7 +345,7 @@ describe("line points", () => {
     // explicit-centre list keys exactly like the old one: files and documents
     // round-trip without their keys moving.
     const throughCentre = points.map((cell) =>
-      linePoint(cell.column, cell.row, CENTRE_ANCHOR),
+      linePoint(cell.column, cell.row, undefined, CENTRE_ANCHOR),
     );
     expect(strokeKey(throughCentre, false)).toBe(strokeKey(points, false));
     expect(strokeKey(points, true)).not.toBe(strokeKey(points, false));
@@ -285,12 +357,12 @@ describe("line points", () => {
       { column: 1, row: 1 },
     ];
     const corner = [
-      linePoint(0, 0, { x: 0, y: 0 }),
-      linePoint(1, 1, { x: 0, y: 0 }),
+      linePoint(0, 0, undefined, { x: 0, y: 0 }),
+      linePoint(1, 1, undefined, { x: 0, y: 0 }),
     ];
     const edge = [
-      linePoint(0, 0, { x: 0.5, y: 0 }),
-      linePoint(1, 1, { x: 0, y: 0 }),
+      linePoint(0, 0, undefined, { x: 0.5, y: 0 }),
+      linePoint(1, 1, undefined, { x: 0, y: 0 }),
     ];
     expect(new Set([strokeKey(bare, false), strokeKey(corner, false), strokeKey(edge, false)]).size).toBe(3);
   });
@@ -302,7 +374,7 @@ describe("line points", () => {
     ];
     const bare = makeStroke(points, false);
     const corner = makeStroke(
-      [linePoint(0, 0, { x: 0, y: 0 }), linePoint(1, 1, { x: 0, y: 0 })],
+      [linePoint(0, 0, undefined, { x: 0, y: 0 }), linePoint(1, 1, undefined, { x: 0, y: 0 })],
       false,
     );
     expect(itemSignature(bare)).toBe(
@@ -390,6 +462,21 @@ describe("itemSignature", () => {
     expect(
       itemSignature({ ...line, border: { sides: BORDER_TOP, width: 2 } }),
     ).not.toBe(itemSignature(line));
+  });
+
+  it("tells a space-fragment end from the ink one", () => {
+    expect(
+      itemSignature({ ...line, to: { column: 3, row: 1, zone: 2 } }),
+    ).not.toBe(itemSignature(line));
+    expect(
+      itemSignature({ ...arc, to: { column: 3, row: 0, zone: 1 } }),
+    ).not.toBe(itemSignature(arc));
+    expect(
+      itemSignature({
+        ...stroke,
+        points: [{ column: 0, row: 0 }, { column: 1, row: 1, zone: 3 }],
+      }),
+    ).not.toBe(itemSignature(stroke));
   });
 
   it("distinguishes every item type and is deterministic", () => {

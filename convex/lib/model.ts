@@ -38,9 +38,13 @@
  *
  * Anchors:
  *   tile    — `column`, `row`, `zone`: one fragment of one cell.
- *   others  — `from`/`to` (`Cell`) or `points` (`LinePoint[]`): whole ink
- *             cells; a line point may carry an `anchor`, a position inside its
- *             cell's ink region (`docs/CANVAS.md` §3).
+ *   line    — `from`/`to` (`FragmentPoint`): the fragments its two ends were
+ *             placed on (zone absent = the ink fragment).
+ *   arc     — `from`/`to` (`FragmentPoint`): the fragments its springs attach
+ *             to (zone absent = the ink fragment).
+ *   stroke  — `points` (`LinePoint[]`): fragments, each with an optional
+ *             `anchor`, a position inside its **own** fragment
+ *             (`docs/CANVAS.md` §3).
  */
 
 import { v } from "convex/values";
@@ -421,11 +425,14 @@ export interface ItemBorder {
 }
 
 /**
- * A position inside one cell's **ink region**, as fractions of that region's
- * extent on each axis: `{x: 0, y: 0}` is the ink origin, `{x: 1, y: 1}` its
- * opposite corner, `{x: 0.5, y: 0.5}` the centre. The editor snaps the pointer
- * to the nine `ANCHOR_GRID` positions; the format itself accepts any fraction
- * in `[0, 1]`, so free positioning needs no format change later.
+ * A position inside one **fragment**, as fractions of that fragment's extent
+ * on each axis: `{x: 0, y: 0}` is the fragment's origin, `{x: 1, y: 1}` its
+ * opposite corner, `{x: 0.5, y: 0.5}` its centre. On the ink fragment (zone 0,
+ * the default) that region is the cell's ink square, exactly as before zones
+ * existed; on a space fragment it is that space square. The editor snaps the
+ * pointer to the nine `ANCHOR_GRID` positions of the fragment under the
+ * cursor; the format itself accepts any fraction in `[0, 1]`, so free
+ * positioning needs no format change later.
  */
 export interface InkPoint {
   x: number;
@@ -433,16 +440,27 @@ export interface InkPoint {
 }
 
 /**
- * A line point: an ink cell plus where inside it the point sits. Absent
- * `anchor` means the cell centre — the point every pre-anchor line point used
- * — and the centre is **never stored** (`linePoint` drops it), so documents,
- * files and keys written before anchors existed round-trip byte-identically.
+ * A cell plus the fragment of it a stored point addresses. `zone` is absent
+ * for the ink fragment (0) — the only fragment the model had before space
+ * points existed — so every line, arc and stroke written by an earlier
+ * version round-trips byte-identically (`docs/CANVAS.md` §3).
  */
-export interface LinePoint extends Cell {
+export interface FragmentPoint extends Cell {
+  zone?: Zone;
+}
+
+/**
+ * A line point: a fragment plus where inside it the point sits. Absent
+ * `anchor` means the fragment's centre — the point every pre-anchor line point
+ * used — and the centre is **never stored** (`linePoint` drops it), so
+ * documents, files and keys written before anchors existed round-trip
+ * byte-identically.
+ */
+export interface LinePoint extends FragmentPoint {
   anchor?: InkPoint;
 }
 
-/** The centre of an ink region: what an absent anchor normalises to. */
+/** The centre of a fragment: what an absent anchor normalises to. */
 export const CENTRE_ANCHOR: InkPoint = { x: 0.5, y: 0.5 };
 
 /**
@@ -482,16 +500,18 @@ export interface TileItem {
 }
 
 /**
- * An axis-aligned run of ink cells drawn as one continuous bar of ink
- * thickness — exactly the old line tool's two-point case (`line()` in the
- * reference app, which emitted the bar as a run of ink/space fragments).
- * `from`/`to` are canonicalised by `compareCells`.
+ * An axis-aligned run of fragments drawn as one continuous bar — exactly the
+ * old line tool's two-point case (`line()` in the reference app, which emitted
+ * the bar as a run of ink/space fragments). The bar's cross-section is the
+ * canonical first end's stripe; its length runs from that fragment's start to
+ * the second fragment's end. `from`/`to` are canonicalised by
+ * `compareFragments` (column, then row, then zone).
  */
 export interface LineItem {
   type: "line";
   key: string;
-  from: Cell;
-  to: Cell;
+  from: FragmentPoint;
+  to: FragmentPoint;
   /** Corner rounding of the bar's box; absent means square corners. */
   rounding?: ItemRounding;
   border?: ItemBorder;
@@ -516,15 +536,15 @@ export interface StrokeItem {
 }
 
 /**
- * A rib (قوس) between two ink cells on the same row, the same column or a
+ * A rib (قوس) between two fragments on the same row, the same column or a
  * 45° diagonal. Rendered as a stroked arc of ink thickness, springing from
- * the ink edges — `docs/CANVAS.md` §5 has the exact geometry.
+ * each fragment's own edges — `docs/CANVAS.md` §5 has the exact geometry.
  */
 export interface ArcItem {
   type: "arc";
   key: string;
-  from: Cell;
-  to: Cell;
+  from: FragmentPoint;
+  to: FragmentPoint;
   direction: ArcDirection;
   size: ArcSize;
   border?: ItemBorder;
@@ -596,7 +616,26 @@ export function isCentreAnchor(anchor: InkPoint): boolean {
   return anchor.x === CENTRE_ANCHOR.x && anchor.y === CENTRE_ANCHOR.y;
 }
 
-/** The anchor a point draws at: its own, or the cell centre when absent. */
+/** The fragment a stored point addresses; absent means the ink fragment. */
+export function zoneOf(point: FragmentPoint): Zone {
+  return point.zone ?? 0;
+}
+
+/**
+ * Builds a fragment point, canonicalising the zone: **the ink zone is
+ * dropped**, so `zone: 0`, no zone at all and every document written before
+ * space points existed produce the same value, key and JSON.
+ */
+export function fragmentPoint(
+  column: number,
+  row: number,
+  zone?: Zone,
+): FragmentPoint {
+  if (zone === undefined || zone === 0) return { column, row };
+  return { column, row, zone };
+}
+
+/** The anchor a point draws at: its own, or its fragment's centre when absent. */
 export function anchorOf(point: LinePoint): InkPoint {
   return point.anchor ?? CENTRE_ANCHOR;
 }
@@ -607,17 +646,21 @@ export function hasAnchor(point: LinePoint): boolean {
 }
 
 /**
- * Builds a line point, canonicalising the anchor: **the centre is dropped**,
- * so every way of naming a centre point — no anchor, `(0.5, 0.5)` — produces
- * the same value, key and JSON as the pre-anchor model did.
+ * Builds a line point, canonicalising both optionals: the ink zone and the
+ * centre anchor are **dropped**, so every way of naming the same point
+ * produces the same value, key and JSON as the pre-fragment model did.
  */
 export function linePoint(
   column: number,
   row: number,
+  zone?: Zone,
   anchor?: InkPoint,
 ): LinePoint {
-  if (anchor === undefined || isCentreAnchor(anchor)) return { column, row };
-  return { column, row, anchor: { x: anchor.x, y: anchor.y } };
+  const point: LinePoint = fragmentPoint(column, row, zone);
+  if (anchor !== undefined && !isCentreAnchor(anchor)) {
+    point.anchor = { x: anchor.x, y: anchor.y };
+  }
+  return point;
 }
 
 /**
@@ -645,13 +688,14 @@ function fraction(value: unknown): number | undefined {
   return Math.min(1, Math.max(0, value));
 }
 
-/** Whether two points are the same cell *and* the same anchor. */
+/** Whether two points are the same cell, zone *and* anchor. */
 export function sameLinePoint(a: LinePoint, b: LinePoint): boolean {
   const anchorA = anchorOf(a);
   const anchorB = anchorOf(b);
   return (
     a.column === b.column &&
     a.row === b.row &&
+    zoneOf(a) === zoneOf(b) &&
     anchorA.x === anchorB.x &&
     anchorA.y === anchorB.y
   );
@@ -662,24 +706,40 @@ function cellKey(cell: Cell): string {
   return `${cell.column}:${cell.row}`;
 }
 
+/**
+ * Compact notation of a fragment point: the cell plus `#zone`, which is
+ * omitted for the ink fragment so pre-fragment points key exactly as before.
+ */
+function fragmentKey(point: FragmentPoint): string {
+  const zone = zoneOf(point);
+  return zone === 0 ? cellKey(point) : `${cellKey(point)}#${zone}`;
+}
+
+/** Canonical fragment order: by column, then row, then zone. */
+export function compareFragments(a: FragmentPoint, b: FragmentPoint): number {
+  return compareCells(a, b) || zoneOf(a) - zoneOf(b);
+}
+
 export function tileKey(column: number, row: number, zone: Zone): string {
   return `tile:${column}:${row}:${zone}`;
 }
 
-/** Identity of a line: its two cells, canonicalised. */
-export function lineKey(from: Cell, to: Cell): string {
-  const [a, b] = compareCells(from, to) <= 0 ? [from, to] : [to, from];
-  return `line:${cellKey(a)}>${cellKey(b)}`;
+/** Identity of a line: its two fragments, canonicalised. */
+export function lineKey(from: FragmentPoint, to: FragmentPoint): string {
+  const [a, b] =
+    compareFragments(from, to) <= 0 ? [from, to] : [to, from];
+  return `line:${fragmentKey(a)}>${fragmentKey(b)}`;
 }
 
 /**
- * Compact notation of one line point: the cell, and the anchor only when it
- * is not the centre (which is absent by construction) — `"2:3"`, `"2:3@0,0.5"`.
+ * Compact notation of one line point: the fragment, and the anchor only when
+ * it is not the centre (which is absent by construction) — `"2:3"`,
+ * `"2:3#1@0,0.5"`, `"2:3@0,0.5"`.
  */
 function linePointKey(point: LinePoint): string {
   const anchor = anchorOf(point);
-  if (isCentreAnchor(anchor)) return cellKey(point);
-  return `${cellKey(point)}@${anchor.x},${anchor.y}`;
+  if (isCentreAnchor(anchor)) return fragmentKey(point);
+  return `${fragmentKey(point)}@${anchor.x},${anchor.y}`;
 }
 
 /**
@@ -693,13 +753,14 @@ export function strokeKey(points: readonly LinePoint[], closed: boolean): string
 }
 
 export function arcKey(
-  from: Cell,
-  to: Cell,
+  from: FragmentPoint,
+  to: FragmentPoint,
   direction: ArcDirection,
   size: ArcSize,
 ): string {
-  const [a, b] = compareCells(from, to) <= 0 ? [from, to] : [to, from];
-  return `arc:${cellKey(a)}>${cellKey(b)}|${direction}|${size}`;
+  const [a, b] =
+    compareFragments(from, to) <= 0 ? [from, to] : [to, from];
+  return `arc:${fragmentKey(a)}>${fragmentKey(b)}|${direction}|${size}`;
 }
 
 /**
@@ -737,10 +798,8 @@ export function itemSignature(item: CanvasItem): string {
     case "line":
       return [
         item.key,
-        item.from.column,
-        item.from.row,
-        item.to.column,
-        item.to.row,
+        fragmentKey(item.from),
+        fragmentKey(item.to),
         item.color ?? "",
         roundingField(item.rounding),
         borderField(item.border),
@@ -757,10 +816,8 @@ export function itemSignature(item: CanvasItem): string {
     case "arc":
       return [
         item.key,
-        item.from.column,
-        item.from.row,
-        item.to.column,
-        item.to.row,
+        fragmentKey(item.from),
+        fragmentKey(item.to),
         item.direction,
         item.size,
         item.color ?? "",
@@ -848,15 +905,28 @@ export const borderValidator = v.object({
 });
 
 /**
- * A line point's anchor. Structurally checked only — the two numbers are
- * unbounded here on purpose: the tool emits the nine `ANCHOR_GRID` positions,
- * but a stored anchor is **repaired** (clamped to `[0, 1]`, the centre dropped)
- * by `sanitizeItem` on the way in rather than rejected at the door, so a write
- * that was valid before anchors existed is still valid, whatever it carries.
+ * A stored fragment point: a cell plus the optional zone (absent = ink). A
+ * stored zone is structural — the sanitiser drops an item whose zone is not
+ * `0…3` rather than moving the point to another square.
+ */
+export const fragmentValidator = v.object({
+  column: v.number(),
+  row: v.number(),
+  zone: v.optional(zoneValidator),
+});
+
+/**
+ * A line point: a fragment plus an optional anchor. The anchor is structurally
+ * checked only — the two numbers are unbounded here on purpose: the tool emits
+ * the nine `ANCHOR_GRID` positions, but a stored anchor is **repaired**
+ * (clamped to `[0, 1]`, the centre dropped) by `sanitizeItem` on the way in
+ * rather than rejected at the door, so a write that was valid before anchors
+ * existed is still valid, whatever it carries.
  */
 export const linePointValidator = v.object({
   column: v.number(),
   row: v.number(),
+  zone: v.optional(zoneValidator),
   anchor: v.optional(v.object({ x: v.number(), y: v.number() })),
 });
 
@@ -876,8 +946,8 @@ export const canvasItemValidator = v.union(
   v.object({
     type: v.literal("line"),
     key: v.string(),
-    from: cellValidator,
-    to: cellValidator,
+    from: fragmentValidator,
+    to: fragmentValidator,
     rounding: v.optional(roundingValidator),
     border: v.optional(borderValidator),
     color: v.optional(v.string()),
@@ -894,8 +964,8 @@ export const canvasItemValidator = v.union(
   v.object({
     type: v.literal("arc"),
     key: v.string(),
-    from: cellValidator,
-    to: cellValidator,
+    from: fragmentValidator,
+    to: fragmentValidator,
     direction: arcDirectionValidator,
     size: arcSizeValidator,
     border: v.optional(borderValidator),

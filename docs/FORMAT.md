@@ -35,11 +35,17 @@ apps never had (see “Legacy” below).
   `docs/CANVAS.md` §3 for the four item types and their keys.
 * `color` is **per item**: it is written on every item the editor creates, so a
   file looks the same no matter what `config.ink` is.
-* A `stroke` point may carry an optional `anchor: { x, y }` — where inside the
-  cell's **ink region** the point sits, as fractions of its extent (`0…1`,
-  `docs/CANVAS.md` §3). Absent means the cell centre, and the centre is never
-  written (`0.5, 0.5` is dropped on write), so a file from before anchors existed
-  is unchanged.
+* A `line` / `arc` end and a `stroke` point may carry an optional
+  `zone: 0 | 1 | 2 | 3` — the **fragment** the point sits on (`docs/CANVAS.md`
+  §3): `0` is the ink square, `1`/`2` the x-/y-space strip, `3` the space
+  square. Absent means zone 0, and zone 0 is never written, so a file from
+  before fragments existed is unchanged. A space fragment adds `#<zone>` to the
+  item key (`"line:2:3#1>4:3#1"`).
+* A `stroke` point may carry an optional `anchor: { x, y }` — where inside that
+  point's **own fragment** the point sits, as fractions of its extent (`0…1`,
+  `docs/CANVAS.md` §3). Absent means the fragment centre, and the centre is
+  never written (`0.5, 0.5` is dropped on write), so a file from before anchors
+  existed is unchanged.
 
 ### Style fields (`rounding`, `border`)
 

@@ -35,6 +35,7 @@ import {
   MIN_CIRCULAR_SECTORS,
   arcKey,
   circularSectors,
+  fragmentPoint,
   lineKey,
   linePoint,
   maxGridIndex,
@@ -50,6 +51,7 @@ import type {
   ArcItem,
   CanvasItem,
   Cell,
+  FragmentPoint,
   GridType,
   ItemBorder,
   ItemRounding,
@@ -185,6 +187,30 @@ function cellOf(value: unknown, maxColumn: number, maxRow: number): Cell | null 
   return { column, row };
 }
 
+/**
+ * The optional zone of a stored fragment: `undefined` when absent (the ink
+ * fragment), `null` when present but not one of the four zones. A bad zone is
+ * structural — it decides *where* the point is, so the item is dropped rather
+ * than silently moved to another fragment (the tile reader does the same).
+ */
+function zoneOf(value: Record<string, unknown>): Zone | undefined | null {
+  if (value.zone === undefined) return undefined;
+  return isZone(value.zone) ? value.zone : null;
+}
+
+/** A stored fragment end: a valid cell plus its optional zone. */
+function fragmentOf(
+  value: unknown,
+  maxColumn: number,
+  maxRow: number,
+): FragmentPoint | null {
+  const cell = cellOf(value, maxColumn, maxRow);
+  if (!cell) return null;
+  const zone = zoneOf(value as Record<string, unknown>);
+  if (zone === null) return null;
+  return fragmentPoint(cell.column, cell.row, zone);
+}
+
 /* ------------------------------------------------------------------ */
 /* Sanitising                                                          */
 /* ------------------------------------------------------------------ */
@@ -305,8 +331,8 @@ export function normalizeItem(
       return item;
     }
     case "line": {
-      const from = cellOf(value.from, maxColumn, maxRow);
-      const to = cellOf(value.to, maxColumn, maxRow);
+      const from = fragmentOf(value.from, maxColumn, maxRow);
+      const to = fragmentOf(value.to, maxColumn, maxRow);
       if (!from || !to) return null;
       const item: LineItem = {
         type: "line",
@@ -326,10 +352,18 @@ export function normalizeItem(
         if (!isRecord(candidate)) return null;
         const cell = cellOf(candidate, maxColumn, maxRow);
         if (!cell) return null;
-        // The anchor is optional and bounded to the ink region; an unusable
-        // one falls back to the cell centre instead of killing the item.
+        // The zone is structural (a bad one drops the item); the anchor is
+        // optional and bounded to the point's fragment, so an unusable one
+        // falls back to the fragment centre instead of killing the item.
+        const zone = zoneOf(candidate);
+        if (zone === null) return null;
         points.push(
-          linePoint(cell.column, cell.row, normalizeAnchor(candidate.anchor)),
+          linePoint(
+            cell.column,
+            cell.row,
+            zone,
+            normalizeAnchor(candidate.anchor),
+          ),
         );
       }
       const closed = value.closed === true;
@@ -345,8 +379,8 @@ export function normalizeItem(
       return item;
     }
     case "arc": {
-      const from = cellOf(value.from, maxColumn, maxRow);
-      const to = cellOf(value.to, maxColumn, maxRow);
+      const from = fragmentOf(value.from, maxColumn, maxRow);
+      const to = fragmentOf(value.to, maxColumn, maxRow);
       if (!from || !to) return null;
       if (from.column === to.column && from.row === to.row) return null;
       const direction: ArcDirection = isDirection(value.direction)

@@ -7,9 +7,8 @@
  *   • viewport → viewBox mapping (`clientToViewBox`) including CSS scaling
  *     and RTL — the SVG is fitted with `preserveAspectRatio="xMidYMid meet"`,
  *     so the mapping is a uniform scale plus a centred letterbox offset;
- *   • anchoring (`anchorAt`, `inkAnchorAt`, `linePointAt`,
- *     `anchorsAlongLine`) and hit testing (`hitTest`) — the item classes answer
- *     for their own geometry;
+ *   • anchoring (`anchorAt`, `linePointAt`, `anchorsAlongLine`) and hit
+ *     testing (`hitTest`) — the item classes answer for their own geometry;
  *   • the line tool's run resolver (`lineRun`): preview and commit resolve a
  *     gesture through it, so they can never disagree on an endpoint;
  *   • selection operations (move, recolour, reshape, duplicate, delete);
@@ -39,6 +38,7 @@ import type {
   ArcSize,
   CanvasItem,
   Cell,
+  FragmentPoint,
   ItemBorder,
   ItemRounding,
   LinePoint,
@@ -49,7 +49,6 @@ import type {
 import {
   cellCentre,
   pointToAnchor,
-  pointToCell,
   pointToLinePoint,
 } from "@/lib/canvas/grid";
 import { shortestSectorDelta } from "@/lib/canvas/geometry";
@@ -238,22 +237,10 @@ export function anchorAt(config: ProjectConfig, point: Point): Anchor {
 }
 
 /**
- * The ink-square anchor of the cell under `point`: the line and arc tools snap
- * to the cell's ink fragment whatever part of the cell was clicked — a
- * deliberate, documented deviation from the old app, which silently ignored a
- * click outside the ink square. This is also what keeps them usable at the
- * equal `1:1`, where the ink and space halves are the same size and both must
- * accept a line or an arc (docs/CANVAS.md §2).
- */
-export function inkAnchorAt(config: ProjectConfig, point: Point): Anchor {
-  const cell = pointToCell(config, clampToCanvas(point));
-  return { column: cell.column, row: cell.row, zone: 0 };
-}
-
-/**
- * The line tool's point under `point`: the cell under the cursor plus the
- * anchor nearest the pointer inside its ink region (nine positions —
- * `docs/CANVAS.md` §3).
+ * The line tool's point under `point`: the **fragment** under the cursor plus
+ * the anchor nearest the pointer inside that fragment (nine positions). A
+ * click on a space fragment stays on it — every fragment is a square the user
+ * can draw on (`docs/CANVAS.md` §3).
  */
 export function linePointAt(config: ProjectConfig, point: Point): LinePoint {
   return pointToLinePoint(config, clampToCanvas(point));
@@ -403,20 +390,41 @@ function wrapRows(config: ProjectConfig, item: CanvasItem): CanvasItem {
       return makeTile({ ...item, row: wrapSector(config, item.row) });
     case "line":
       return makeLine(
-        { column: item.from.column, row: wrapSector(config, item.from.row) },
-        { column: item.to.column, row: wrapSector(config, item.to.row) },
+        {
+          column: item.from.column,
+          row: wrapSector(config, item.from.row),
+          zone: item.from.zone,
+        },
+        {
+          column: item.to.column,
+          row: wrapSector(config, item.to.row),
+          zone: item.to.zone,
+        },
         item.color,
       );
     case "arc":
       return makeArc({
         ...item,
-        from: { column: item.from.column, row: wrapSector(config, item.from.row) },
-        to: { column: item.to.column, row: wrapSector(config, item.to.row) },
+        from: {
+          column: item.from.column,
+          row: wrapSector(config, item.from.row),
+          zone: item.from.zone,
+        },
+        to: {
+          column: item.to.column,
+          row: wrapSector(config, item.to.row),
+          zone: item.to.zone,
+        },
       });
     case "stroke":
       return makeStroke(
         item.points.map((point) =>
-          linePoint(point.column, wrapSector(config, point.row), point.anchor),
+          linePoint(
+            point.column,
+            wrapSector(config, point.row),
+            point.zone,
+            point.anchor,
+          ),
         ),
         item.closed ?? false,
         item.color,
@@ -563,11 +571,11 @@ export function deleteItems(
 /* Item builders shared by the tools                                   */
 /* ------------------------------------------------------------------ */
 
-/** Arc between two cells, or `null` when the pair cannot carry one. */
+/** Arc between two fragments, or `null` when the pair cannot carry one. */
 export function arcBetween(
   ctx: ToolContext,
-  from: Cell,
-  to: Cell,
+  from: FragmentPoint,
+  to: FragmentPoint,
 ): ArcItem | null {
   if (sameCell(from, to)) return null;
   if (!Arc.isSupported(from, to)) return null;

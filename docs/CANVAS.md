@@ -114,10 +114,10 @@ item, or a space fragment beside an ink one, never a `ratio = 1` special case.
 So `zone = 0` is the ink square of the cell (the old app's `isMainRect`) and
 `zone = 3` the fragment in the space-space corner — congruent with `zone = 0` at
 the equal `1:1`, the small one at every denser preset. A `TileItem` is one zone
-fragment; a `line`, `stroke` and `arc` always address **whole ink cells**
-(`Cell`, i.e. zone 0), and their tools accept a click anywhere in the cell
-(`inkAnchorAt`), so at `1:1` both the ink and the space half start a line or an
-arc.
+fragment; a `line`, `stroke` and `arc` address a **fragment** too
+(`FragmentPoint` / `LinePoint`, §3 — absent zone = the ink fragment), and their
+tools arm on the fragment under the pointer, so every square of the cell, ink or
+space, starts a line or an arc.
 
 ## 3. Items
 
@@ -130,9 +130,9 @@ recolour behaviour), on the client (`paintItems`) and on the backend
 | type | fields | key |
 | --- | --- | --- |
 | `tile` | `column`, `row`, `zone`, `shape?`, `rotation?`, `color?` | `tile:<column>:<row>:<zone>` |
-| `line` | `from`, `to` (`Cell`), `color?` | `line:<c>:<r>><c>:<r>` (cells canonical by column, then row) |
+| `line` | `from`, `to` (`FragmentPoint`), `color?` | `line:<f>><f>` (fragments canonical by column, then row, then zone) |
 | `stroke` | `points` (`LinePoint[]`), `closed?`, `color?` | `stroke:<digest>` (FNV-1a of the point list — a point list is unbounded, a key is not) |
-| `arc` | `from`, `to`, `direction`, `size`, `color?` | `arc:<c>:<r>><c>:<r>\|<direction>\|<size>` |
+| `arc` | `from`, `to` (`FragmentPoint`), `direction`, `size`, `color?` | `arc:<f>><f>\|<direction>\|<size>` |
 
 * `shape` is one of the ten `ShapeId`s (`SHAPE_IDS`), absent = `square`;
   `rotation` is quarter turns clockwise (`0…3`), absent = 0.
@@ -140,38 +140,66 @@ recolour behaviour), on the client (`paintItems`) and on the backend
   (`resolvedColor(config, color) = color ?? config.ink`), so changing
   `config.ink` later never repaints what is already on the board. Absent means
   the item was authored before v2 or edited without a colour.
+* `from` / `to` / `points` address **fragments**, not just cells: a `zone` is
+  optional and absent means zone 0, the ink square (§ below).
 * A `line` is an axis-aligned bar of ink: a legal `line` shares one row **or**
   one column; a diagonal (or a 3+-point run) is a `stroke` polyline.
   `Arc.isSupported` accepts the same row / column / 45° diagonal cases.
 
-### Line points (anchors)
+### Fragments and line points
 
-A `stroke`'s points are `LinePoint = Cell & { anchor?: InkPoint }`: the cell,
-plus where inside its **ink region** the point sits. An anchor is two fractions —
-`InkPoint = { x, y }`, each in `[0, 1]` — of the ink region's extent, **not** an
-index into a fixed palette, so the format can express free positioning without a
-version bump; the editor only produces half-multiples today.
+A **fragment** is one of the four squares a cell is divided into (§2): the ink
+square (`zone 0`) and the three space strips/squares (`1` = x-space, `2` =
+y-space, `3` = both). Every line / arc end and every stroke point addresses a
+**fragment**:
 
-* **Absent anchor = centre.** `CENTRE_ANCHOR = (0.5, 0.5)`, and the centre is
-  **never stored**: `linePoint()` drops an absent *or* centre anchor, so every
-  value, key and file written before anchors existed round-trips byte-identically.
-  `anchorOf(point)` reads a point's own anchor or the centre; `hasAnchor(point)`
-  is true only for a non-centre anchor.
+```
+FragmentPoint = Cell & { zone?: 0 | 1 | 2 | 3 }   // absent = 0 (ink)
+LinePoint     = FragmentPoint & { anchor?: InkPoint }
+```
+
+A space fragment is an ordinary square to everything that edits the board — the
+line and arc tools arm on it, its hover dot sits on it, hit-testing, marquee,
+move, duplicate and erase treat it exactly like ink. **Only rendering differs**:
+tiles paint their own fragment's box, and the line/arc geometry springs off it
+(§5).
+
+* **Zone 0 is canonical storage of nothing.** `fragmentPoint()` / `linePoint()`
+  drop an absent *or* zero zone, so every item, key and file written before
+  fragments existed round-trips byte-identically; a space zone is stored as
+  `"zone": n`, and a stored zone outside `0…3` is structural — the item is
+  rejected, never silently moved to the ink square.
+* **An anchor is relative to its own fragment.** `anchor` is two fractions
+  `InkPoint = { x, y }`, each in `[0, 1]`, of **that fragment's box** — its
+  `zoneRect` on the square grid, its `circularSlice` on the circular grid — not
+  of the cell and not of the ink square. A click on a space fragment therefore
+  stays on that space square, measured inside it, and never snaps across into
+  the ink fragment.
+* **Absent anchor = centre.** `CENTRE_ANCHOR = (0.5, 0.5)` is **never stored**:
+  `linePoint()` drops an absent or centre anchor. `anchorOf(point)` reads a
+  point's anchor or the centre; `hasAnchor(point)` is true only for a
+  non-centre anchor.
 * **The nine anchors.** The editor snaps to `ANCHOR_GRID = {0, 0.5, 1}²`,
   row-major — `(0,0) (0.5,0) (1,0) / (0,0.5) (0.5,0.5) (1,0.5) / (0,1) (0.5,1) (1,1)`
-  — the reference app's nine-cell geometry, now per point (§6 «Line rules»).
-* **Keys.** `strokeKey` digests the point list; a non-centre anchor contributes
-  `@x,y` to its point's payload (`"2:0@1,1"`), and an anchored point keys
-  differently from its centre sibling.
-* **Circular grid.** `x` is the fraction of the ink band's thickness (outwards
-  from the inner ink edge) and `y` the fraction of the whole **sector**, not of
-  the ink slice — the asymmetry exists so `(0.5, 0.5)` is exactly `cellCentre`
-  on both grids, which back-compat demands.
-* Readers **repair** an anchor instead of rejecting the item: `normalizeAnchor`
-  clamps a finite `{x, y}` into `[0, 1]`, and anything else (wrong shape, `NaN`,
-  a stored centre) becomes the cell centre — in `kuficraft-file.ts` and the
-  backend's `sanitizeItem` alike, so a document that was valid before anchors
-  existed is never rejected for carrying one.
+  — the reference app's nine-cell geometry, now measured inside the clicked
+  fragment (§6 «Line rules»).
+* **Keys.** `fragmentKey` appends `#<zone>` to a space fragment (`"2:3#1"`);
+  `strokeKey` digests the point list with that fragment key and the anchor as
+  before (`"2:0#1@1,1"`). Ink keys are exactly the pre-fragment strings; a space
+  point keys differently from the ink point in the same cell.
+* **Circular grid.** `x` is the fraction of the fragment's radial band. `y` is
+  the fraction of the **whole sector** when the point is angularly ink
+  (`zone & 2 === 0`) — the asymmetry that keeps `(0.5, 0.5)` exactly
+  `cellCentre` on both grids, which back-compat demands — and of the **space
+  slice** when the point is angularly space (`zone & 2 !== 0`), so a space point
+  is a point on its own slice.
+* Readers **split** the two failure modes: a bad zone rejects the item (it
+  decides *where* the point is), while a bad anchor is **repaired** instead of
+  rejecting it — `normalizeAnchor` clamps a finite `{x, y}` into `[0, 1]`, and
+  anything else (wrong shape, `NaN`, a stored centre) becomes the fragment
+  centre, in `kuficraft-file.ts` and the backend's `sanitizeItem` alike, so a
+  document that was valid before anchors existed is never rejected for carrying
+  one.
 
 ### Per-grid item rules
 
@@ -199,15 +227,16 @@ has no equivalent. One rule, one place (`items.ts`):
 ### Stored shape (the wire contract)
 
 `toJSON()` emits **exactly** the fields of `canvasItemValidator`
-(`convex/lib/model.ts`) and nothing else: every whole cell is copied to
-`{column, row}` and every stroke point through `plainLinePoint`, which keeps a
-non-centre `anchor` while dropping the stored centre and any foreign key beside
-the cell. Tool state holds an `Anchor` (a cell **plus** a `zone`), and
-`cellValidator` rejects the extra key — the reported `applyOps`
-`ArgumentValidationError` was an arc that shipped the tool's `Anchor` unchanged.
-The classes therefore copy their cells through `plainCell` in the constructor
-**and** in `toJSON()`; `items.test.ts` sweeps every item type (and the edit
-paths) against the validator's own field list.
+(`convex/lib/model.ts`) and nothing else: every line / arc end is copied through
+`plainFragment` (`{column, row}` for the ink fragment, `{column, row, zone}` for
+a space fragment) and every stroke point through `plainLinePoint`, which does
+the same plus keeps a non-centre `anchor` while dropping the stored centre. Tool
+state holds an `Anchor` (a cell **plus** a required `zone`), which is assignable
+to a `FragmentPoint`; the backend sanitiser applies the same canonicalisation and
+re-derives the key from the fragments, so a zone-0 end is stored
+byte-identically to a pre-fragment one. The classes therefore copy their
+fragments in the constructor **and** in `toJSON()`; `items.test.ts` sweeps every
+item type (and the edit paths) against the validator's own field list.
 
 ### Item classes (`src/lib/canvas/items.ts`)
 
@@ -274,24 +303,28 @@ Every function is deterministic and side-effect free.
   reported positions (`anchorsAlongLine`, see §6). Consecutive identical anchors
   collapse, and a fragment is always a `tile` — the pen never merges a straight
   run into a bar.
-* **`lineItems(config, points, closed, color, style?)`** — a run whose points are
-  all **centre** points — every point the pre-anchor model could make — follows
-  the reference rules unchanged: a run with **no diagonal segment** is either one
-  `line` bar in a single span, or — when `config.straightLinesAsSquares` is on
-  (default) — one square per cell along every segment, which is what the
-  reference app's straight line produced. Anything with a diagonal (including a
-  closing segment) → one `stroke` polyline; `closed` adds the closing segment.
-  `dedupeCells` drops immediate repeats (and the closing repeat), and a closed
-  tiled run paints the first cell once. An **anchored** point (§3) sits inside
-  its cell, which neither a bar nor a tile can express, so a run containing one
-  is always a stroked polyline through the anchors; it is merged to its two ends
-  only when it is open, straight, on the square grid, every point agrees on the
-  anchor and the run does not double back. A mixed-anchor run is never merged,
-  so no point a designer placed is dropped. The optional `style` carries the
-  draw style's `rounding` and `border` into the items; with rounding on, a run
-  is kept as **one** item — a `line` bar (its box corners round) or a `stroke`
-  (its turns round) — because rounding independently tiled cells would notch the
-  joins.
+* **`lineItems(config, points, closed, color, style?)`** — fragments are first
+  class. A run whose points are all **fragment centres** follows the reference
+  rules unchanged, per fragment: a run with **no diagonal segment** that spans
+  at least one cell boundary is either one `line` bar in a single span, or — when
+  `config.straightLinesAsSquares` is on (default) — one square per cell along
+  every segment, each square on the zone that was clicked (the in-between cells
+  take the target point's zone, the spread `anchorsAlongLine` uses). Anything
+  with a diagonal (including a closing segment) → one `stroke` polyline;
+  `closed` adds the closing segment. `dedupeFragments` drops immediate repeats
+  of the same **cell and zone** (and the closing repeat), and a closed tiled run
+  paints the first cell once. Two fragments of the **same** cell are two
+  positions inside it — no bar or square run can span less than a cell — so they
+  are stroked. An **anchored** point (§3) sits inside its fragment, which
+  neither a bar nor a tile can express, so a run containing one is always a
+  stroked polyline through the anchors; it is merged to its two ends only when
+  it is open, straight, on the square grid, every point agrees on the anchor
+  **and zone**, and the run does not double back. A run with mixed anchors or
+  zones is never merged, so no point a designer placed is dropped. The optional
+  `style` carries the draw style's `rounding` and `border` into the items; with
+  rounding on, a run is kept as **one** item — a `line` bar (its box corners
+  round) or a `stroke` (its turns round) — because rounding independently tiled
+  cells would notch the joins.
 * **`toOps(prev, next)`** — diffs two item lists into the backend batch
   (`remove` + `add`) around the longest common *content* prefix, so a stroke
   re-sends only the tail it touched, never the whole board.
@@ -306,8 +339,10 @@ Every function is deterministic and side-effect free.
     `width = inkUnit(config)`.
   * A stroke's path runs through each point's **anchored** position
     (`linePointPosition`). Only a **centre** end still takes the reference app's
-    half-ink nudge out to the fragment edge; an explicit anchor is drawn exactly
-    where it was placed (§3).
+    nudge out to the fragment edge; the nudge is **half of that point's own
+    fragment span** (`zoneRect` on the square grid), so a space end reaches the
+    space square's edge and an ink end is exactly the old half-ink nudge. An
+    explicit anchor is drawn exactly where it was placed (§3).
 * The board draws `visibleItems(gridType, items)` (§3): a circular board leaves
   its line/arc items out of the canvas, the overlay, the exports and the
   thumbnail.
@@ -339,23 +374,29 @@ Every function is deterministic and side-effect free.
 
 ### Arc (قوس) geometry
 
-An `Arc` is a rib between two ink cells on the same row, the same column or a 45°
-diagonal (`Arc.isSupported`). It is ported from the reference app
+An `Arc` is a rib between two **fragments** on the same row, the same column or
+a 45° diagonal (`Arc.isSupported`). It is ported from the reference app
 (`kufi.js` lines 285‑311 and its `radius()`), but derived from a **canonical**
-cell order (`from` is the lower cell by column, then row) so the picture no
-longer depends on which anchor was clicked first; the reference app's
+fragment order (`from` is the lower fragment by column, then row, then zone) so
+the picture no longer depends on which click armed the tool; the reference app's
 click-order quirk became the explicit `direction` control
 (`clockwise` / `counterclockwise`, literally the SVG sweep flag 1 / 0).
 
-* **Horizontal chord** (`from.row === to.row`): `clockwise` springs off the ink's
-  **bottom** edge and rises, `counterclockwise` off the **top** edge and falls;
-  the ends sit at the ink centre line (`half = ink/2`).
+* **Each end springs off its own fragment** (`zoneRect`), so a space end springs
+  off the space square — the two ends need only share the row / column /
+  diagonal relation on their cells, not a zone.
+* **Horizontal chord** (`from.row === to.row`): `clockwise` springs off the
+  fragment's **bottom** edge and rises, `counterclockwise` off the **top** edge
+  and falls; each end sits at its fragment's mid-width (the ink centre for ink
+  ends, the space centre for a space end).
 * **Vertical chord** (`from.column === to.column`): `clockwise` springs off the
   **left** edge and turns right, `counterclockwise` off the **right** edge.
-* **45° diagonal**: the four spring points are the two ink corners that face the
-  chord, chosen by the sweep.
+* **45° diagonal**: the four spring points are the fragments' corners that face
+  the chord, chosen by the sweep.
 * `size: "half"` → a semicircle over the chord: radius `chord/2` (or
-  `dColumn·cell + ink/2` on a diagonal), `largeArc = 0`.
+  `dColumn·cell + ink/2` on a diagonal — the board's cell pitch plus half an
+  ink, independent of the fragments' widths, so ink ends render exactly as
+  before), `largeArc = 0`.
 * `size: "threeQuarter"` → 270°: radius `chord/√2`, `largeArc = 1`.
 * A rib is a **square-grid item**: a circular board hides every `arc` (§3), so
   the class carries no polar geometry. (Earlier rounds drew a circular arc at the
@@ -372,9 +413,9 @@ name. Adding a tool = one class + one registry line.
 | --- | --- | --- | --- |
 | `select` | تحديد | `V` | click selects (shift toggles), drag on an item moves the selection (clamped to the grid), drag on empty space marquee-selects |
 | `pen` | قلم | `P` | press/drag colours the cells the pointer is moved over — one fragment per cell, and a fast drag fills the cells it flew over (`anchorsAlongLine`) |
-| `line` | خط | `L` | **square grid only** (`creates: ["line"]`). Click sequence: click A, click B… commits an open run; click the last point again ends it, click the first one closes it. A drag also works (pointer-up ends the *drag*, not the run). Every click snaps to one of the nine anchors of the cell under the cursor, and the overlay's dot shows the point the next click would store; a run with no diagonal segment is squares (`straightLinesAsSquares`, default) or one bar |
+| `line` | خط | `L` | **square grid only** (`creates: ["line"]`). Click sequence: click A, click B… commits an open run; click the last point again ends it, click the first one closes it. A drag also works (pointer-up ends the *drag*, not the run). Every click snaps to one of the nine anchors of the **fragment** under the cursor (ink or space), and the overlay's dot shows the point the next click would store; a run with no diagonal segment is squares (`straightLinesAsSquares`, default) or one bar |
 | `eraser` | ممحاة | `E` | click/drag removes whatever the pointer touches; a fast drag sweeps the cells it flew over (hidden items are never touched) |
-| `arc` | قوس | `A` | **square grid only** (`creates: ["arc"]`). Press-drag-release A→B, **or** click A then click B (clicking A again cancels) |
+| `arc` | قوس | `A` | **square grid only** (`creates: ["arc"]`). Press-drag-release A→B, **or** click A then click B (clicking the origin's cell again cancels — an arc needs two cells); each end springs off the fragment it was clicked on |
 | `hand` | يد | `H` | the one **view** tool: the pointer scrolls the canvas pane (`panScrollOffset`), `KufiTool.pans` tells the controller so, and a double click recentres the board (`centreScroll`) |
 
 * `KufiTool.creates` — the item types a tool produces. A grid that does not
@@ -428,27 +469,31 @@ the live pointer too, so a sweep that retraces itself does not brush a chord.
    (`Z` closes the path). Pointer-up ends the drag only — the tool is
    `persistent`, so the run stays alive between clicks.
 2. **Snap.** A click and a hover resolve through `linePointAt` →
-   `pointToLinePoint`: the cell under the cursor (`floor`, so a point exactly on
-   a border belongs to the higher cell) and, inside its ink region, the
-   **nearest of the nine anchors** of `ANCHOR_GRID` (§3) — per-axis rounding to
-   `{0, ½, 1}` with a tie rounding to the higher fraction, the fraction clamped
-   into the ink region, so a pointer in the cell's space strip snaps to the
-   nearest ink edge of *its own* cell. The stored point carries its anchor; the
-   format itself accepts any `[0, 1]` fraction.
+   `pointToLinePoint`: the **fragment** under the cursor (`floor`, so a point
+   exactly on a border belongs to the higher cell; the zone follows the same
+   half-open convention) and, inside that fragment's own box, the **nearest of
+   the nine anchors** of `ANCHOR_GRID` (§3) — per-axis rounding to `{0, ½, 1}`
+   with a tie rounding to the higher fraction. A pointer on a space fragment
+   snaps to an anchor *of that space square* and stores its zone; it never snaps
+   across into the ink fragment. The stored point carries its zone and anchor;
+   the format itself accepts any `[0, 1]` fraction.
 3. **The dot.** While the tool is armed (hover included — an empty run exists
    before the first click), `ToolPreview.dot` is exactly the point the next
    click would store, drawn as an open circle at that position; the preview's
    marker ring still shows the run's first point.
 4. **Repeats are allowed.** Line points are *not* deduplicated by cell: two
-   points may share a cell as long as their anchors differ (a turn inside one
-   cell), and a click on the exact first/last point finishes or closes the run
-   instead of storing a repeat. A zero-length segment (two points at the same
-   position, e.g. closing a run in one cell) is legal and draws nothing.
-5. **Merging.** A run of centre points follows the pre-anchor rules byte for
-   byte (§4 `lineItems`): squares or one bar, `dedupeCells`. Any non-centre
-   anchor makes the run a stroked polyline, merged to its two ends only when it
-   is open, straight, on the square grid, every point agrees on the anchor and
-   the run does not double back; mixed anchors are never merged.
+   points may share a cell as long as their fragment or anchor differs (a turn
+   inside one cell — including ink to space), and a click on the exact
+   first/last point finishes or closes the run instead of storing a repeat. A
+   zero-length segment (two points at the same position, e.g. closing a run in
+   one cell) is legal and draws nothing.
+5. **Merging.** A run of fragment-centre points follows the pre-anchor rules
+   byte for byte (§4 `lineItems`): squares or one bar, `dedupeFragments`; the
+   squares land on the clicked zones and the bar ends on the clicked fragments.
+   Two fragments of one cell, or any non-centre anchor, make the run a stroked
+   polyline, merged to its two ends only when it is open, straight, on the
+   square grid, every point agrees on the anchor **and zone**, and the run does
+   not double back; mixed anchors or zones are never merged.
 6. **Preview = commit.** The ghost and the click both go through `lineRun`, so
    the overlay can never show an endpoint (or a closing) the commit does not
    draw — the fix that ended the old preview/commit drift.
@@ -537,14 +582,15 @@ The hand tool pans, the wheel zooms. The maths is pure, lives in
 * Lines and arcs are **square-grid items**: their polar branches were removed
   rather than disabled (hidden is not re-drawn), and a circular board hides them
   while the document keeps them (§3).
-* Line points are anchored by **coordinates** (`anchor: {x, y}`, fractions of the
-  cell's ink region), not by an index into a nine-position palette: the format
-  accepts any fraction in `[0, 1]` while the tool produces the nine
+* Line points are anchored by **coordinates** (`anchor: {x, y}`, fractions of
+  the point's **own fragment**), not by an index into a nine-position palette:
+  the format accepts any fraction in `[0, 1]` while the tool produces the nine
   half-multiples, so free positioning needs no format change later. The centre
   is canonical storage of nothing (absent = centre *and* `linePoint` drops a
-  stored centre), which is what keeps pre-anchor documents byte-identical; on
-  the circular grid the anchor's `y` spans the whole sector rather than the ink
-  slice, a deliberate asymmetry that keeps `(0.5, 0.5)` on `cellCentre`.
+  stored centre), as is the ink zone, which is what keeps pre-anchor documents
+  byte-identical; on the circular grid the anchor's `y` spans the whole sector
+  for an ink-angular point and the space slice for a space-angular one, a
+  deliberate asymmetry that keeps `(0.5, 0.5)` on `cellCentre`.
 * The pen paints **over** what is already there: same key → replaced in place,
   which is how recolouring a fragment works.
 * The ratio axis has **no space-less preset**. The port had made the old app's
@@ -587,9 +633,12 @@ const full = renderSvg(config, items, { showGrid: config.showGrid });
 
 The engine suite (`bun run test`) covers, file by file: `geometry.test.ts`
 (frames, zone rects, slices, arc centres), `grid.test.ts` (addressing,
-round-trips, two-family grid paths, the drawn-cell tiling), `ratio.test.ts` (the
+round-trips — including every space fragment's own box — two-family grid paths,
+the drawn-cell tiling), `ratio.test.ts` (the
 §2 invariant: the four fragments tile the cell and stay non-degenerate at every
-preset, and the touch relation is identical across all `5×5` ratio pairs),
+preset, the touch relation is identical across all `5×5` ratio pairs, and a
+space fragment is a normal square — line points, tool runs and moves treat it
+exactly like ink),
 `items.test.ts`
 (item classes, keys, geometry, hit-testing, rounding / border styling, the
 stored shape against `canvasItemValidator`, the per-grid rules),
@@ -598,6 +647,6 @@ replace, `toOps`, pen/line items, hidden items surviving the diff),
 `model.test.ts` (presets, snapping, keys, signatures, style clamping),
 `render.test.ts` (markup, thumbnail budget),
 `rounding.test.ts` / `border.test.ts` (the style geometry), `kuficraft-file.test.ts`
-(v2 round-trip + v1 upgrade), plus the backend `convex/**/*.test.ts` suites and
+(v2 round-trip — fragment zones included — + v1 upgrade), plus the backend `convex/**/*.test.ts` suites and
 the editor's `tools.test.ts` /
 `interaction.test.ts` / `shortcuts.test.ts`.

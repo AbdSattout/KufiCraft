@@ -8,6 +8,7 @@ import {
   arcKey,
   cellSize,
   lineKey,
+  linePoint,
   maxGridIndex,
   tileKey,
 } from "@/lib/canvas/model";
@@ -42,11 +43,11 @@ import {
   duplicateItems,
   hitTest,
   hitsItem,
-  inkAnchorAt,
   isProjectId,
   itemBounds,
   itemSignature,
   itemsEqual,
+  linePointAt,
   linePreview,
   lineRun,
   marqueeSelection,
@@ -166,23 +167,29 @@ describe("anchoring", () => {
     });
   });
 
-  it("snaps the line / arc tools to the ink square (always zone 0)", () => {
-    expect(inkAnchorAt(square, { x: 2, y: 2 })).toEqual({
-      column: 0,
-      row: 0,
-      zone: 0,
-    });
-    // A click in the space corner still answers with the cell's ink square.
-    expect(inkAnchorAt(square, { x: 8, y: 8 })).toEqual({
-      column: 0,
-      row: 0,
-      zone: 0,
-    });
-    expect(inkAnchorAt(square, { x: 25, y: 5 })).toEqual({
-      column: 2,
-      row: 0,
-      zone: 0,
-    });
+  it("puts a line point on the fragment that was clicked", () => {
+    const base = cellSize(square);
+    const ink = inkUnit(square);
+    const space = base - ink;
+    // Ink quadrant of cell (0, 0): the ink square, as every pre-fragment point.
+    expect(linePointAt(square, { x: ink / 2, y: ink / 2 })).toEqual(
+      linePoint(0, 0, undefined, { x: 0.5, y: 0.5 }),
+    );
+    // Space corner: the point stays on *that* space square — it must not snap
+    // across into the ink fragment; its fractions are the space square's own.
+    expect(
+      linePointAt(square, {
+        x: ink + space / 2,
+        y: ink + space / 2,
+      }),
+    ).toEqual(linePoint(0, 0, 3, { x: 0.5, y: 0.5 }));
+    // A space strip along one axis only.
+    expect(
+      linePointAt(square, {
+        x: 2 * base + ink + space / 2,
+        y: ink / 2,
+      }),
+    ).toEqual(linePoint(2, 0, 1, { x: 0.5, y: 0.5 }));
   });
 });
 
@@ -311,6 +318,24 @@ describe("marquee selection", () => {
     expect(keys).toEqual([tileKey(0, 0, 0), tileKey(5, 5, 0)]);
   });
 
+  it("selects a space fragment by its own square", () => {
+    const space = tile(2, 0, 3);
+    const ink = tile(0, 0, 0);
+    const side = tile(2, 0, 1);
+    // A box strictly inside the space square: it meets neither the ink square
+    // of another cell nor the same cell's x-space strip (a shared edge counts
+    // as touched, and those strips share one).
+    const bounds = itemBounds(square, space);
+    expect(
+      marqueeSelection(square, [ink, space, side], {
+        x: bounds.x + 1,
+        y: bounds.y + 1,
+        w: bounds.w - 2,
+        h: bounds.h - 2,
+      }),
+    ).toEqual([space.key]);
+  });
+
   it("leaves the items the grid hides out of the selection", () => {
     const line = makeLine({ column: 0, row: 1 }, { column: 4, row: 1 });
     const board = [line, tile(0, 0), tile(1, 0)];
@@ -372,6 +397,13 @@ describe("selection operations", () => {
     expect(moved.some((item) => item.key === tileKey(3, 3, 0))).toBe(true);
     // Untouched items keep their identity.
     expect(moved.some((item) => item === items[2])).toBe(true);
+  });
+
+  it("moves a space fragment without changing its zone", () => {
+    const space = tile(3, 4, 2);
+    expect(moveItems(square, [space], [space.key], 1, 1)).toEqual([
+      tile(4, 5, 2),
+    ]);
   });
 
   it("moves the listed items in their original order", () => {
@@ -691,17 +723,19 @@ describe("the equal 1:1 cell", () => {
     });
   });
 
-  it("anchors the ink tools from either half — the two look alike there", () => {
-    expect(inkAnchorAt(equal, { x: 2, y: 2 })).toEqual({
-      column: 0,
-      row: 0,
-      zone: 0,
-    });
-    expect(inkAnchorAt(equal, { x: 8, y: 8 })).toEqual({
-      column: 0,
-      row: 0,
-      zone: 0,
-    });
+  it("gives each quadrant its own line point — no snap into the ink half", () => {
+    expect(linePointAt(equal, { x: 2, y: 2 })).toEqual(
+      linePoint(0, 0, undefined, { x: 0.5, y: 0.5 }),
+    );
+    expect(linePointAt(equal, { x: 8, y: 2 })).toEqual(
+      linePoint(0, 0, 1, { x: 0.5, y: 0.5 }),
+    );
+    expect(linePointAt(equal, { x: 2, y: 8 })).toEqual(
+      linePoint(0, 0, 2, { x: 0.5, y: 0.5 }),
+    );
+    expect(linePointAt(equal, { x: 8, y: 8 })).toEqual(
+      linePoint(0, 0, 3, { x: 0.5, y: 0.5 }),
+    );
   });
 
   it("hits only the quadrant a tile actually covers", () => {

@@ -20,10 +20,12 @@
 
 import {
   VIEWBOX_SIZE,
+  anchorOf,
   cellSize,
   circularAngularUnit,
   circularSectors,
   linePoint,
+  zoneOf,
 } from "./model";
 import type { Anchor, Cell, LinePoint, ProjectConfig, Zone } from "./model";
 import {
@@ -138,69 +140,75 @@ export function isSameAxis(a: Cell, b: Cell): boolean {
 /* ------------------------------------------------------------------ */
 
 /**
- * Position of a line point: the ink origin of its **drawn** cell
- * (`cellSize(config)`, §1) plus `anchor · ink` on each axis. A point without an
- * anchor is `cellCentre` — literally the same value, so a document written
- * before anchors existed renders identically.
+ * Position of a line point: its anchor inside **its own fragment** —
+ * `docs/CANVAS.md` §3. The ink fragment (zone 0) maps onto the cell's ink
+ * square, exactly where every pre-fragment point drew; a space fragment maps
+ * onto its own space square, so a point placed on a space fragment stays on
+ * it at every ratio.
  *
- * Square grid: `x · ink` across, `y · ink` down from the ink square's origin.
- * Circular grid: `x · ink` outwards from the inner ink edge and `y · sector`
- * from the sector's start — the angular fraction spans the whole **sector**,
- * not the ink slice, which is what puts `(0.5, 0.5)` on the sector's mid-angle
- * and so exactly on `cellCentre`.
+ * Square grid: the fragment's `zoneRect`. Circular grid: the fragment's
+ * annular slice — `x` runs across the fragment's radial span, and `y` across
+ * the whole **sector** for an ink-angular point (the pre-fragment rule:
+ * `(0.5, 0.5)` is exactly `cellCentre`, which back-compat pins) and across the
+ * space slice for a space-angular point, so a space point also stays on its
+ * own slice. A point without an anchor draws at its fragment's centre —
+ * `cellCentre` for the ink fragment.
  */
 export function linePointPosition(config: ProjectConfig, point: LinePoint): Point {
-  const anchor = point.anchor;
-  if (anchor === undefined) return cellCentre(config, point);
-  const base = cellSize(config);
-  const ink = inkUnit(config);
+  const anchor = anchorOf(point);
+  const zone = zoneOf(point);
   if (config.gridType === "circular") {
-    const radius = point.column * base + anchor.x * ink;
-    const angle = (point.row + anchor.y) * circularAngularUnit(config);
+    const slice = circularSlice(config, point.column, point.row, zone);
+    const radius = slice.r1 + anchor.x * (slice.r2 - slice.r1);
+    const angle =
+      zone & 2
+        ? slice.a1 + anchor.y * (slice.a2 - slice.a1)
+        : (point.row + anchor.y) * circularAngularUnit(config);
     return polar(CENTER, CENTER, radius, angle);
   }
+  const box = zoneRect(config, point.column, point.row, zone);
   return {
-    x: point.column * base + anchor.x * ink,
-    y: point.row * base + anchor.y * ink,
+    x: box.x + anchor.x * box.w,
+    y: box.y + anchor.y * box.h,
   };
 }
 
 /**
- * The line tool's point under a pointer: the cell under the cursor (`floor`,
- * so a point exactly on a border belongs to the higher cell) and the anchor
- * nearest the pointer inside that cell's ink region, snapped to the nine
- * `ANCHOR_GRID` positions. The ink fraction is clamped to `[0, 1]`, so a
- * pointer in the cell's space strip lands on the nearest ink edge — the cell
- * under the cursor always wins.
+ * The line tool's point under a pointer: the **fragment** under the cursor
+ * (`pointToAnchor`) plus the anchor nearest the pointer inside that fragment,
+ * snapped to the nine `ANCHOR_GRID` positions. Each axis is measured inside
+ * the fragment's own box and the fraction is clamped to `[0, 1]`, so a click
+ * on a space fragment lands on that space fragment — never on the cell's ink
+ * square (docs/CANVAS.md §3).
  */
 export function pointToLinePoint(config: ProjectConfig, point: Point): LinePoint {
-  const base = cellSize(config);
-  const ink = inkUnit(config);
+  const target = pointToAnchor(config, point);
+  const zone = target.zone;
   if (config.gridType === "circular") {
     const dx = point.x - CENTER;
     const dy = point.y - CENTER;
     const radius = Math.hypot(dx, dy);
-    const column = Math.floor(radius / base);
     const angle = normalizeAngle(Math.atan2(dy, dx));
     const unit = circularAngularUnit(config);
-    const row = Math.min(Math.floor(angle / unit), circularSectors(config) - 1);
-    return linePoint(column, row, {
-      x: anchorFraction(radius - column * base, ink),
-      y: anchorFraction(angle - row * unit, unit),
+    const slice = circularSlice(config, target.column, target.row, zone);
+    return linePoint(target.column, target.row, zone, {
+      x: anchorFraction(radius - slice.r1, slice.r2 - slice.r1),
+      y: zone & 2
+        ? anchorFraction(angle - slice.a1, slice.a2 - slice.a1)
+        : anchorFraction(angle - target.row * unit, unit),
     });
   }
-  const column = Math.floor(point.x / base);
-  const row = Math.floor(point.y / base);
-  return linePoint(column, row, {
-    x: anchorFraction(point.x - column * base, ink),
-    y: anchorFraction(point.y - row * base, ink),
+  const box = zoneRect(config, target.column, target.row, zone);
+  return linePoint(target.column, target.row, zone, {
+    x: anchorFraction(point.x - box.x, box.w),
+    y: anchorFraction(point.y - box.y, box.h),
   });
 }
 
 /**
  * `local / span` snapped to the nearest of `{0, ½, 1}` and clamped into the
- * ink region: a tie (`¼`, `¾` of the extent) rounds outwards, to the anchor
- * after it. Degenerate input (a vanished ink region) snaps to the centre.
+ * fragment: a tie (`¼`, `¾` of the extent) rounds outwards, to the anchor
+ * after it. Degenerate input (a vanished fragment) snaps to the centre.
  */
 function anchorFraction(local: number, span: number): number {
   if (!(span > 0) || !Number.isFinite(local)) return 0.5;

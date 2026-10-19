@@ -52,7 +52,7 @@ import {
   slicePath,
   zoneRect,
 } from "@/lib/canvas/geometry";
-import type { Point } from "@/lib/canvas/geometry";
+import type { Point, Rect } from "@/lib/canvas/geometry";
 import {
   Arc,
   Line,
@@ -156,6 +156,13 @@ function endpoints(path: string): { start: Point; end: Point } {
 
 function expectPointNear(actual: Point, expected: Point, eps: number): void {
   expect(Math.hypot(actual.x - expected.x, actual.y - expected.y)).toBeLessThanOrEqual(eps);
+}
+
+function expectRectNear(actual: Rect, expected: Rect): void {
+  expect(actual.x).toBeCloseTo(expected.x, 12);
+  expect(actual.y).toBeCloseTo(expected.y, 12);
+  expect(actual.w).toBeCloseTo(expected.w, 12);
+  expect(actual.h).toBeCloseTo(expected.h, 12);
 }
 
 /* ------------------------------------------------------------------ */
@@ -913,18 +920,181 @@ function expectStoredShape(item: CanvasItem): void {
   const keys = Object.keys(item);
   expect(keys.filter((key) => !allowed.includes(key))).toEqual([]);
   expect(required.filter((key) => !keys.includes(key))).toEqual([]);
-  // Whole cells are exactly `{column, row}` — `cellValidator` rejects any
-  // other key on the same wire value.
-  const cells =
+  // A fragment is exactly `{column, row}` for the ink fragment (zone 0 is
+  // canonical storage of nothing) and `{column, row, zone}` for a space
+  // fragment — `fragmentValidator`/`linePointValidator` accept exactly those.
+  const fragments =
     item.type === "line" || item.type === "arc"
       ? [item.from, item.to]
       : item.type === "stroke"
         ? item.points
         : [];
-  for (const cell of cells) {
-    expect(Object.keys(cell).sort()).toEqual(["column", "row"]);
+  for (const fragment of fragments) {
+    const keys = Object.keys(fragment).sort();
+    expect(keys).toEqual(
+      (fragment.zone ?? 0) === 0
+        ? ["column", "row"]
+        : ["column", "row", "zone"],
+    );
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* fragments                                                           */
+/* ------------------------------------------------------------------ */
+
+describe("fragment geometry", () => {
+  it("draws a bar over the fragments its ends address", () => {
+    const base = cellSize(SQUARE);
+    const ink = inkUnit(SQUARE);
+    // Horizontal run of two x-space fragments: the bar is that stripe, from
+    // the first space square's start to the second's end, ink thick.
+    expectRectNear(
+      new Line({
+        from: { column: 1, row: 3, zone: 1 },
+        to: { column: 3, row: 3, zone: 1 },
+      }).bar(SQUARE),
+      { x: base + ink, y: 3 * base, w: 3 * base - ink, h: ink },
+    );
+    // Vertical run of y-space fragments: the same rule on the other axis.
+    expectRectNear(
+      new Line({
+        from: { column: 2, row: 1, zone: 2 },
+        to: { column: 2, row: 3, zone: 2 },
+      }).bar(SQUARE),
+      { x: 2 * base, y: base + ink, w: ink, h: 3 * base - ink },
+    );
+    // Ink ends are exactly the pre-fragment bar.
+    expectRectNear(
+      new Line({
+        from: { column: 1, row: 1 },
+        to: { column: 4, row: 1 },
+      }).bar(SQUARE),
+      { x: base, y: base, w: 3 * base + ink, h: ink },
+    );
+  });
+
+  it("nudges a stroke's centre ends to their own fragment edges", () => {
+    const base = cellSize(SQUARE);
+    const ink = inkUnit(SQUARE);
+    // Two centre points on the x-space stripe: each end reaches the edge of
+    // the space square it sits on, not the ink square's edge.
+    expect(
+      new Stroke({
+        points: [
+          { column: 1, row: 0, zone: 1 },
+          { column: 2, row: 0, zone: 1 },
+        ],
+      }).anchorPoints(SQUARE),
+    ).toEqual([
+      { x: base + ink, y: ink / 2 },
+      { x: 3 * base, y: ink / 2 },
+    ]);
+    // …and the ink stripe keeps the pre-fragment half-ink nudge.
+    expect(
+      new Stroke({
+        points: [
+          { column: 1, row: 0 },
+          { column: 2, row: 0 },
+        ],
+      }).anchorPoints(SQUARE),
+    ).toEqual([
+      { x: base, y: ink / 2 },
+      { x: 2 * base + ink, y: ink / 2 },
+    ]);
+    // The fragment width, not the ink width, is what the end reaches: at a
+    // denser preset the two differ.
+    const dense = makeConfig({ ratio: 4 / 5 });
+    const denseSpace = cellSize(dense) - inkUnit(dense);
+    const nudged = new Stroke({
+      points: [
+        { column: 1, row: 0, zone: 1 },
+        { column: 2, row: 0, zone: 1 },
+      ],
+    }).anchorPoints(dense);
+    expect(nudged[0].x).toBeCloseTo(cellSize(dense) + inkUnit(dense), 12);
+    expect(nudged[1].x).toBeCloseTo(
+      2 * cellSize(dense) + inkUnit(dense) + denseSpace,
+      12,
+    );
+  });
+
+  it("springs an arc off the space fragments its ends address", () => {
+    const base = cellSize(SQUARE);
+    const ink = inkUnit(SQUARE);
+    const space = base - ink;
+    // Horizontal rib through the x-space stripe: the springs sit at the
+    // space squares' mid-width, on the y-ink edge (clockwise → bottom).
+    const geometry = new Arc({
+      from: { column: 0, row: 0, zone: 1 },
+      to: { column: 2, row: 0, zone: 1 },
+      direction: "clockwise",
+      size: "half",
+    }).geometry(SQUARE);
+    expect(geometry.start).toEqual({ x: ink + space / 2, y: ink });
+    expect(geometry.end).toEqual({
+      x: 2 * base + ink + space / 2,
+      y: ink,
+    });
+    // Counter-clockwise springs off the top of the same space squares.
+    expect(
+      new Arc({
+        from: { column: 0, row: 0, zone: 1 },
+        to: { column: 2, row: 0, zone: 1 },
+        direction: "counterclockwise",
+        size: "half",
+      }).geometry(SQUARE).start,
+    ).toEqual({ x: ink + space / 2, y: 0 });
+  });
+
+  it("keeps every fragment when an item moves", () => {
+    const zoneEnd = { column: 1, row: 1, zone: 2 as Zone };
+    const otherEnd = { column: 1, row: 3, zone: 2 as Zone };
+    const lineItem = moveItem(
+      new Line({ from: zoneEnd, to: otherEnd }).toJSON(),
+      2,
+      1,
+    );
+    expect(lineItem).toMatchObject({
+      from: { column: 3, row: 2, zone: 2 },
+      to: { column: 3, row: 4, zone: 2 },
+      key: lineKey(
+        { column: 3, row: 2, zone: 2 },
+        { column: 3, row: 4, zone: 2 },
+      ),
+    });
+    const arcItem = moveItem(
+      new Arc({
+        from: zoneEnd,
+        to: otherEnd,
+        direction: "clockwise",
+        size: "half",
+      }).toJSON(),
+      2,
+      1,
+    );
+    expect(arcItem).toMatchObject({
+      from: { column: 3, row: 2, zone: 2 },
+      to: { column: 3, row: 4, zone: 2 },
+    });
+    const strokeItem = moveItem(
+      new Stroke({
+        points: [
+          { column: 0, row: 0 },
+          { column: 2, row: 0, zone: 3, anchor: { x: 0.5, y: 0 } },
+        ],
+      }).toJSON(),
+      1,
+      1,
+    );
+    expect(strokeItem).toMatchObject({
+      points: [
+        { column: 1, row: 1 },
+        { column: 3, row: 1, zone: 3, anchor: { x: 0.5, y: 0 } },
+      ],
+    });
+  });
+});
 
 describe("stored shape", () => {
   it("emits exactly the validator's fields for every item type", () => {
@@ -950,8 +1120,8 @@ describe("stored shape", () => {
         size: "half",
         color: "#9f1239",
       }),
-      // The reported repro: the arc tool held `inkAnchorAt` results (an
-      // `Anchor` = cell + zone) and `toJSON` shipped the zone to Convex.
+      // The tool hands the class `Anchor`s (a cell plus a zone); the class
+      // canonicalises the ink zone away and keeps a space zone.
       makeLine(anchor, other),
       makeArc({ from: anchor, to: other, direction: "clockwise", size: "half" }),
     ];
@@ -980,9 +1150,11 @@ describe("stored shape", () => {
     }
   });
 
-  it("copies tool-shaped anchors to plain cells", () => {
+  it("copies tool-shaped anchors to plain fragments", () => {
     // A tool hands the class its `Anchor` objects; the class must copy the
-    // two fields it stores and drop the rest (docs/CANVAS.md §3).
+    // fields it stores and drop the rest (docs/CANVAS.md §3). The ink zone is
+    // canonical storage of nothing, so it is dropped; a space fragment keeps
+    // its zone — that is what makes the end stay on the square clicked.
     const anchor: Anchor = { column: 3, row: 33, zone: 0 };
     const other: Anchor = { column: 3, row: 35, zone: 2 };
     const drawn = new Arc({
@@ -993,9 +1165,14 @@ describe("stored shape", () => {
     });
     expect(drawn.toJSON()).toEqual({
       type: "arc",
-      key: arcKey({ column: 3, row: 33 }, { column: 3, row: 35 }, "clockwise", "half"),
+      key: arcKey(
+        { column: 3, row: 33 },
+        { column: 3, row: 35, zone: 2 },
+        "clockwise",
+        "half",
+      ),
       from: { column: 3, row: 33 },
-      to: { column: 3, row: 35 },
+      to: { column: 3, row: 35, zone: 2 },
       direction: "clockwise",
       size: "half",
     });
@@ -1003,9 +1180,9 @@ describe("stored shape", () => {
     expect(
       new Line({ from: anchor, to: other }).toJSON().from,
     ).toEqual({ column: 3, row: 33 });
-    for (const point of new Stroke({ points: [anchor, other] }).toJSON().points) {
-      expect(Object.keys(point)).toEqual(["column", "row"]);
-    }
+    const points = new Stroke({ points: [anchor, other] }).toJSON().points;
+    expect(Object.keys(points[0])).toEqual(["column", "row"]);
+    expect(points[1]).toEqual({ column: 3, row: 35, zone: 2 });
   });
 });
 
