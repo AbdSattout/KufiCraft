@@ -6,7 +6,7 @@
  * dashboard stores (no grid, fixed light background, reduced precision, and
  * guaranteed to stay within `MAX_THUMBNAIL_LENGTH`).
  *
- * Every path comes from the item classes (`items.ts` → `KufiItem.render`), so
+ * Every path comes from the item classes (`items.ts` → `KufiItem.draw`), so
  * the string renderer and the React canvas can never drift apart.
  */
 
@@ -103,19 +103,16 @@ function renderSvgString(
         : roundPathNumbers(rendered.path, parts.precision);
     const color = escapeXml(itemOf(item).resolvedColor(config));
     const key = parts.includeKeys ? ` data-k="${escapeXml(item.key)}"` : "";
-    // A border is one translated duplicate of the same path per enabled side,
-    // painted first so the original ink covers all but the border's width.
-    for (const copy of rendered.borders ?? []) {
-      const transform = ` transform="translate(${num(copy.dx)} ${num(copy.dy)})"`;
-      if (rendered.mode === "stroke") {
-        out.push(
-          `<path${key} d="${d}"${transform} fill="none" stroke="${escapeXml(copy.color)}"` +
-            ` stroke-width="${num(rendered.width)}"` +
-            ` stroke-linecap="butt" stroke-linejoin="miter"/>`,
-        );
-      } else {
-        out.push(`<path${key} d="${d}"${transform} fill="${escapeXml(copy.color)}"/>`);
-      }
+    // The border is the item's own path stroked once, before the ink: a wider
+    // copy of a stroked item, or a native outline under a filled one. The fill
+    // (or the ink stroke) covers the inner half, leaving exactly the border
+    // band outside.
+    if (rendered.border !== undefined) {
+      out.push(
+        `<path${key} d="${d}" fill="none" stroke="${escapeXml(rendered.border.color)}"` +
+          ` stroke-width="${num(rendered.border.width)}"` +
+          ` stroke-linecap="butt" stroke-linejoin="miter"/>`,
+      );
     }
     if (rendered.mode === "stroke") {
       // Butt caps and mitre joins: a rib ends flush with the ink edge, exactly

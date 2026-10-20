@@ -807,29 +807,64 @@ describe("rounding / border", () => {
     });
   });
 
-  it("duplicates in draw(), while render() stays the item's own paint", () => {
+  it("adds one border paint in draw(), while render() stays the item's own paint", () => {
     const subject = parseItem(
       makeTile({ column: 0, row: 0, zone: 0, border: BORDER }),
     );
     const rendered = subject.render(SQUARE);
-    expect(rendered.borders).toBeUndefined();
+    expect(rendered.border).toBeUndefined();
 
     const drawn = subject.draw(SQUARE);
     expect(drawn.path).toBe(rendered.path);
-    // One copy per enabled side, translated by the width; the path is the
-    // item's own path, so both renderers can paint the same duplicate.
-    expect(drawn.borders).toEqual([
-      { dx: 0, dy: -3, color: "#7c2d12" },
-      { dx: -3, dy: 0, color: "#7c2d12" },
-    ]);
     expect(drawn.mode).toBe("fill");
+    expect(drawn.width).toBe(0);
+    // The tile is filled: its border is a native stroke of the same path,
+    // 2 × width, painted before the fill.
+    expect(drawn.border).toEqual({ color: "#7c2d12", width: 6 });
+    expect(drawn).not.toHaveProperty("borders");
+    expect(drawn).not.toHaveProperty("transform");
 
     // Without a border `draw` paints exactly `render`.
     const plain = parseItem(makeTile({ column: 0, row: 0, zone: 0 }));
     expect(plain.draw(SQUARE)).toEqual(plain.render(SQUARE));
   });
 
-  it("falls back to the resolved item colour for the duplicate", () => {
+  it("strokes the same path wider for stroked items", () => {
+    const strokeBorder = { sides: BORDER_TOP, width: 2 };
+    const subjects = [
+      stroke([
+        { column: 0, row: 0 },
+        { column: 2, row: 2 },
+      ]),
+      arc({ column: 0, row: 6 }, { column: 4, row: 6 }),
+      line({ column: 0, row: 3 }, { column: 2, row: 5 }),
+    ];
+    for (const item of subjects) {
+      const bordered = styleItem(item, { border: strokeBorder });
+      const rendered = itemRender(SQUARE, bordered);
+      const drawn = parseItem(bordered).draw(SQUARE);
+      expect(rendered.mode).toBe("stroke");
+      expect(drawn.path).toBe(rendered.path);
+      expect(drawn.mode).toBe("stroke");
+      expect(drawn.width).toBe(rendered.width);
+      expect(drawn.border).toEqual({
+        color: SQUARE.ink,
+        width: inkUnit(SQUARE) + 4,
+      });
+      expect(drawn).not.toHaveProperty("borders");
+    }
+
+    // A line bar is filled, so its native outline is 2 × width, like a tile.
+    const bar = styleItem(line({ column: 0, row: 1 }, { column: 4, row: 1 }), {
+      border: strokeBorder,
+    });
+    expect(parseItem(bar).draw(SQUARE).border).toEqual({
+      color: SQUARE.ink,
+      width: 4,
+    });
+  });
+
+  it("falls back to the resolved item colour for the border", () => {
     const subject = parseItem(
       makeTile({
         column: 0,
@@ -839,7 +874,7 @@ describe("rounding / border", () => {
         border: { sides: BORDER_TOP, width: 2 },
       }),
     );
-    expect(subject.draw(SQUARE).borders?.[0].color).toBe("#abcdef");
+    expect(subject.draw(SQUARE).border?.color).toBe("#abcdef");
     expect(
       parseItem(
         makeTile({
@@ -848,16 +883,32 @@ describe("rounding / border", () => {
           zone: 0,
           border: { sides: BORDER_TOP, width: 2 },
         }),
-      ).draw(INKED).borders?.[0].color,
+      ).draw(INKED).border?.color,
     ).toBe("#123456");
   });
 
+  it("keeps a legacy one-side mask and renders it all around", () => {
+    const legacy = styleItem(tile(1, 2, 0), {
+      border: { sides: BORDER_TOP, width: 3 },
+    });
+    expect(legacy).toMatchObject({ border: { sides: BORDER_TOP, width: 3 } });
+    // There is no side to translate: the same border paint covers the whole
+    // path, whichever legacy bit is stored.
+    expect(parseItem(legacy).draw(SQUARE).border).toEqual({
+      color: SQUARE.ink,
+      width: 6,
+    });
+  });
+
   it("canonicalises a style patch before it reaches an item", () => {
-    // A width-only border patch with no side on is the off state: it clears
-    // instead of storing an invisible `sides: 0` outline.
+    // A zero mask is the off state: it clears instead of storing an invisible
+    // outline.
     const bordered = styleItem(tile(1, 2, 0), { border: BORDER });
     expect(styleItem(bordered, { border: { sides: 0, width: 5 } })).toEqual(
       tile(1, 2, 0),
+    );
+    expect(parseItem(styleItem(bordered, { border: { sides: 0, width: 5 } })).draw(SQUARE)).not.toHaveProperty(
+      "border",
     );
     // The same clamps the backend applies: radius 0.9 → 0.5, width 99 → 12.
     expect(
@@ -869,27 +920,13 @@ describe("rounding / border", () => {
       rounding: { radius: 0.5, corners: CORNER_ALL },
       border: { sides: BORDER_TOP, width: 12 },
     });
-  });
-
-  it("duplicates a run, a polyline and an arc with the same path", () => {
-    const border = { sides: BORDER_TOP | BORDER_LEFT, width: 2 };
-    const items = [
-      line({ column: 0, row: 1 }, { column: 4, row: 1 }),
-      stroke([
-        { column: 0, row: 0 },
-        { column: 2, row: 2 },
-      ]),
-      arc({ column: 0, row: 6 }, { column: 4, row: 6 }),
-    ];
-    for (const item of items) {
-      const bordered = styleItem(item, { border });
-      const drawn = parseItem(bordered).draw(SQUARE);
-      expect(drawn.path).toBe(itemRender(SQUARE, bordered).path);
-      expect(drawn.borders).toEqual([
-        { dx: 0, dy: -2, color: SQUARE.ink },
-        { dx: -2, dy: 0, color: SQUARE.ink },
-      ]);
-    }
+    expect(
+      parseItem(
+        styleItem(tile(0, 0, 0), {
+          border: { sides: BORDER_TOP, width: 99, color: "" },
+        }),
+      ).draw(SQUARE).border?.width,
+    ).toBe(2 * 12);
   });
 
   it("rounds a line bar and a polyline's turns", () => {

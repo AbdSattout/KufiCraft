@@ -159,7 +159,7 @@ describe("ratioLabel", () => {
 });
 
 describe("rounding / border model", () => {
-  it("names corners and sides physically, with a full mask of 15", () => {
+  it("keeps the legacy border mask bits and a full mask of 15", () => {
     expect(CORNER_ALL).toBe(15);
     expect(BORDER_ALL).toBe(15);
     expect(CORNER_TOP_LEFT).toBe(1);
@@ -184,17 +184,24 @@ describe("rounding / border model", () => {
     ).toEqual({ radius: 0.25, corners: CORNER_ALL });
   });
 
-  it("clamps a border and drops the empty state", () => {
+  it("clamps a border and keeps the legacy mask as stored", () => {
     expect(clampBorderWidth(0)).toBe(MIN_BORDER_WIDTH);
     expect(clampBorderWidth(99)).toBe(MAX_BORDER_WIDTH);
     expect(clampBorderWidth(Number.NaN)).toBe(DEFAULT_BORDER_WIDTH);
     expect(sanitizeBorder({ sides: 0, width: 2 })).toBeUndefined();
+    expect(sanitizeBorder({ sides: Number.NaN, width: 2 })).toBeUndefined();
     expect(
       sanitizeBorder({ sides: BORDER_TOP | 16, width: 0, color: "" }),
     ).toEqual({ sides: BORDER_TOP, width: MIN_BORDER_WIDTH });
     expect(
       sanitizeBorder({ sides: BORDER_ALL, width: 2, color: "#ff0000" }),
     ).toEqual({ sides: BORDER_ALL, width: 2, color: "#ff0000" });
+    // Every non-zero mask is kept exactly as stored: it means "on" now, and
+    // rewriting it would change a legacy document on read.
+    expect(sanitizeBorder({ sides: BORDER_LEFT, width: 2 })).toEqual({
+      sides: BORDER_LEFT,
+      width: 2,
+    });
 
     const long = `#${"a".repeat(MAX_COLOR_LENGTH)}`;
     expect(

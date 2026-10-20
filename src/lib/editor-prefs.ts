@@ -188,13 +188,14 @@ function roundingPref(value: unknown): ItemRounding {
   return { radius, corners };
 }
 
-/** Border from prefs: the side mask limited to the four sides, width clamped. */
+/** Border from prefs: any non-zero legacy mask becomes the all-around mask. */
 function borderPref(value: unknown): ItemBorder {
   const record = isRecord(value) ? value : {};
-  const sides =
+  const rawSides =
     typeof record.sides === "number" && Number.isFinite(record.sides)
-      ? Math.trunc(record.sides) & BORDER_ALL
+      ? record.sides
       : DEFAULT_EDITOR_PREFS.border.sides;
+  const sides = (Math.trunc(rawSides) & BORDER_ALL) === 0 ? 0 : BORDER_ALL;
   const width =
     typeof record.width === "number" && Number.isFinite(record.width)
       ? Math.min(MAX_BORDER_WIDTH, Math.max(MIN_BORDER_WIDTH, record.width))

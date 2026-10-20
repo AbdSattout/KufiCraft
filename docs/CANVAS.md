@@ -268,7 +268,7 @@ which owns the geometry for that item and nothing else:
 | `key` | the identity above, derived from the geometry in the constructor |
 | `type` | the discriminant (`"tile" \| "line" \| "stroke" \| "arc"`) |
 | `render(config)` | `Rendered = { path, mode: "fill" \| "stroke", width }` |
-| `draw(config)` | `render` plus `borders`: one translated duplicate per enabled border side |
+| `draw(config)` | `render` plus one optional border paint: a wider stroke of the same path |
 | `bounds(config)` / `contains(config, point)` | hit-testing and marquee geometry |
 | `cellRange()` | the cell box the item occupies (move/duplicate maths) |
 | `moved(dColumn, dRow)` / `withColor(color)` | copy-on-write edits |
@@ -307,7 +307,7 @@ and export.
 | `grid.ts` | `pointToCell`, `pointToAnchor` → `Anchor`, `pointToLinePoint` → `LinePoint`, `pointToArcPoint` → `LinePoint` (the centre kept), `linePointPosition`, `anchorToCell`, `cellCentre`, `isSameAxis`, `runOf(cells)` → `Run`, `cellsBetween`, `gridPaths` → `{ cellBorders, inkLines }` |
 | `shapes.ts` | `KufiShape` + the ten shapes (`shapeById`, `shapeLabel`, `shapePath`, `shapeOrderIndex`, `SHAPE_ORDER`); the **same** renderer draws the canvas fragment and the toolbar icon (`tileIconPath`) |
 | `rounding.ts` | `roundingRadius`, `rotateCornerMask`, `hasRounding`, `roundCorners` (per-corner rounding generated from a shape's own commands) |
-| `border.ts` | `borderCopies` (one translated duplicate of the item's shape per enabled border side) |
+| `border.ts` | `borderPaint` (one wider stroke of the item's own path, colour + stroke width) |
 | `items.ts` | the item classes and factories above, `itemRender`, `itemColor`, `itemBounds`, `itemContains`, `itemCellRange`, `tileIconPath`, `itemsBounds`, `itemIntersectsRect`, the per-grid rules (`isItemTypeAllowed`, `isItemAllowed`, `visibleItems`) |
 | `ops.ts` | `addItems`, `removeItems`, `paintItems`, `replaceItems`, `toOps(prev, next)` → backend batch, `penItems`, `lineItems` |
 | `render.ts` | `renderSvg(config, items, opts?)` → standalone SVG **string**, `renderThumbnail(config, items)` → compact string |
@@ -351,7 +351,8 @@ Every function is deterministic and side-effect free.
 ## 5. Rendering contract
 
 * Every item renders through its class: `item.render(config)` →
-  `{ path, mode, width }`.
+  `{ path, mode, width }`; `item.draw(config)` adds the border paint below and
+  is what renderers call.
   * `mode: "fill"` → `<path d fill={itemColor}>` (tiles, straight lines).
   * `mode: "stroke"` → `<path d fill="none" stroke={itemColor}
     stroke-width={width}>` (polylines, arcs, diagonal `line` fallbacks) with
@@ -367,15 +368,25 @@ Every function is deterministic and side-effect free.
   thumbnail.
 * **Style is part of the item, not the renderer**: a tile, a line bar and a
   polyline may carry `rounding` (radius as a fraction of the shorter side plus a
-  physical corner mask) and **every** item may carry a `border` (side mask,
-  offset in viewBox units, optional colour). `item.draw(config)` paints one
-  **duplicate of the item's own path** per enabled side — translated by the
-  width on that side — **before** `item.render(config)`, so the duplicate sits
-  behind the ink and cannot cover it; absent fields render exactly like a
+  physical corner mask) and **every** item may carry a `border` (legacy on/off
+  mask, band width in viewBox units, optional colour). `item.draw(config)`
+  computes **one** border paint and paints it **before** `item.render(config)`,
+  so the item always wins:
+  * a **stroked** item (polyline, arc, diagonal line fallback) is stroked again
+    with `stroke-width = item width + 2 × border width`, same path, same butt
+    caps and mitre joins, in the border colour — the visible band is exactly
+    `border width` on each side of the ink;
+  * a **filled** item (tile, line bar) gets a native stroke of its own path,
+    `2 × border width` wide, painted before the fill; the fill covers the inner
+    half, so the band is exactly `border width` outside every edge and corner
+    (rounded corners, circles, pills and concave shapes included).
+
+  There is no duplicate geometry, no translation, no clip, no scale and no
+  filter. `sides` is only a legacy on/off mask: any non-zero value paints the
+  whole outline, `0` paints none, and stored masks are not rewritten on read
+  (§`docs/FORMAT.md` §Style fields). Absent fields render exactly like a
   pre-style document. Rounding geometry is generated in `rounding.ts` (tiles,
-  line bars and polyline turns); the border duplicate is a translation applied
-  to the item's own path in the renderers, never a filter, a shadow or a
-  path-string rewrite.
+  line bars and polyline turns).
 * **Butt caps and mitre joins** — a rib ends flush with the ink edge, exactly
   like the reference app. No `stroke-linecap="round"` anywhere in artwork.
 * `itemColor(config, item)` = `item.color ?? config.ink`.
@@ -730,7 +741,8 @@ stored shape against `canvasItemValidator`, the per-grid rules),
 replace, `toOps`, pen/line items, hidden items surviving the diff),
 `model.test.ts` (presets, snapping, keys, signatures, style clamping),
 `render.test.ts` (markup, thumbnail budget),
-`rounding.test.ts` / `border.test.ts` (the style geometry), `kuficraft-file.test.ts`
+`rounding.test.ts` / `border.test.ts` (the style geometry: one wider stroke of
+the same path, legacy masks on/off), `kuficraft-file.test.ts`
 (v2 round-trip — fragment zones included — + v1 upgrade), plus the backend `convex/**/*.test.ts` suites and
 the editor's `tools.test.ts` /
 `interaction.test.ts` / `shortcuts.test.ts`.

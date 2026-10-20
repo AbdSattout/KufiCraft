@@ -144,7 +144,7 @@ export interface EditorController {
   setRounding: (rounding: ItemRounding) => void;
   /** Corner rounding while a slider is dragged — style only, no write. */
   previewRounding: (radius: number) => void;
-  /** Border duplicates: sets the draw style and re-borders the selection. */
+  /** Border: sets the draw style and re-borders the selection. */
   setBorder: (border: ItemBorder) => void;
   /** Border width while a slider is dragged — style only, no write. */
   previewBorderWidth: (width: number) => void;

@@ -63,10 +63,22 @@ describe("editor preferences", () => {
       showGrid: false,
       inkSwatches: ["#111827", "#7c2d12"],
       rounding: { radius: 0.15, corners: 5 },
-      border: { sides: 3, width: 4, color: "#123456" },
+      border: { sides: 15, width: 4, color: "#123456" },
     };
     saveEditorPrefs(prefs, storage);
     expect(loadEditorPrefs(storage)).toEqual(prefs);
+  });
+
+  it("turns any legacy non-zero border mask into the all-around mask", () => {
+    const prefs = loadEditorPrefs(
+      new MemoryStorage({
+        [EDITOR_PREFS_KEY]: JSON.stringify({
+          border: { sides: 3, width: 4, color: "#123456" },
+        }),
+      }),
+    );
+    // New borders are written all-around; side selection no longer exists.
+    expect(prefs.border).toEqual({ sides: 15, width: 4, color: "#123456" });
   });
 
   it("keeps the draw style across boards — it is the user's, not the project's", () => {

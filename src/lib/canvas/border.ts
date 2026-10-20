@@ -1,77 +1,59 @@
 /**
- * KufiCraft — outside borders (pure, no DOM).
+ * KufiCraft — item borders (pure, no DOM).
  *
- * A border is one **duplicate of the item's own shape per enabled side**,
- * translated by the border width and painted behind the original in the border
- * colour (`docs/FORMAT.md` §Style fields):
+ * A border is painted with the **item's own path** — never a translated copy
+ * and never a filter (`docs/FORMAT.md` §Style fields):
  *
- *   • top    → `(0, -width)`
- *   • bottom → `(0, +width)`
- *   • left   → `(-width, 0)`
- *   • right  → `(+width, 0)`
+ *   • a stroked item (line fallback, polyline, arc) is stroked again first,
+ *     wider by the border band on each side: `itemWidth + 2 × width`, with the
+ *     same butt caps and mitre joins as the ink;
+ *   • a filled item (tiles, line bars) gets a native stroke of the same path,
+ *     `2 × width` wide, painted **before** the fill. The fill covers the inner
+ *     half, so exactly `width` remains visible outside every edge and corner.
  *
- * The duplicate keeps the item's paint mode and stroke width (the renderers
- * reuse the item's `Rendered` path), so the construction is identical for
- * filled tiles and for stroked lines, polylines and arcs. Because it is a
- * plain translated copy of the same path — never a filter, shadow or blur —
- * the SVG and PNG exports agree, and any SVG-capable program opens it.
- *
- * The visible border is the sliver of the copy the original does not cover:
- * exactly `width` wide on that side. With all four sides on there are four
- * copies, one per side; with none, there is no copy at all.
+ * The old `sides` mask stays in the format for compatibility. Any non-zero
+ * mask means "border on" and the border surrounds the whole shape; the mask no
+ * longer selects sides (`docs/FORMAT.md`).
  */
 
-import {
-  BORDER_ALL,
-  BORDER_BOTTOM,
-  BORDER_LEFT,
-  BORDER_RIGHT,
-  BORDER_TOP,
-  MAX_BORDER_WIDTH,
-} from "./model";
+import { BORDER_ALL, MAX_BORDER_WIDTH } from "./model";
 import type { ItemBorder } from "./model";
 
-/** One translated copy of the item's shape, in a resolved border colour. */
-export interface BorderCopy {
-  /** Translation on the x axis, in viewBox units. */
-  dx: number;
-  /** Translation on the y axis, in viewBox units. */
-  dy: number;
+/** One border stroke of the item's own path, in a resolved colour. */
+export interface BorderPaint {
+  /** Resolved colour: the override, else the item's own colour. */
   color: string;
+  /** `stroke-width` in viewBox units. */
+  width: number;
 }
 
 /**
- * The duplicates for `border`, or `[]` when it paints nothing (`sides === 0`
- * or a non-positive/broken width — the states the sanitisers normalise away,
- * checked here too so a hostile document cannot draw an invisible or huge
- * copy).
+ * The border stroke for `border`, or `undefined` when it paints nothing
+ * (`sides === 0`, a broken/negative width — the states the sanitisers
+ * normalise away, checked here too so a hostile document cannot draw an
+ * invisible outline). `width` is capped like the stored format.
  *
- * `color` is the fallback colour: the item's own resolved colour.
+ * `inkWidth` is the item's own stroke width (`0` for a filled item): a
+ * stroked item's border is wider by `2 × width`, so the visible band is
+ * exactly `width` on each side of the ink.
+ *
+ * `color` is the fallback: the item's own resolved colour.
  */
-export function borderCopies(
+export function borderPaint(
   border: ItemBorder,
   color: string,
-): BorderCopy[] {
+  inkWidth: number,
+): BorderPaint | undefined {
   const sides = Number.isFinite(border.sides)
     ? Math.trunc(border.sides) & BORDER_ALL
     : 0;
-  const width = Math.min(border.width, MAX_BORDER_WIDTH);
-  if (sides === 0 || !Number.isFinite(width) || width <= 0) return [];
+  const band = Number.isFinite(border.width)
+    ? Math.min(border.width, MAX_BORDER_WIDTH)
+    : 0;
+  if (sides === 0 || band <= 0) return undefined;
   const override = border.color;
-  const copyColor =
-    override !== undefined && override.length > 0 ? override : color;
-  const copies: BorderCopy[] = [];
-  if ((sides & BORDER_TOP) !== 0) {
-    copies.push({ dx: 0, dy: -width, color: copyColor });
-  }
-  if ((sides & BORDER_RIGHT) !== 0) {
-    copies.push({ dx: width, dy: 0, color: copyColor });
-  }
-  if ((sides & BORDER_BOTTOM) !== 0) {
-    copies.push({ dx: 0, dy: width, color: copyColor });
-  }
-  if ((sides & BORDER_LEFT) !== 0) {
-    copies.push({ dx: -width, dy: 0, color: copyColor });
-  }
-  return copies;
+  return {
+    color: override !== undefined && override.length > 0 ? override : color,
+    width: (Number.isFinite(inkWidth) ? Math.max(0, inkWidth) : 0) + 2 * band,
+  };
 }

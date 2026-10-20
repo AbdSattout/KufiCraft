@@ -284,7 +284,7 @@ function activeRounding(
   return rounding !== undefined && rounding.radius > 0 ? rounding : undefined;
 }
 
-/** The stored form of a draw style's border: no sides is the off state. */
+/** The stored form of a draw style's border: a zero mask is the off state. */
 function activeBorder(border: ItemBorder | undefined): ItemBorder | undefined {
   return border !== undefined && border.sides !== 0 ? border : undefined;
 }

@@ -107,7 +107,7 @@ function sanitizeItem(item: CanvasItem, config: ProjectConfig): CanvasItem | nul
   const color = capColor(item.color);
   const key = (value: string) => requireKey(value);
   // A border is the one style every item type can carry; `undefined` stays
-  // `undefined` (the absent state), and a zero-side mask normalises away.
+  // `undefined` (the absent state), and a zero mask normalises away.
   const border =
     item.border === undefined ? undefined : sanitizeBorder(item.border);
 

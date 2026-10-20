@@ -63,8 +63,8 @@ that omits them renders **exactly** like a v2 file written before they existed.
 // tiles, line bars and polylines — rounded corners
 "rounding": { "radius": 0.15, "corners": 15 }
 
-// any item — one duplicated offset shape per enabled side
-"border": { "sides": 5, "width": 2, "color": "#7c2d12" }
+// any item — one stroke around the whole shape
+"border": { "sides": 15, "width": 2, "color": "#7c2d12" }
 ```
 
 * `rounding.radius` is a **fraction of the shorter side** of the item's box,
@@ -87,25 +87,30 @@ that omits them renders **exactly** like a v2 file written before they existed.
   reference's mutating “virtual close line” is replaced by trimming each edge
   exactly at the closing corner, and the radius is relative rather than a
   length.
-* `border.sides` is a bit mask of the sides an item is bordered on: `1` top,
-  `2` right, `4` bottom, `8` left, `15` all four. `border.width` is in **viewBox
-  units** (`1…12`, default `2` when the field is present but broken) and is the
-  **offset** of the duplicate. `color` is optional; absent means the item's
-  resolved colour (`color ?? config.ink`).
-* A border is **one duplicate of the item's own complete shape per enabled
-  side** — `1` side, `1` copy; `4` sides, `4` copies — translated `width` on
-  that side (top `y − w`, right `x + w`, bottom `y + w`, left `x − w`) and
-  painted **behind** the item in the border colour. The duplicate keeps the
-  item's own paint (fill or stroke), so the construction is identical for tiles,
-  lines, polylines and arcs, works without filters or shadows, and renders the
-  same in the SVG and PNG exports. The visible border is the sliver the original
-  does not cover, exactly `width` wide on that side.
+* `border.sides` is a **legacy on/off mask**: any non-zero value (`1`…`15`)
+  means the border is on; `0` means no border. It no longer selects sides, so a
+  file written when a border could sit on one side now renders as a border
+  around the whole shape. The stored mask is **not rewritten on read** (a
+  legacy `sides: 1` stays `1` through export/import); new borders write `15`
+  (`BORDER_ALL`). `border.width` is the visible band in **viewBox units** on
+  each side (`1…12`, default `2` when the field is present but broken).
+  `color` is optional; absent means the item's resolved colour
+  (`color ?? config.ink`).
+* A border is **the item's own path stroked once, before the item**, in the
+  border colour — never a translated copy, a second shape or a filter:
+  * a **stroked** item (a polyline, an arc, a diagonal line fallback) is
+    stroked again with `stroke-width = itemWidth + 2 × border.width`, same butt
+    caps and mitre joins, so the visible band is exactly `border.width` on each
+    side of the ink;
+  * a **filled** item (tile, line bar) gets a native stroke of the same path,
+    `2 × border.width` wide, painted before the fill. The fill covers the inner
+    half, so the band is exactly `border.width` outside every edge and corner —
+    rounded corners, circles, pills and concave shapes included.
 * Normalisation on read/write (backend and file import): radius clamped to
-  `[0, 0.5]`, masks masked to the four real bits, width clamped to `[1, 12]`,
+  `[0, 0.5]`, masks masked to the four legacy bits, width clamped to `[1, 12]`,
   colours capped at `MAX_COLOR_LENGTH`. A zero radius drops `rounding`; a
-  zero-side border drops `border` (file import also drops a border whose `sides`
-  is missing or not a number rather than guessing all four) — absent is the
-  canonical “off” state, so a round-trip stays byte-stable.
+  zero mask (or a broken/absent one) drops `border` — absent is the canonical
+  “off” state, so a round-trip stays byte-stable.
 
 ## Rules
 

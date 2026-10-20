@@ -291,8 +291,10 @@ function itemRounding(value: unknown): ItemRounding | undefined {
 
 /**
  * Reads an untrusted border object. `sides` must be a real number — a border
- * without sides is not a border, so a broken mask drops the whole field rather
- * than silently outlining all four sides.
+ * without a mask is not a border, so a broken mask drops the whole field
+ * rather than silently outlining the shape. A finite non-zero mask is kept
+ * **as stored** (the legacy mask is not rewritten on read) and renders as an
+ * all-around border; zero means no border.
  */
 function itemBorder(value: unknown): ItemBorder | undefined {
   if (!isRecord(value) || !isFiniteNumber(value.sides)) return undefined;

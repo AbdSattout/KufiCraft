@@ -707,6 +707,22 @@ describe("normalizeItem", () => {
     ).toEqual(arcItem);
   });
 
+  it("loads a legacy one-side border and keeps its mask as stored", () => {
+    const config = sampleConfig();
+    const legacy = normalizeItem(
+      {
+        type: "tile",
+        column: 0,
+        row: 0,
+        zone: 0,
+        border: { sides: BORDER_TOP, width: 2 },
+      },
+      config,
+    );
+    // Any non-zero mask is an all-around border now; the file is not rewritten.
+    expect(legacy?.border).toEqual({ sides: BORDER_TOP, width: 2 });
+  });
+
   it("round-trips style fields through export and parse", () => {
     const config = sampleConfig();
     const items: CanvasItem[] = [

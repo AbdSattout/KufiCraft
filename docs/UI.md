@@ -186,6 +186,12 @@ With something selected the same section reveals the selection actions
 («التحديد»: recolour with the ink colour, duplicate, delete) — with nothing
 selected they are absent, not disabled.
 
+The style blocks under the palette are rounding and borders. A border is one
+**on/off toggle** — there are no side buttons — followed by its width, colour
+and «استخدام لون الحبر». Every border wraps the whole shape; a line or an arc
+is outlined around its whole stroke, so side selection does not exist and does
+not apply to them.
+
 Sidebar, top to bottom: الأشكال (palette + selection), لون الحبر, لون الورقة,
 then the board — نسبة الحبر as the five presets `1:1`…`1:5` (live re-render; the
 `1:1` hint explains that ink and space are equal there, and every preset shows

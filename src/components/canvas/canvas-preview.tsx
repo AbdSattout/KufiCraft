@@ -6,7 +6,7 @@
  * `<CanvasPreview config items />` draws the document into a
  * `viewBox="0 0 1000 1000"` SVG: background, construction grid (only when
  * `config.showGrid`) and one element per item. Every path comes from the item
- * class (`itemOf(item).render(config)`), exactly like the string renderer in
+ * class (`itemOf(item).draw(config)`), exactly like the string renderer in
  * `@/lib/canvas/render`, so the React canvas and exports can never drift.
  *
  * The grid has two families (`gridPaths` in `@/lib/canvas/grid`): the cell
@@ -36,9 +36,10 @@ interface CanvasItemShapeProps {
 }
 
 /**
- * One item as SVG: the class decides the paths and whether the item is stroked
- * (lines, polylines, arcs) or filled (tiles). An item with a border gets one
- * translated duplicate per enabled side, drawn first, so the ink always wins.
+ * One item as SVG: the class decides the path and whether the item is stroked
+ * (lines, polylines, arcs) or filled (tiles). An item with a border paints the
+ * same path once more underneath as a wider stroke in the border colour, so the
+ * ink always wins and every edge and corner is covered.
  */
 export const CanvasItemShape = memo(function CanvasItemShape({
   config,
@@ -46,40 +47,26 @@ export const CanvasItemShape = memo(function CanvasItemShape({
   className,
   opacity,
 }: CanvasItemShapeProps) {
-  const { path, mode, width, borders } = useMemo(
+  const { path, mode, width, border } = useMemo(
     () => itemOf(item).draw(config),
     [config, item],
   );
   const color = useMemo(() => itemOf(item).resolvedColor(config), [config, item]);
   return (
     <>
-      {borders?.map((copy, index) =>
-        mode === "stroke" ? (
-          <path
-            key={`${item.key}:border:${index}`}
-            data-key={`${item.key}:border:${index}`}
-            d={path}
-            transform={`translate(${copy.dx} ${copy.dy})`}
-            fill="none"
-            stroke={copy.color}
-            strokeWidth={width}
-            strokeLinecap="butt"
-            strokeLinejoin="miter"
-            className={className}
-            opacity={opacity}
-          />
-        ) : (
-          <path
-            key={`${item.key}:border:${index}`}
-            data-key={`${item.key}:border:${index}`}
-            d={path}
-            transform={`translate(${copy.dx} ${copy.dy})`}
-            fill={copy.color}
-            className={className}
-            opacity={opacity}
-          />
-        ),
-      )}
+      {border !== undefined ? (
+        <path
+          data-key={`${item.key}:border`}
+          d={path}
+          fill="none"
+          stroke={border.color}
+          strokeWidth={border.width}
+          strokeLinecap="butt"
+          strokeLinejoin="miter"
+          className={className}
+          opacity={opacity}
+        />
+      ) : null}
       {mode === "stroke" ? (
         <path
           data-key={item.key}

@@ -79,8 +79,8 @@ import {
   zoneRect,
 } from "./geometry";
 import type { CircularSlice, PathCmd, Point, Rect } from "./geometry";
-import { borderCopies } from "./border";
-import type { BorderCopy } from "./border";
+import { borderPaint } from "./border";
+import type { BorderPaint } from "./border";
 import { cellCentre, linePointPosition } from "./grid";
 import { roundCorners, roundingRadius } from "./rounding";
 import { shapeById, shapePath } from "./shapes";
@@ -98,11 +98,11 @@ export interface Rendered {
   /** Stroke width in viewBox units (0 for fills). */
   width: number;
   /**
-   * The item's outside border, when it carries one (`draw`, not `render`):
-   * one translated duplicate of `path` per enabled side, painted **before**
-   * the item's own path so the ink always wins.
+   * The item's border, when it carries one (`draw`, not `render`): one wider
+   * stroke of the same `path`, in the border colour, painted **before** the
+   * item's own paint. No duplicate path and no translation.
    */
-  borders?: readonly BorderCopy[];
+  border?: BorderPaint;
 }
 
 /** Inclusive cell extent of an item — used to clamp a selection move. */
@@ -204,17 +204,22 @@ export abstract class KufiItem {
   abstract render(config: ProjectConfig): Rendered;
 
   /**
-   * What a renderer paints for this item: the border duplicates first (so the
-   * item's ink always wins), then the item's own path. This is the entry point
-   * of every renderer; `render` is for callers that want the shape alone
-   * (selection rings, toolbar icons).
+   * What a renderer paints for this item: the border stroke first (so the
+   * item's ink always wins), then the item's own path. The border is computed
+   * once here — a stroked item's is `width + 2 × border`, a filled item's is
+   * `2 × border` — so every renderer consumes the same paint. `render` is for
+   * callers that want the shape alone (selection rings, toolbar icons).
    */
   draw(config: ProjectConfig): Rendered {
     const rendered = this.render(config);
     const border = this.border;
     if (border === undefined) return rendered;
-    const copies = borderCopies(border, this.resolvedColor(config));
-    return copies.length > 0 ? { ...rendered, borders: copies } : rendered;
+    const paint = borderPaint(
+      border,
+      this.resolvedColor(config),
+      rendered.mode === "stroke" ? rendered.width : 0,
+    );
+    return paint === undefined ? rendered : { ...rendered, border: paint };
   }
 
   abstract bounds(config: ProjectConfig): Rect;
@@ -1242,9 +1247,9 @@ export function colorItem(item: CanvasItem, color: string | undefined): CanvasIt
 
 export function styleItem(item: CanvasItem, style: ItemStyle): CanvasItem {
   // A style patch is stored canonically: the same clamps the backend and the
-  // file reader apply. That way a width-only border patch with no side on
-  // clears the field instead of storing an invisible `sides: 0` outline (and a
-  // zero radius clears rounding instead of storing a no-op object).
+  // file reader apply. That way a patch with `sides: 0` clears the field
+  // instead of storing an invisible outline (and a zero radius clears rounding
+  // instead of storing a no-op object).
   const rounding =
     style.rounding === undefined
       ? undefined

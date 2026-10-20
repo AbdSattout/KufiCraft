@@ -523,7 +523,7 @@ export function recolourItems(
 /**
  * Applies a style patch to the listed items. Shape and rotation belong to
  * tiles; rounding belongs to tiles, line bars and polylines (an arc ignores
- * it); a border is a translated duplicate behind any item type, so
+ * it); a border is one stroke around the whole shape for any item type, so
  * `{ border }` in a patch re-borders a line, a polyline or a rib just as well
  * as a tile.
  */

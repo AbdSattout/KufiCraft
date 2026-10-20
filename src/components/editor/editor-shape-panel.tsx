@@ -6,8 +6,8 @@
  * One panel, four jobs: the palette feeds the next drawn tiles *and* reshapes
  * the current selection (docs/UI.md §Editor) — rotation cycles `r` in quarter
  * turns (`R` on the keyboard too), the rounding block sets the corners of
- * tiles, line bars and polyline turns, and the border block duplicates
- * whatever is drawn behind it; picking a shape is
+ * tiles, line bars and polyline turns, and the border block wraps the whole
+ * shape (there is no per-side selection); picking a shape is
  * the way back to the plain square, so the panel carries no separate reset
  * button.
  *
@@ -46,10 +46,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { tileIconPath } from "@/lib/canvas/items";
 import {
-  BORDER_BOTTOM,
-  BORDER_LEFT,
-  BORDER_RIGHT,
-  BORDER_TOP,
+  BORDER_ALL,
   CORNER_BOTTOM_LEFT,
   CORNER_BOTTOM_RIGHT,
   CORNER_TOP_LEFT,
@@ -102,13 +99,6 @@ const CORNER_GLYPHS: Record<number, string> = {
   [CORNER_BOTTOM_LEFT]: "M2 2 L22 2 L22 22 L10 22 A8 8 0 0 1 2 14 Z",
 };
 
-const SIDE_GLYPHS: Record<number, string> = {
-  [BORDER_TOP]: "M2.5 2.5 H21.5",
-  [BORDER_RIGHT]: "M21.5 2.5 V21.5",
-  [BORDER_BOTTOM]: "M2.5 21.5 H21.5",
-  [BORDER_LEFT]: "M2.5 2.5 V21.5",
-};
-
 function CornerGlyph({ corner }: { corner: number }) {
   return (
     <svg viewBox="0 0 24 24" aria-hidden className="size-5">
@@ -123,28 +113,22 @@ function CornerGlyph({ corner }: { corner: number }) {
   );
 }
 
-/** The box the border wraps, with this side drawn thick just outside it. */
-function SideGlyph({ side }: { side: number }) {
+/** The box the border wraps, with the whole outline drawn thick. */
+function BorderGlyph() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden className="size-5">
       <path
-        d="M5 5 H19 V19 H5 Z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={1}
-        strokeOpacity={0.4}
-      />
-      <path
-        d={SIDE_GLYPHS[side]}
+        d="M4 4 H20 V20 H4 Z"
         fill="none"
         stroke="currentColor"
         strokeWidth={2.5}
+        strokeLinejoin="miter"
       />
     </svg>
   );
 }
 
-/** One button of a physical 2×2 corner map or 3×3 side map. */
+/** One button of the physical 2×2 corner map. */
 function GlyphToggle({
   pressed,
   label,
@@ -259,8 +243,8 @@ export function ShapePanel({
     setRounding({ ...style.rounding, corners: corners ^ corner });
   };
 
-  const toggleSide = (side: number) => {
-    setBorder({ ...style.border, sides: sides ^ side });
+  const toggleBorder = () => {
+    setBorder({ ...style.border, sides: sides === 0 ? BORDER_ALL : 0 });
   };
 
   return (
@@ -348,48 +332,19 @@ export function ShapePanel({
 
       <div className="flex flex-col gap-2 border-t border-border/60 pt-2">
         <p className="text-xs text-muted-foreground">{MESSAGES.borders}</p>
-        <div className="flex items-start gap-3">
-          <div
-            className="grid w-fit grid-cols-3 grid-rows-3 gap-1"
-            dir="ltr"
-            role="group"
-            aria-label={MESSAGES.borderSides}
-          >
-            <GlyphToggle
-              pressed={(sides & BORDER_TOP) !== 0}
-              label={MESSAGES.borderTop}
-              position="col-start-2 row-start-1"
-              onClick={() => toggleSide(BORDER_TOP)}
-            >
-              <SideGlyph side={BORDER_TOP} />
-            </GlyphToggle>
-            <GlyphToggle
-              pressed={(sides & BORDER_LEFT) !== 0}
-              label={MESSAGES.borderLeft}
-              position="col-start-1 row-start-2"
-              onClick={() => toggleSide(BORDER_LEFT)}
-            >
-              <SideGlyph side={BORDER_LEFT} />
-            </GlyphToggle>
-            <GlyphToggle
-              pressed={(sides & BORDER_RIGHT) !== 0}
-              label={MESSAGES.borderRight}
-              position="col-start-3 row-start-2"
-              onClick={() => toggleSide(BORDER_RIGHT)}
-            >
-              <SideGlyph side={BORDER_RIGHT} />
-            </GlyphToggle>
-            <GlyphToggle
-              pressed={(sides & BORDER_BOTTOM) !== 0}
-              label={MESSAGES.borderBottom}
-              position="col-start-2 row-start-3"
-              onClick={() => toggleSide(BORDER_BOTTOM)}
-            >
-              <SideGlyph side={BORDER_BOTTOM} />
-            </GlyphToggle>
-          </div>
-          <p className="text-xs text-muted-foreground/80">{MESSAGES.borderHint}</p>
-        </div>
+        <Button
+          variant={sides !== 0 ? "secondary" : "outline"}
+          size="sm"
+          className="w-full"
+          aria-pressed={sides !== 0}
+          aria-label={MESSAGES.borderToggle}
+          title={MESSAGES.borderToggle}
+          onClick={toggleBorder}
+        >
+          <BorderGlyph />
+          {MESSAGES.borderToggle}
+        </Button>
+        <p className="text-xs text-muted-foreground/80">{MESSAGES.borderHint}</p>
         <SliderField
           label={MESSAGES.borderWidth}
           value={width}

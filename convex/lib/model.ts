@@ -246,7 +246,13 @@ export const CORNER_ALL =
  */
 export const MAX_ROUNDING_RADIUS = 0.5;
 
-/** Side bits of a border mask — the sides of the item's box, as seen. */
+/**
+ * Legacy side bits of a border mask. Rendering no longer selects sides: any
+ * non-zero mask means "border on" and the border surrounds the whole shape
+ * (`docs/FORMAT.md` §Style fields). The bits are kept so old documents load
+ * unchanged and their mask survives a round-trip; new borders write
+ * `BORDER_ALL`.
+ */
 export const BORDER_TOP = 1;
 export const BORDER_RIGHT = 2;
 export const BORDER_BOTTOM = 4;
@@ -274,9 +280,9 @@ export function clampCornerMask(value: number): number {
   return Math.trunc(value) & CORNER_ALL;
 }
 
-/** A side mask with only the four real sides set (unknown bits dropped). */
+/** A mask with only the four legacy bits set (unknown bits dropped). */
 export function clampBorderSides(value: number): number {
-  if (!Number.isFinite(value)) return BORDER_ALL;
+  if (!Number.isFinite(value)) return 0;
   return Math.trunc(value) & BORDER_ALL;
 }
 
@@ -300,9 +306,11 @@ export function sanitizeRounding(
 }
 
 /**
- * Normalises a stored border: the side mask masked to the four real sides, the
- * width clamped and an empty colour dropped (it would mean "no override", not
- * "no border"). Returns `undefined` when no side is on — the absent state.
+ * Normalises a stored border: the legacy mask is masked to its four known bits
+ * but **not rewritten** (any non-zero mask is an all-around border at render
+ * time), the width is clamped and an empty colour is dropped (it would mean
+ * "no override", not "no border"). Returns `undefined` when the mask is zero
+ * or broken — the absent state.
  */
 export function sanitizeBorder(border: ItemBorder): ItemBorder | undefined {
   const sides = clampBorderSides(border.sides);
@@ -417,10 +425,13 @@ export interface ItemRounding {
 }
 
 /**
- * A border drawn behind the item, as one translated duplicate of its own shape
- * per enabled side: which sides (`BORDER_*` bits), the translation distance in
- * viewBox units, and an optional colour. Absent means no border. The copy keeps
- * the item's paint mode, so this works for every item type without filters.
+ * A border drawn around the item's whole shape, as one stroke of the item's
+ * own path: `sides` is a **legacy mask** — any non-zero value means "on" (the
+ * border is all-around regardless of which bits are set), `0` means none;
+ * `width` is the visible band in viewBox units on each side; `color` is an
+ * optional override. Absent means no border. The same field works for every
+ * item type without filters: a stroke is widened, a fill is outlined before it
+ * is painted.
  */
 export interface ItemBorder {
   sides: number;
@@ -994,7 +1005,8 @@ export const cellValidator = v.object({
 /**
  * Rounding + border. The numeric fields are **required** and clamped by
  * `sanitizeRounding` / `sanitizeBorder` on every write, so a document can
- * never carry a radius, a mask bit or a width outside the model's range.
+ * never carry a radius, a legacy mask bit or a width outside the model's
+ * range.
  */
 export const roundingValidator = v.object({
   radius: v.number(),
