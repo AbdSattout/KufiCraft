@@ -201,8 +201,9 @@ block has only a width slider (`0` = no border) and a colour field; the width is
 the switch: raising it above `0` adds the border, and a new border starts black
 until the user picks another colour.
 
-Sidebar, top to bottom: الأشكال (palette + selection), لون الحبر, لون الورقة,
-then the board — نسبة الحبر as the five presets `1:1`…`1:5` (live re-render; the
+Sidebar, top to bottom: الأشكال (palette + selection), the fill row (لون الحبر
+with nothing selected, لون التحديد with a selection), لون الورقة, then the
+board — نسبة الحبر as the five presets `1:1`…`1:5` (live re-render; the
 `1:1` hint explains that ink and space are equal there, and every preset shows
 the inner edges of its ink squares), حجم الخلية (`base`), قطاعات الدائرة
 (circular boards only: the angular division, its caption reading out the
@@ -230,17 +231,21 @@ tool's shape: on (the default) it draws a run with no diagonal segment as one
 square per cell — the reference app's straight line; off, that run is a single
 solid `line` bar. It never affects what is already drawn.
 
-There is exactly **one** colour control for drawing: لون الحبر is the project's
-ink *and* the pen's colour. لون الورقة next to it is the board's background.
-A second “لون الرسم” picker was removed on purpose: the pen paints with the
-project ink, and a per-item colour change happens through «تلوين بلون الحبر» on
-a selection.
+There is exactly **one** fill control above لون الورقة. With nothing selected
+it is **لون الحبر**: the project's ink *and* the pen's colour. With a selection
+it becomes **لون التحديد**: it shows the first selected item's own colour (or
+the project ink when that item has no override) and picking a colour recolours
+only the selection — one undo step, while the project ink and the draw prefs
+stay unchanged. A second “لون الرسم” picker was removed on purpose: the pen
+paints with the project ink, and «تلوين بلون الحبر» on a selection is a real
+action that uses that project ink rather than the fill currently shown for the
+selection.
 
 Editing ops on selection: move (drag, items keep relative offsets; anchors snap
-to grid), recolour (the selection takes the current ink colour → set the item’s
-own `color`), reshape (shape + rotation), delete, duplicate (`Ctrl+D`). A
-fragment keeps the colour it was drawn with: changing لون الحبر never repaints
-existing items.
+to grid), recolour (the selection takes the current ink colour from the button,
+or the colour picked in لون التحديد; both store the item’s own `color`), reshape
+(shape + rotation), delete, duplicate (`Ctrl+D`). A fragment keeps the colour it
+was drawn with: changing لون الحبر never repaints existing items.
 
 Persistence: every completed gesture → one `api.projects.applyOps` call with a
 `clientMutationId`-free batch; cursor local state only; project fetched with

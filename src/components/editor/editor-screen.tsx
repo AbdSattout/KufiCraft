@@ -96,7 +96,9 @@ function Panels({ editor }: { editor: EditorController }) {
         config={editor.config}
         inkSwatches={editor.inkSwatches}
         itemsCount={editor.items.length}
-        setInkColor={editor.setInkColor}
+        fillColor={editor.fillColor}
+        selectionCount={editor.selection.length}
+        setFillColor={editor.setFillColor}
         setShowGrid={editor.setShowGrid}
         patchConfig={editor.patchConfig}
         previewConfig={editor.previewConfig}

@@ -682,6 +682,23 @@ export function moveItemsWithSelection(
   return { items: plan.items, keys: remapped };
 }
 
+/**
+ * The fill colour the settings panel shows: the first selected item's own
+ * colour, resolved against the project ink when that item has no override.
+ * With nothing selected (or a stale first key) it is the project ink. Items
+ * store their colour, so this never mutates the document while merely
+ * following a selection.
+ */
+export function selectionFillColor(
+  items: readonly CanvasItem[],
+  selection: readonly string[],
+  fallback: string,
+): string {
+  if (selection.length === 0) return fallback;
+  const first = items.find((item) => item.key === selection[0]);
+  return first?.color ?? fallback;
+}
+
 /** Applies a colour override (`undefined` → back to the project ink). */
 export function recolourItems(
   config: ProjectConfig,

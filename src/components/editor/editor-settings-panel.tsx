@@ -60,8 +60,12 @@ export interface SettingsPanelProps {
   /** Recent ink colours, most-recent-first (shown ahead of the defaults). */
   inkSwatches: readonly string[];
   itemsCount: number;
-  /** Sets the project ink (the colour the pen paints with). */
-  setInkColor: (color: string) => void;
+  /** The reset/fallback fill: the first selected item's colour or the ink. */
+  fillColor: string;
+  /** Whether the panel's fill control is editing a selection. */
+  selectionCount: number;
+  /** Edits the selection's fill, or the project ink when nothing is selected. */
+  setFillColor: (color: string) => void;
   /** Writes the grid guide to the user's preference (it is not document config). */
   setShowGrid: (show: boolean) => void;
   patchConfig: (patch: Partial<ProjectConfig>) => void;
@@ -100,7 +104,9 @@ export function SettingsPanel({
   config,
   inkSwatches,
   itemsCount,
-  setInkColor,
+  fillColor,
+  selectionCount,
+  setFillColor,
   setShowGrid,
   patchConfig,
   previewConfig,
@@ -113,6 +119,13 @@ export function SettingsPanel({
     () => mergedSwatches(inkSwatches, INK_SWATCHES),
     [inkSwatches],
   );
+  const editingSelection = selectionCount > 0;
+  const fillTitle = editingSelection
+    ? MESSAGES.selectionFillColor
+    : MESSAGES.inkColor;
+  const fillHint = editingSelection
+    ? MESSAGES.selectionFillColorHint
+    : MESSAGES.inkColorHint;
 
   const requestGridType = (next: GridType) => {
     if (next === config.gridType) return;
@@ -127,16 +140,14 @@ export function SettingsPanel({
 
   return (
     <>
-      <PanelSection title={MESSAGES.inkColor}>
-        <p className="text-xs text-muted-foreground/80">
-          {MESSAGES.inkColorHint}
-        </p>
+      <PanelSection title={fillTitle}>
+        <p className="text-xs text-muted-foreground/80">{fillHint}</p>
         <ColourField
-          label={MESSAGES.inkColor}
-          value={config.ink}
+          label={fillTitle}
+          value={fillColor}
           colors={swatches}
-          onPick={setInkColor}
-          labelFor={(color) => swatchLabel(MESSAGES.inkColor, color)}
+          onPick={setFillColor}
+          labelFor={(color) => swatchLabel(fillTitle, color)}
           hideLabel
         />
       </PanelSection>

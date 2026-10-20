@@ -49,6 +49,9 @@ export const MESSAGES = {
     "تغيير العدد يعيد تفسير العناصر المرسومة على القطاعات، مثل تغيير حجم الخلية.",
   inkColor: "لون الحبر",
   inkColorHint: "يُطبَّق على ما ترسمه من الآن؛ ما رسمته سابقًا يحتفظ بلونه.",
+  selectionFillColor: "لون التحديد",
+  selectionFillColorHint:
+    "يُطبَّق على التحديد فقط؛ لا يغيّر لون الحبر للرسم الجديد.",
   paperColor: "لون الورقة",
   showGrid: "إظهار الشبكة",
   straightLinesAsSquares: "الخط المستقيم مربّعات",

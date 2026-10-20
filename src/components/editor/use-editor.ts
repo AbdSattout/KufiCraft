@@ -65,6 +65,7 @@ import {
   pruneSelection,
   recolourItems,
   reshapeItems,
+  selectionFillColor,
   styleForSelection,
   wheelSteps,
   wheelZoomDelta,
@@ -158,6 +159,16 @@ export interface EditorController {
   setStrokeJoin: (join: StrokeJoin) => void;
   /** The ink colour is the pen's colour *and* the project's ink. */
   setInkColor: (color: string) => void;
+  /**
+   * The fill shown by the settings panel: the first selected item's resolved
+   * colour, or the project ink when nothing is selected.
+   */
+  fillColor: string;
+  /**
+   * Edits that fill: recolours the live selection, or changes the project ink
+   * (and therefore the next drawing) when nothing is selected.
+   */
+  setFillColor: (color: string) => void;
 
   selection: readonly string[];
   setSelection: (keys: readonly string[]) => void;
@@ -357,6 +368,18 @@ export function useEditor(
       rotation: first.rotation ?? 0,
     };
   }, [items, selection, style]);
+
+  /**
+   * The settings panel's fill control follows the live selection: the first
+   * selected item's own colour (or its project-ink fallback), otherwise the
+   * project ink. Both `items` and `selection` are derived from the Convex
+   * document, so a colour committed in another tab or by another action
+   * updates this value without a local copy to drift.
+   */
+  const fillColor = useMemo(
+    () => selectionFillColor(items, selection, config.ink),
+    [config.ink, items, selection],
+  );
 
   /**
    * A grid switch drops any armed gesture: it was aimed at the old geometry,
@@ -701,6 +724,24 @@ export function useEditor(
       applyCommit(recolourItems(config, items, selection, color), "تلوين", selection);
     },
     [applyCommit, config, items, selection],
+  );
+
+  /**
+   * The one control in the settings panel has two meanings: with a selection
+   * it is that selection's fill and never the project ink; with nothing
+   * selected it is the project ink the pen draws with. Keeping the branch here
+   * means the panel cannot accidentally repaint the document while it is
+   * merely following a selected item's colour.
+   */
+  const setFillColor = useCallback(
+    (color: string) => {
+      if (selection.length > 0) {
+        recolourSelection(color);
+        return;
+      }
+      setInkColor(color);
+    },
+    [recolourSelection, selection.length, setInkColor],
   );
 
   const deleteSelection = useCallback(() => {
@@ -1054,6 +1095,8 @@ export function useEditor(
     setStrokeCap,
     setStrokeJoin,
     setInkColor,
+    fillColor,
+    setFillColor,
     selection,
     setSelection,
     clearSelection,

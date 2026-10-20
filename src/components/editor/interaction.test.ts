@@ -62,6 +62,7 @@ import {
   rectFromPoints,
   rectsIntersect,
   reshapeItems,
+  selectionFillColor,
   shiftSelection,
   styleForSelection,
   wheelSteps,
@@ -888,6 +889,36 @@ describe("arcBetween + linePreview", () => {
       cap: "round",
       join: "bevel",
     });
+  });
+});
+
+describe("selectionFillColor", () => {
+  it("falls back to the project ink with nothing selected", () => {
+    const red = tile(0, 0, 0, { color: "#ff0000" });
+    expect(selectionFillColor([red], [], "#123456")).toBe("#123456");
+  });
+
+  it("shows the first selected item's own colour, not its list order", () => {
+    const blue = tile(0, 0, 0, { color: "#0000ff" });
+    const red = tile(0, 1, 0, { color: "#ff0000" });
+    expect(
+      selectionFillColor([blue, red], [red.key, blue.key], "#123456"),
+    ).toBe("#ff0000");
+  });
+
+  it("uses the project ink for a selected item without its own colour", () => {
+    const plain = tile(1, 0);
+    const red = tile(0, 0, 0, { color: "#ff0000" });
+    expect(
+      selectionFillColor([red, plain], [plain.key, red.key], "#123456"),
+    ).toBe("#123456");
+  });
+
+  it("falls back when the first selected key no longer exists", () => {
+    const red = tile(0, 0, 0, { color: "#ff0000" });
+    expect(
+      selectionFillColor([red], ["missing-item", red.key], "#123456"),
+    ).toBe("#123456");
   });
 });
 
