@@ -368,10 +368,10 @@ Every function is deterministic and side-effect free.
   thumbnail.
 * **Style is part of the item, not the renderer**: a tile, a line bar and a
   polyline may carry `rounding` (radius as a fraction of the shorter side plus a
-  physical corner mask) and **every** item may carry a `border` (legacy on/off
-  mask, band width in viewBox units, optional colour). `item.draw(config)`
-  computes **one** border paint and paints it **before** `item.render(config)`,
-  so the item always wins:
+  physical corner mask) and **every** item may carry a `border` (band width in
+  viewBox units, colour; width `0` means none). `item.draw(config)` computes
+  **one** border paint and paints it **before** `item.render(config)`, so the
+  item always wins:
   * a **stroked** item (polyline, arc, diagonal line fallback) is stroked again
     with `stroke-width = item width + 2 × border width`, same path, same butt
     caps and mitre joins, in the border colour — the visible band is exactly
@@ -382,11 +382,11 @@ Every function is deterministic and side-effect free.
     (rounded corners, circles, pills and concave shapes included).
 
   There is no duplicate geometry, no translation, no clip, no scale and no
-  filter. `sides` is only a legacy on/off mask: any non-zero value paints the
-  whole outline, `0` paints none, and stored masks are not rewritten on read
-  (§`docs/FORMAT.md` §Style fields). Absent fields render exactly like a
-  pre-style document. Rounding geometry is generated in `rounding.ts` (tiles,
-  line bars and polyline turns).
+  filter. Width is the switch: `0` paints none, a positive width paints the
+  whole outline, and the colour is the border's own (black when a new border is
+  created). Absent fields render exactly like a pre-style document. Rounding
+  geometry is generated in `rounding.ts` (tiles, line bars and polyline
+  turns).
 * **Butt caps and mitre joins** — a rib ends flush with the ink edge, exactly
   like the reference app. No `stroke-linecap="round"` anywhere in artwork.
 * `itemColor(config, item)` = `item.color ?? config.ink`.

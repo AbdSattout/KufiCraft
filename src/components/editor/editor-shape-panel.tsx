@@ -6,10 +6,9 @@
  * One panel, four jobs: the palette feeds the next drawn tiles *and* reshapes
  * the current selection (docs/UI.md §Editor) — rotation cycles `r` in quarter
  * turns (`R` on the keyboard too), the rounding block sets the corners of
- * tiles, line bars and polyline turns, and the border block wraps the whole
- * shape (there is no per-side selection); picking a shape is
- * the way back to the plain square, so the panel carries no separate reset
- * button.
+ * tiles, line bars and polyline turns, and the border block sets the band
+ * width and colour around the whole shape; picking a shape is the way back to
+ * the plain square, so the panel carries no separate reset button.
  *
  * Rounding and the border work like the shape buttons: they set the **draw
  * style** (what the pen paints next) and, when a selection is live, re-style it
@@ -46,7 +45,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { tileIconPath } from "@/lib/canvas/items";
 import {
-  BORDER_ALL,
   CORNER_BOTTOM_LEFT,
   CORNER_BOTTOM_RIGHT,
   CORNER_TOP_LEFT,
@@ -113,21 +111,6 @@ function CornerGlyph({ corner }: { corner: number }) {
   );
 }
 
-/** The box the border wraps, with the whole outline drawn thick. */
-function BorderGlyph() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden className="size-5">
-      <path
-        d="M4 4 H20 V20 H4 Z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={2.5}
-        strokeLinejoin="miter"
-      />
-    </svg>
-  );
-}
-
 /** One button of the physical 2×2 corner map. */
 function GlyphToggle({
   pressed,
@@ -160,7 +143,7 @@ function GlyphToggle({
 
 export interface ShapePanelProps {
   style: DrawStyle;
-  /** The ink colour, used by “تلوين التحديد” and as the border colour's default. */
+  /** The ink colour, used by “تلوين التحديد” and «استخدام لون الحبر». */
   inkColor: string;
   /** Recent ink colours, offered by the border colour field. */
   inkSwatches: readonly string[];
@@ -230,7 +213,7 @@ export function ShapePanel({
   canArrange,
 }: ShapePanelProps) {
   const { radius, corners } = style.rounding;
-  const { sides, width, color } = style.border;
+  const { width, color } = style.border;
   const swatches = useMemo(
     () => mergedSwatches(inkSwatches, INK_SWATCHES),
     [inkSwatches],
@@ -241,10 +224,6 @@ export function ShapePanel({
 
   const toggleCorner = (corner: number) => {
     setRounding({ ...style.rounding, corners: corners ^ corner });
-  };
-
-  const toggleBorder = () => {
-    setBorder({ ...style.border, sides: sides === 0 ? BORDER_ALL : 0 });
   };
 
   return (
@@ -332,19 +311,6 @@ export function ShapePanel({
 
       <div className="flex flex-col gap-2 border-t border-border/60 pt-2">
         <p className="text-xs text-muted-foreground">{MESSAGES.borders}</p>
-        <Button
-          variant={sides !== 0 ? "secondary" : "outline"}
-          size="sm"
-          className="w-full"
-          aria-pressed={sides !== 0}
-          aria-label={MESSAGES.borderToggle}
-          title={MESSAGES.borderToggle}
-          onClick={toggleBorder}
-        >
-          <BorderGlyph />
-          {MESSAGES.borderToggle}
-        </Button>
-        <p className="text-xs text-muted-foreground/80">{MESSAGES.borderHint}</p>
         <SliderField
           label={MESSAGES.borderWidth}
           value={width}
@@ -358,25 +324,23 @@ export function ShapePanel({
           <div className="flex-1">
             <ColourField
               label={MESSAGES.borderColor}
-              value={color ?? inkColor}
+              value={color}
               colors={swatches}
               onPick={(next) => setBorder({ ...style.border, color: next })}
               labelFor={(next) => swatchLabel(MESSAGES.borderColor, next)}
               hideLabel
             />
           </div>
-          {color !== undefined ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              aria-label={MESSAGES.borderUseInk}
-              title={MESSAGES.borderUseInk}
-              onClick={() => setBorder({ sides, width })}
-            >
-              <RotateCcw />
-              {MESSAGES.borderUseInk}
-            </Button>
-          ) : null}
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label={MESSAGES.borderUseInk}
+            title={MESSAGES.borderUseInk}
+            onClick={() => setBorder({ ...style.border, color: inkColor })}
+          >
+            <RotateCcw />
+            {MESSAGES.borderUseInk}
+          </Button>
         </div>
       </div>
 

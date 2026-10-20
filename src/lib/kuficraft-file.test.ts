@@ -1,10 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  BORDER_ALL,
-  BORDER_BOTTOM,
-  BORDER_LEFT,
-  BORDER_TOP,
   CORNER_ALL,
+  DEFAULT_BORDER_COLOR,
   DEFAULT_PROJECT_CONFIG,
   MAX_CIRCULAR_SECTORS,
   MAX_ITEMS,
@@ -643,16 +640,16 @@ describe("normalizeItem", () => {
         row: 0,
         zone: 0,
         rounding: { radius: 0.9, corners: CORNER_ALL | 16 },
-        border: { sides: BORDER_TOP | 16, width: 99, color: "#ff0000" },
+        border: { width: 99, color: "#ff0000" },
       },
       config,
     );
     expect(styled).toMatchObject({
       rounding: { radius: 0.5, corners: CORNER_ALL },
-      border: { sides: BORDER_TOP, width: 12, color: "#ff0000" },
+      border: { width: 12, color: "#ff0000" },
     });
 
-    // Zero is the absent state for both fields: a reader drops them instead of
+    // Width 0 is the absent state: a reader drops the border instead of
     // storing a no-op style.
     const off = normalizeItem(
       {
@@ -661,13 +658,13 @@ describe("normalizeItem", () => {
         row: 0,
         zone: 0,
         rounding: { radius: 0, corners: CORNER_ALL },
-        border: { sides: 0, width: 2 },
+        border: { width: 0, color: "#ff0000" },
       },
       config,
     );
     expect(off).not.toHaveProperty("rounding");
     expect(off).not.toHaveProperty("border");
-    // A broken value drops its field rather than guessing a style.
+    // A broken or missing width drops the field rather than guessing a style.
     const broken = normalizeItem(
       {
         type: "tile",
@@ -675,17 +672,30 @@ describe("normalizeItem", () => {
         row: 0,
         zone: 0,
         rounding: { corners: CORNER_ALL },
-        border: { width: 2 },
+        border: { color: "#ff0000" },
       },
       config,
     );
     expect(broken).not.toHaveProperty("rounding");
     expect(broken).not.toHaveProperty("border");
+    // A missing colour is black; it is never the item's ink.
+    expect(
+      normalizeItem(
+        {
+          type: "tile",
+          column: 0,
+          row: 0,
+          zone: 0,
+          border: { width: 2 },
+        },
+        config,
+      )?.border,
+    ).toEqual({ width: 2, color: DEFAULT_BORDER_COLOR });
   });
 
   it("keeps a border on every item type and rounding where it applies", () => {
     const config = sampleConfig();
-    const border = { sides: BORDER_ALL, width: 2 };
+    const border = { width: 2, color: "#000000" };
     for (const item of sampleItems().slice(1)) {
       expect(normalizeItem({ ...item, border }, config)).toMatchObject({ border });
     }
@@ -707,22 +717,6 @@ describe("normalizeItem", () => {
     ).toEqual(arcItem);
   });
 
-  it("loads a legacy one-side border and keeps its mask as stored", () => {
-    const config = sampleConfig();
-    const legacy = normalizeItem(
-      {
-        type: "tile",
-        column: 0,
-        row: 0,
-        zone: 0,
-        border: { sides: BORDER_TOP, width: 2 },
-      },
-      config,
-    );
-    // Any non-zero mask is an all-around border now; the file is not rewritten.
-    expect(legacy?.border).toEqual({ sides: BORDER_TOP, width: 2 });
-  });
-
   it("round-trips style fields through export and parse", () => {
     const config = sampleConfig();
     const items: CanvasItem[] = [
@@ -733,7 +727,7 @@ describe("normalizeItem", () => {
         row: 0,
         zone: 0,
         rounding: { radius: 0.15, corners: 5 },
-        border: { sides: BORDER_LEFT, width: 3, color: "#123456" },
+        border: { width: 3, color: "#123456" },
       },
       {
         type: "line",
@@ -741,7 +735,7 @@ describe("normalizeItem", () => {
         from: { column: 0, row: 1 },
         to: { column: 4, row: 1 },
         rounding: { radius: 0.2, corners: CORNER_ALL },
-        border: { sides: BORDER_BOTTOM, width: 2 },
+        border: { width: 2, color: "#000000" },
       },
     ];
     const parsed = parseProjectFile(exportProjectFile({ name: "أنماط", config, items }));

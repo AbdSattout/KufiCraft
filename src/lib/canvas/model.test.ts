@@ -1,13 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   ANCHOR_GRID,
-  BORDER_ALL,
-  BORDER_LEFT,
-  BORDER_TOP,
   CENTRE_ANCHOR,
   CORNER_ALL,
   CORNER_BOTTOM_LEFT,
   CORNER_TOP_LEFT,
+  DEFAULT_BORDER,
+  DEFAULT_BORDER_COLOR,
   DEFAULT_BORDER_WIDTH,
   DEFAULT_RATIO,
   MAX_BORDER_WIDTH,
@@ -159,14 +158,16 @@ describe("ratioLabel", () => {
 });
 
 describe("rounding / border model", () => {
-  it("keeps the legacy border mask bits and a full mask of 15", () => {
+  it("defines the off border as width 0 and black", () => {
     expect(CORNER_ALL).toBe(15);
-    expect(BORDER_ALL).toBe(15);
     expect(CORNER_TOP_LEFT).toBe(1);
     expect(CORNER_BOTTOM_LEFT).toBe(8);
-    expect(BORDER_TOP).toBe(1);
-    expect(BORDER_LEFT).toBe(8);
     expect(MAX_ROUNDING_RADIUS).toBe(0.5);
+    expect(MIN_BORDER_WIDTH).toBe(0);
+    expect(MAX_BORDER_WIDTH).toBe(12);
+    expect(DEFAULT_BORDER_WIDTH).toBe(0);
+    expect(DEFAULT_BORDER_COLOR).toBe("#000000");
+    expect(DEFAULT_BORDER).toEqual({ width: 0, color: "#000000" });
   });
 
   it("clamps a radius to [0, half the shorter side] and drops zero", () => {
@@ -184,29 +185,30 @@ describe("rounding / border model", () => {
     ).toEqual({ radius: 0.25, corners: CORNER_ALL });
   });
 
-  it("clamps a border and keeps the legacy mask as stored", () => {
+  it("clamps a border and drops the zero-width off state", () => {
     expect(clampBorderWidth(0)).toBe(MIN_BORDER_WIDTH);
+    expect(clampBorderWidth(-3)).toBe(MIN_BORDER_WIDTH);
     expect(clampBorderWidth(99)).toBe(MAX_BORDER_WIDTH);
     expect(clampBorderWidth(Number.NaN)).toBe(DEFAULT_BORDER_WIDTH);
-    expect(sanitizeBorder({ sides: 0, width: 2 })).toBeUndefined();
-    expect(sanitizeBorder({ sides: Number.NaN, width: 2 })).toBeUndefined();
+    expect(sanitizeBorder({ width: 0, color: "#000000" })).toBeUndefined();
+    expect(sanitizeBorder({ width: -2, color: "#000000" })).toBeUndefined();
     expect(
-      sanitizeBorder({ sides: BORDER_TOP | 16, width: 0, color: "" }),
-    ).toEqual({ sides: BORDER_TOP, width: MIN_BORDER_WIDTH });
-    expect(
-      sanitizeBorder({ sides: BORDER_ALL, width: 2, color: "#ff0000" }),
-    ).toEqual({ sides: BORDER_ALL, width: 2, color: "#ff0000" });
-    // Every non-zero mask is kept exactly as stored: it means "on" now, and
-    // rewriting it would change a legacy document on read.
-    expect(sanitizeBorder({ sides: BORDER_LEFT, width: 2 })).toEqual({
-      sides: BORDER_LEFT,
+      sanitizeBorder({ width: Number.NaN, color: "#000000" }),
+    ).toBeUndefined();
+    expect(sanitizeBorder({ width: 2, color: "#ff0000" })).toEqual({
       width: 2,
+      color: "#ff0000",
+    });
+    // A missing / empty colour is the default black, never the item's ink.
+    expect(sanitizeBorder({ width: 2, color: "" })).toEqual({
+      width: 2,
+      color: DEFAULT_BORDER_COLOR,
     });
 
     const long = `#${"a".repeat(MAX_COLOR_LENGTH)}`;
-    expect(
-      sanitizeBorder({ sides: BORDER_TOP, width: 2, color: long })?.color,
-    ).toBe(long.slice(0, MAX_COLOR_LENGTH));
+    expect(sanitizeBorder({ width: 2, color: long })?.color).toBe(
+      long.slice(0, MAX_COLOR_LENGTH),
+    );
   });
 });
 
@@ -575,7 +577,7 @@ describe("itemSignature", () => {
     };
     const bordered: TileItem = {
       ...tile,
-      border: { sides: BORDER_TOP, width: 2 },
+      border: { width: 2, color: "#000000" },
     };
     expect(itemSignature(rounded)).not.toBe(itemSignature(tile));
     expect(itemSignature(bordered)).not.toBe(itemSignature(tile));
@@ -587,7 +589,7 @@ describe("itemSignature", () => {
     ).not.toBe(itemSignature(rounded));
     // A line's border is part of its signature too.
     expect(
-      itemSignature({ ...line, border: { sides: BORDER_TOP, width: 2 } }),
+      itemSignature({ ...line, border: { width: 2, color: "#000000" } }),
     ).not.toBe(itemSignature(line));
   });
 

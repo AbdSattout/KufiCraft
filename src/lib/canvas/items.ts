@@ -216,7 +216,6 @@ export abstract class KufiItem {
     if (border === undefined) return rendered;
     const paint = borderPaint(
       border,
-      this.resolvedColor(config),
       rendered.mode === "stroke" ? rendered.width : 0,
     );
     return paint === undefined ? rendered : { ...rendered, border: paint };
@@ -468,7 +467,7 @@ export function sameBorder(
 ): boolean {
   if (a === b) return true;
   if (a === undefined || b === undefined) return false;
-  return a.sides === b.sides && a.width === b.width && a.color === b.color;
+  return a.width === b.width && a.color === b.color;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1247,7 +1246,7 @@ export function colorItem(item: CanvasItem, color: string | undefined): CanvasIt
 
 export function styleItem(item: CanvasItem, style: ItemStyle): CanvasItem {
   // A style patch is stored canonically: the same clamps the backend and the
-  // file reader apply. That way a patch with `sides: 0` clears the field
+  // file reader apply. That way a patch with width `0` clears the field
   // instead of storing an invisible outline (and a zero radius clears rounding
   // instead of storing a no-op object).
   const rounding =

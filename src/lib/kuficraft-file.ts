@@ -24,6 +24,7 @@ import {
   CORNER_ALL,
   DEFAULT_BACKGROUND,
   DEFAULT_BASE,
+  DEFAULT_BORDER_COLOR,
   DEFAULT_BORDER_WIDTH,
   DEFAULT_INK,
   DEFAULT_PROJECT_CONFIG,
@@ -290,18 +291,15 @@ function itemRounding(value: unknown): ItemRounding | undefined {
 }
 
 /**
- * Reads an untrusted border object. `sides` must be a real number — a border
- * without a mask is not a border, so a broken mask drops the whole field
- * rather than silently outlining the shape. A finite non-zero mask is kept
- * **as stored** (the legacy mask is not rewritten on read) and renders as an
- * all-around border; zero means no border.
+ * Reads an untrusted border object. The width is the switch: a missing or
+ * broken width is the absent state, so the whole field drops rather than
+ * silently outlining the shape. A missing / empty colour defaults to black.
  */
 function itemBorder(value: unknown): ItemBorder | undefined {
-  if (!isRecord(value) || !isFiniteNumber(value.sides)) return undefined;
+  if (!isRecord(value)) return undefined;
   return sanitizeBorder({
-    sides: value.sides,
     width: isFiniteNumber(value.width) ? value.width : DEFAULT_BORDER_WIDTH,
-    color: itemColour(value.color),
+    color: itemColour(value.color) ?? DEFAULT_BORDER_COLOR,
   });
 }
 

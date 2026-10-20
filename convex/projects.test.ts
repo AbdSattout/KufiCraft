@@ -10,8 +10,6 @@ import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
 import {
-  BORDER_LEFT,
-  BORDER_TOP,
   CIRCULAR_SECTORS,
   CORNER_ALL,
   DEFAULT_PROJECT_CONFIG,
@@ -1675,14 +1673,13 @@ describe("item sanitisation", () => {
             tile(0, 0, 0, {
               rounding: { radius: 0.9, corners: CORNER_ALL | 16 },
               border: {
-                sides: BORDER_TOP | 16,
                 width: 99,
                 color: "#ff0000",
               },
             }),
             tile(1, 0, 0, {
               rounding: { radius: 0, corners: CORNER_ALL },
-              border: { sides: 0, width: 2 },
+              border: { width: 0, color: "#000000" },
             }),
             {
               type: "line",
@@ -1690,7 +1687,7 @@ describe("item sanitisation", () => {
               from: { column: 0, row: 1 },
               to: { column: 4, row: 1 },
               rounding: { radius: 3, corners: CORNER_ALL | 32 },
-              border: { sides: BORDER_LEFT, width: 2 },
+              border: { width: 2, color: "#000000" },
             },
             {
               type: "stroke",
@@ -1708,7 +1705,7 @@ describe("item sanitisation", () => {
                 { column: 2, row: 4 },
               ],
               rounding: { radius: 0.2, corners: CORNER_ALL },
-              border: { sides: BORDER_TOP, width: 3, color: "#00ff00" },
+              border: { width: 3, color: "#00ff00" },
             },
           ],
         },
@@ -1721,18 +1718,18 @@ describe("item sanitisation", () => {
     );
     expect(doc.items[0]).toMatchObject({
       rounding: { radius: 0.5, corners: CORNER_ALL },
-      border: { sides: BORDER_TOP, width: MAX_BORDER_WIDTH, color: "#ff0000" },
+      border: { width: MAX_BORDER_WIDTH, color: "#ff0000" },
     });
     expect(doc.items[1]).not.toHaveProperty("rounding");
     expect(doc.items[1]).not.toHaveProperty("border");
     // Line and stroke rounding survive the server, re-clamped and masked.
     expect(doc.items[2]).toMatchObject({
       rounding: { radius: 0.5, corners: CORNER_ALL },
-      border: { sides: BORDER_LEFT, width: 2 },
+      border: { width: 2, color: "#000000" },
     });
     expect(doc.items[3]).toMatchObject({
       rounding: { radius: 0.2, corners: CORNER_ALL },
-      border: { sides: BORDER_TOP, width: 3, color: "#00ff00" },
+      border: { width: 3, color: "#00ff00" },
     });
   });
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_BORDER,
   DEFAULT_PROJECT_CONFIG,
   MAX_COLOR_LENGTH,
   RATIO_PRESETS,
@@ -46,6 +47,7 @@ describe("editor preferences", () => {
     expect(loadEditorPrefs(null)).toEqual(DEFAULT_EDITOR_PREFS);
     // No `window` in the node test environment → the default resolver is null.
     expect(loadEditorPrefs()).toEqual(DEFAULT_EDITOR_PREFS);
+    expect(DEFAULT_EDITOR_PREFS.border).toEqual(DEFAULT_BORDER);
   });
 
   it("round-trips every field", () => {
@@ -63,22 +65,10 @@ describe("editor preferences", () => {
       showGrid: false,
       inkSwatches: ["#111827", "#7c2d12"],
       rounding: { radius: 0.15, corners: 5 },
-      border: { sides: 15, width: 4, color: "#123456" },
+      border: { width: 4, color: "#123456" },
     };
     saveEditorPrefs(prefs, storage);
     expect(loadEditorPrefs(storage)).toEqual(prefs);
-  });
-
-  it("turns any legacy non-zero border mask into the all-around mask", () => {
-    const prefs = loadEditorPrefs(
-      new MemoryStorage({
-        [EDITOR_PREFS_KEY]: JSON.stringify({
-          border: { sides: 3, width: 4, color: "#123456" },
-        }),
-      }),
-    );
-    // New borders are written all-around; side selection no longer exists.
-    expect(prefs.border).toEqual({ sides: 15, width: 4, color: "#123456" });
   });
 
   it("keeps the draw style across boards — it is the user's, not the project's", () => {
@@ -95,19 +85,25 @@ describe("editor preferences", () => {
     expect(reopened.rotation).toBe(3);
   });
 
-  it("clamps rounding and border prefs and drops unknown mask bits", () => {
+  it("clamps rounding and border prefs, including the off width", () => {
     const prefs = loadEditorPrefs(
       new MemoryStorage({
         [EDITOR_PREFS_KEY]: JSON.stringify({
           rounding: { radius: 9, corners: 15 | 16 },
-          border: { sides: 15 | 16, width: 0, color: "x".repeat(80) },
+          border: { width: 0, color: "x".repeat(80) },
         }),
       }),
     );
     expect(prefs.rounding).toEqual({ radius: 0.5, corners: 15 });
-    expect(prefs.border.sides).toBe(15);
-    expect(prefs.border.width).toBe(1);
+    expect(prefs.border.width).toBe(0);
     expect(prefs.border.color).toBe("x".repeat(MAX_COLOR_LENGTH));
+
+    const defaulted = loadEditorPrefs(
+      new MemoryStorage({
+        [EDITOR_PREFS_KEY]: JSON.stringify({ border: { width: 4 } }),
+      }),
+    );
+    expect(defaulted.border).toEqual({ width: 4, color: "#000000" });
   });
 
   it("remembers the hand tool — it is a rail tool like any other", () => {

@@ -77,12 +77,9 @@ export const MESSAGES = {
   cornerBottomLeft: "الزاوية السفلى اليسرى",
   roundingHint: "نسبة من الضلع الأقصر للشكل؛ ٠٪ تعني زوايا قائمة.",
   borders: "الحدود",
-  borderToggle: "حدود حول الشكل",
   borderWidth: "سُمك الحد",
   borderColor: "لون الحدود",
   borderUseInk: "استخدام لون الحبر",
-  borderHint:
-    "الحدود تحيط بالشكل كاملًا؛ لا يوجد اختيار للجوانب، والخطوط والأقواس تُحاط حول كامل مسارها.",
   recolourSelection: "تلوين بلون الحبر",
   deleteSelection: "حذف التحديد",
   duplicateSelection: "تكرار التحديد",

@@ -1,7 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  BORDER_LEFT,
-  BORDER_TOP,
   CORNER_ALL,
   DEFAULT_PROJECT_CONFIG,
   MAX_THUMBNAIL_LENGTH,
@@ -298,7 +296,7 @@ describe("style in the SVG renderer", () => {
     column: 1,
     row: 2,
     zone: 0,
-    border: { sides: BORDER_TOP | BORDER_LEFT, width: 3, color: "#ff0000" },
+    border: { width: 3, color: "#ff0000" },
   };
 
   it("renders a tile with and without rounding", () => {
@@ -353,7 +351,7 @@ describe("style in the SVG renderer", () => {
           { column: 0, row: 0 },
           { column: 2, row: 2 },
         ],
-        border: { sides: BORDER_TOP, width: 2 },
+        border: { width: 2, color: "#000000" },
       },
       {
         type: "arc",
@@ -367,7 +365,7 @@ describe("style in the SVG renderer", () => {
         to: { column: 3, row: 6 },
         direction: "clockwise",
         size: "half",
-        border: { sides: BORDER_TOP, width: 2 },
+        border: { width: 2, color: "#000000" },
       },
     ];
     for (const item of items) {
@@ -376,7 +374,7 @@ describe("style in the SVG renderer", () => {
       const [outline, ink] = paths;
       expect(outline.attrs.transform).toBeUndefined();
       expect(outline.attrs.fill).toBe("none");
-      expect(outline.attrs.stroke).toBe("#123456");
+      expect(outline.attrs.stroke).toBe("#000000");
       expect(outline.attrs["stroke-width"]).toBe(
         String(Math.round((inkWidth + 4) * 1000) / 1000),
       );
@@ -395,7 +393,7 @@ describe("style in the SVG renderer", () => {
       key: lineKey({ column: 0, row: 1 }, { column: 3, row: 1 }),
       from: { column: 0, row: 1 },
       to: { column: 3, row: 1 },
-      border: { sides: BORDER_LEFT, width: 2 },
+      border: { width: 2, color: "#000000" },
     };
     const [barOutline, barInk] = find(rootOf(renderSvg(config, [bar])), "path");
     expect(barOutline.attrs["stroke-width"]).toBe("4");
@@ -403,37 +401,22 @@ describe("style in the SVG renderer", () => {
     expect(barInk.attrs.fill).toBe("#123456");
   });
 
-  it("uses the item's resolved colour when the border has no colour", () => {
+  it("uses the stored border colour, independently of the item colour", () => {
     const config = makeConfig({ ink: "#123456" });
     const item: CanvasItem = {
       ...BORDERED,
       color: "#abcdef",
-      border: { sides: BORDER_TOP, width: 2 },
+      border: { width: 2, color: "#ff0000" },
     };
     const [outline] = find(rootOf(renderSvg(config, [item])), "path");
-    expect(outline.attrs.stroke).toBe("#abcdef");
+    expect(outline.attrs.stroke).toBe("#ff0000");
   });
 
-  it("renders every legacy non-zero mask as the same all-around border", () => {
-    const config = makeConfig({ ink: "#123456" });
-    const render = (sides: number): string =>
-      renderSvg(config, [
-        { ...BORDERED, border: { sides, width: 3, color: "#ff0000" } },
-      ]);
-    const oneSide = render(BORDER_TOP);
-    const allSides = render(BORDER_TOP | BORDER_LEFT | 2 | 4 | 8);
-    expect(oneSide).toBe(allSides);
-    const paths = find(rootOf(oneSide), "path");
-    expect(paths).toHaveLength(2);
-    expect(paths[0].attrs["stroke-width"]).toBe("6");
-    expect(paths[0].attrs.transform).toBeUndefined();
-  });
-
-  it("removes the border when the mask is zero", () => {
+  it("removes the border when its width is zero", () => {
     const config = makeConfig({ ink: "#123456" });
     const item: CanvasItem = {
       ...BORDERED,
-      border: { sides: 0, width: 3, color: "#ff0000" },
+      border: { width: 0, color: "#ff0000" },
     };
     const paths = find(rootOf(renderSvg(config, [item])), "path");
     expect(paths).toHaveLength(1);
@@ -444,7 +427,7 @@ describe("style in the SVG renderer", () => {
     const hostile = '#fff" onload="alert(1)';
     const item: CanvasItem = {
       ...BORDERED,
-      border: { sides: BORDER_TOP, width: 2, color: hostile },
+      border: { width: 2, color: hostile },
     };
     const source = renderSvg(makeConfig(), [item]);
     expect(source).not.toContain("<script");
@@ -465,7 +448,7 @@ describe("style in the SVG renderer", () => {
     expect(paths[2].attrs.fill).not.toBe("none");
   });
 
-  it("draws the same number of border paths in the SVG export and thumbnail", () => {
+  it("paints the same border paths in the SVG export and thumbnail", () => {
     const config = makeConfig();
     const items = [ROUNDED, BORDERED];
     const svgPaths = find(rootOf(renderSvg(config, items)), "path");
@@ -474,7 +457,20 @@ describe("style in the SVG renderer", () => {
       "path",
     );
     expect(thumbnailPaths).toHaveLength(svgPaths.length);
-    for (const path of svgPaths) {
+    // The thumbnail rounds path coordinates to one decimal; the geometry is
+    // the same once both paths are read at that precision.
+    const atThumbnailPrecision = (path: string): string =>
+      path.replace(/-?\d+(?:\.\d+)?/g, (value) =>
+        String(Math.round(Number(value) * 10) / 10),
+      );
+    for (const [index, path] of svgPaths.entries()) {
+      const thumbnail = thumbnailPaths[index];
+      expect(atThumbnailPrecision(path.attrs.d)).toBe(
+        atThumbnailPrecision(thumbnail.attrs.d),
+      );
+      expect(path.attrs.fill).toBe(thumbnail.attrs.fill);
+      expect(path.attrs.stroke).toBe(thumbnail.attrs.stroke);
+      expect(path.attrs["stroke-width"]).toBe(thumbnail.attrs["stroke-width"]);
       expect(path.attrs.transform).toBeUndefined();
     }
   });

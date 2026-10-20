@@ -284,9 +284,9 @@ function activeRounding(
   return rounding !== undefined && rounding.radius > 0 ? rounding : undefined;
 }
 
-/** The stored form of a draw style's border: a zero mask is the off state. */
+/** The stored form of a draw style's border: width `0` is the off state. */
 function activeBorder(border: ItemBorder | undefined): ItemBorder | undefined {
-  return border !== undefined && border.sides !== 0 ? border : undefined;
+  return border !== undefined && border.width > 0 ? border : undefined;
 }
 
 function tileFor(
@@ -296,8 +296,9 @@ function tileFor(
 ): CanvasItem {
   const shape = style.shape ?? "square";
   const rotation = (((style.rotation ?? 0) % 4) + 4) % 4;
-  // `radius: 0` / `sides: 0` are the off ends of the style: they store nothing,
-  // which is exactly how a document drawn before these fields existed looks.
+  // `radius: 0` / border width `0` are the off ends of the style: they store
+  // nothing, which is exactly how a document drawn before these fields existed
+  // looks.
   const rounding = activeRounding(style.rounding);
   const border = activeBorder(style.border);
   return makeTile({

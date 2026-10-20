@@ -32,13 +32,12 @@ import type {
 import {
   ARC_DIRECTIONS,
   ARC_SIZES,
-  BORDER_ALL,
   CORNER_ALL,
-  DEFAULT_BORDER_WIDTH,
+  DEFAULT_BORDER,
+  DEFAULT_BORDER_COLOR,
   MAX_BORDER_WIDTH,
   MAX_COLOR_LENGTH,
   MAX_ROUNDING_RADIUS,
-  MIN_BORDER_WIDTH,
 } from "@/lib/canvas/model";
 import { SHAPE_ORDER } from "@/lib/canvas/shapes";
 import { TOOL_ORDER } from "@/components/editor/tools";
@@ -71,7 +70,7 @@ export interface EditorPrefs {
   inkSwatches: string[];
   /** Corner rounding of the next drawn tiles (radius 0 = square corners). */
   rounding: ItemRounding;
-  /** Outside border of the next drawn items (sides 0 = none). */
+  /** Outside border of the next drawn items (width 0 = none). */
   border: ItemBorder;
 }
 
@@ -84,7 +83,7 @@ export const DEFAULT_EDITOR_PREFS: EditorPrefs = {
   showGrid: true,
   inkSwatches: [],
   rounding: { radius: 0, corners: CORNER_ALL },
-  border: { sides: 0, width: DEFAULT_BORDER_WIDTH },
+  border: { ...DEFAULT_BORDER },
 };
 
 /** The slice of the Web Storage API this module needs (easy to stub). */
@@ -188,23 +187,18 @@ function roundingPref(value: unknown): ItemRounding {
   return { radius, corners };
 }
 
-/** Border from prefs: any non-zero legacy mask becomes the all-around mask. */
+/** Border from prefs: width is the switch, colour defaults to black. */
 function borderPref(value: unknown): ItemBorder {
   const record = isRecord(value) ? value : {};
-  const rawSides =
-    typeof record.sides === "number" && Number.isFinite(record.sides)
-      ? record.sides
-      : DEFAULT_EDITOR_PREFS.border.sides;
-  const sides = (Math.trunc(rawSides) & BORDER_ALL) === 0 ? 0 : BORDER_ALL;
   const width =
     typeof record.width === "number" && Number.isFinite(record.width)
-      ? Math.min(MAX_BORDER_WIDTH, Math.max(MIN_BORDER_WIDTH, record.width))
+      ? Math.min(MAX_BORDER_WIDTH, Math.max(0, record.width))
       : DEFAULT_EDITOR_PREFS.border.width;
-  const border: ItemBorder = { sides, width };
-  if (typeof record.color === "string" && record.color.length > 0) {
-    border.color = record.color.slice(0, MAX_COLOR_LENGTH);
-  }
-  return border;
+  const color =
+    typeof record.color === "string" && record.color.length > 0
+      ? record.color.slice(0, MAX_COLOR_LENGTH)
+      : DEFAULT_BORDER_COLOR;
+  return { width, color };
 }
 
 function normalizeSwatches(value: unknown): string[] {

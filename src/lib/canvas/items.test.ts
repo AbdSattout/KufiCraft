@@ -10,9 +10,6 @@
 
 import { describe, expect, it } from "vitest";
 import {
-  BORDER_BOTTOM,
-  BORDER_LEFT,
-  BORDER_TOP,
   CIRCULAR_ANGULAR_UNIT,
   CORNER_ALL,
   CORNER_TOP_LEFT,
@@ -720,7 +717,7 @@ describe("colorItem / styleItem", () => {
 
 describe("rounding / border", () => {
   const ROUNDING = { radius: 0.2, corners: CORNER_TOP_LEFT };
-  const BORDER = { sides: BORDER_TOP | BORDER_LEFT, width: 3, color: "#7c2d12" };
+  const BORDER = { width: 3, color: "#7c2d12" };
 
   it("rounds a tile's own path in the shape box", () => {
     const subject = parseItem(
@@ -753,7 +750,7 @@ describe("rounding / border", () => {
 
     const bordered: LineItem = {
       ...line({ column: 0, row: 1 }, { column: 4, row: 1 }),
-      border: { sides: BORDER_BOTTOM, width: 2 },
+      border: { width: 2, color: "#000000" },
     };
     expect(parseItem(bordered).toJSON()).toEqual(bordered);
   });
@@ -830,7 +827,7 @@ describe("rounding / border", () => {
   });
 
   it("strokes the same path wider for stroked items", () => {
-    const strokeBorder = { sides: BORDER_TOP, width: 2 };
+    const strokeBorder = { width: 2, color: "#000000" };
     const subjects = [
       stroke([
         { column: 0, row: 0 },
@@ -848,7 +845,7 @@ describe("rounding / border", () => {
       expect(drawn.mode).toBe("stroke");
       expect(drawn.width).toBe(rendered.width);
       expect(drawn.border).toEqual({
-        color: SQUARE.ink,
+        color: "#000000",
         width: inkUnit(SQUARE) + 4,
       });
       expect(drawn).not.toHaveProperty("borders");
@@ -859,71 +856,67 @@ describe("rounding / border", () => {
       border: strokeBorder,
     });
     expect(parseItem(bar).draw(SQUARE).border).toEqual({
-      color: SQUARE.ink,
+      color: "#000000",
       width: 4,
     });
   });
 
-  it("falls back to the resolved item colour for the border", () => {
+  it("uses the stored border colour, not the item colour", () => {
     const subject = parseItem(
       makeTile({
         column: 0,
         row: 0,
         zone: 0,
         color: "#abcdef",
-        border: { sides: BORDER_TOP, width: 2 },
+        border: { width: 2, color: "#ff0000" },
       }),
     );
-    expect(subject.draw(SQUARE).border?.color).toBe("#abcdef");
-    expect(
-      parseItem(
-        makeTile({
-          column: 0,
-          row: 0,
-          zone: 0,
-          border: { sides: BORDER_TOP, width: 2 },
-        }),
-      ).draw(INKED).border?.color,
-    ).toBe("#123456");
+    expect(subject.draw(SQUARE).border?.color).toBe("#ff0000");
   });
 
-  it("keeps a legacy one-side mask and renders it all around", () => {
-    const legacy = styleItem(tile(1, 2, 0), {
-      border: { sides: BORDER_TOP, width: 3 },
+  it("keeps a border's width and colour through parsing", () => {
+    const bordered = styleItem(tile(1, 2, 0), {
+      border: { width: 3, color: "#000000" },
     });
-    expect(legacy).toMatchObject({ border: { sides: BORDER_TOP, width: 3 } });
-    // There is no side to translate: the same border paint covers the whole
-    // path, whichever legacy bit is stored.
-    expect(parseItem(legacy).draw(SQUARE).border).toEqual({
-      color: SQUARE.ink,
+    expect(bordered).toMatchObject({
+      border: { width: 3, color: "#000000" },
+    });
+    // Width is the switch, so the same paint covers the whole path for every
+    // border the item carries.
+    expect(parseItem(bordered).draw(SQUARE).border).toEqual({
+      color: "#000000",
       width: 6,
     });
   });
 
   it("canonicalises a style patch before it reaches an item", () => {
-    // A zero mask is the off state: it clears instead of storing an invisible
+    // Width 0 is the off state: it clears instead of storing an invisible
     // outline.
     const bordered = styleItem(tile(1, 2, 0), { border: BORDER });
-    expect(styleItem(bordered, { border: { sides: 0, width: 5 } })).toEqual(
-      tile(1, 2, 0),
-    );
-    expect(parseItem(styleItem(bordered, { border: { sides: 0, width: 5 } })).draw(SQUARE)).not.toHaveProperty(
-      "border",
-    );
+    expect(
+      styleItem(bordered, {
+        border: { width: 0, color: "#000000" },
+      }),
+    ).toEqual(tile(1, 2, 0));
+    expect(
+      parseItem(
+        styleItem(bordered, { border: { width: 0, color: "#000000" } }),
+      ).draw(SQUARE),
+    ).not.toHaveProperty("border");
     // The same clamps the backend applies: radius 0.9 → 0.5, width 99 → 12.
     expect(
       styleItem(tile(0, 0, 0), {
         rounding: { radius: 0.9, corners: CORNER_ALL },
-        border: { sides: BORDER_TOP, width: 99, color: "" },
+        border: { width: 99, color: "" },
       }),
     ).toMatchObject({
       rounding: { radius: 0.5, corners: CORNER_ALL },
-      border: { sides: BORDER_TOP, width: 12 },
+      border: { width: 12, color: "#000000" },
     });
     expect(
       parseItem(
         styleItem(tile(0, 0, 0), {
-          border: { sides: BORDER_TOP, width: 99, color: "" },
+          border: { width: 99, color: "" },
         }),
       ).draw(SQUARE).border?.width,
     ).toBe(2 * 12);

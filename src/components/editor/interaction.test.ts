@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  BORDER_TOP,
   CORNER_ALL,
-  DEFAULT_BORDER_WIDTH,
+  DEFAULT_BORDER,
   DEFAULT_PROJECT_CONFIG,
   RATIO_PRESETS,
   arcKey,
@@ -668,7 +667,7 @@ describe("arcBetween + linePreview", () => {
 
   it("previews with the draw style's rounding and border", () => {
     const rounding = { radius: 0.2, corners: CORNER_ALL };
-    const border = { sides: BORDER_TOP, width: 2 };
+    const border = { width: 2, color: "#000000" };
     // Rounding turns the straight run into one roundable bar in the preview,
     // exactly as the commit does.
     const preview = linePreview(
@@ -688,11 +687,13 @@ describe("arcBetween + linePreview", () => {
 describe("styleForSelection", () => {
   it("shows the draw style when nothing is selected", () => {
     expect(styleForSelection(DEFAULT_STYLE, undefined)).toBe(DEFAULT_STYLE);
+    // A fresh draw style has no border, and the one it will create is black.
+    expect(DEFAULT_STYLE.border).toEqual(DEFAULT_BORDER);
   });
 
   it("shows the selected item's own rounding and border", () => {
     const rounding = { radius: 0.2, corners: CORNER_ALL };
-    const border = { sides: BORDER_TOP, width: 3, color: "#ff0000" };
+    const border = { width: 3, color: "#ff0000" };
     const item: CanvasItem = { ...tile(0, 0), rounding, border };
     expect(styleForSelection(DEFAULT_STYLE, item)).toMatchObject({
       rounding,
@@ -705,18 +706,18 @@ describe("styleForSelection", () => {
   it("shows the off states for an item without style and no rounding on an arc", () => {
     expect(styleForSelection(DEFAULT_STYLE, tile(0, 0))).toMatchObject({
       rounding: { radius: 0, corners: CORNER_ALL },
-      border: { sides: 0, width: DEFAULT_BORDER_WIDTH },
+      border: DEFAULT_BORDER,
     });
     const arc = makeArc({
       from: { column: 0, row: 0 },
       to: { column: 2, row: 0 },
       direction: "clockwise",
       size: "half",
-      border: { sides: BORDER_TOP, width: 2 },
+      border: { width: 2, color: "#000000" },
     });
     expect(styleForSelection(DEFAULT_STYLE, arc)).toMatchObject({
       rounding: { radius: 0, corners: CORNER_ALL },
-      border: { sides: BORDER_TOP, width: 2 },
+      border: { width: 2, color: "#000000" },
     });
   });
 });

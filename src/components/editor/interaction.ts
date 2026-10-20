@@ -22,7 +22,7 @@
 
 import {
   CORNER_ALL,
-  DEFAULT_BORDER_WIDTH,
+  DEFAULT_BORDER,
   VIEWBOX_SIZE,
   cellSize,
   circularSectors,
@@ -109,9 +109,8 @@ export function nextRotation(rotation: Rotation): Rotation {
  *
  * Rounding and the outside border are part of the style too, so a pen stroke
  * is drawn exactly the way the panel shows it. `rounding.radius === 0` and
- * `border.sides === 0` are the "off" ends and are what a fresh editor opens
- * with — a document drawn with the defaults stores neither field, which is why
- * an old board renders unchanged.
+ * `border.width === 0` are the "off" ends and are what a fresh editor opens
+ * with — a document drawn with the defaults stores neither field.
  */
 export interface DrawStyle {
   shape: ShapeId;
@@ -125,7 +124,7 @@ export const DEFAULT_STYLE: DrawStyle = {
   rotation: 0,
   // All four corners on: the switch a designer expects when first enabling it.
   rounding: { radius: 0, corners: CORNER_ALL },
-  border: { sides: 0, width: DEFAULT_BORDER_WIDTH },
+  border: { ...DEFAULT_BORDER },
 };
 
 /**
@@ -145,7 +144,7 @@ export function styleForSelection(
   return {
     ...style,
     rounding: rounding ?? { radius: 0, corners: CORNER_ALL },
-    border: item.border ?? { sides: 0, width: DEFAULT_BORDER_WIDTH },
+    border: item.border ?? { ...DEFAULT_BORDER },
   };
 }
 
@@ -599,7 +598,7 @@ export function arcBetween(
     to,
     direction: ctx.arc.direction,
     size: ctx.arc.size,
-    border: ctx.style.border.sides !== 0 ? ctx.style.border : undefined,
+    border: ctx.style.border.width > 0 ? ctx.style.border : undefined,
     color: ctx.config.ink,
   });
 }

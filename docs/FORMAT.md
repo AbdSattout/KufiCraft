@@ -64,7 +64,7 @@ that omits them renders **exactly** like a v2 file written before they existed.
 "rounding": { "radius": 0.15, "corners": 15 }
 
 // any item — one stroke around the whole shape
-"border": { "sides": 15, "width": 2, "color": "#7c2d12" }
+"border": { "width": 2, "color": "#7c2d12" }
 ```
 
 * `rounding.radius` is a **fraction of the shorter side** of the item's box,
@@ -87,15 +87,13 @@ that omits them renders **exactly** like a v2 file written before they existed.
   reference's mutating “virtual close line” is replaced by trimming each edge
   exactly at the closing corner, and the radius is relative rather than a
   length.
-* `border.sides` is a **legacy on/off mask**: any non-zero value (`1`…`15`)
-  means the border is on; `0` means no border. It no longer selects sides, so a
-  file written when a border could sit on one side now renders as a border
-  around the whole shape. The stored mask is **not rewritten on read** (a
-  legacy `sides: 1` stays `1` through export/import); new borders write `15`
-  (`BORDER_ALL`). `border.width` is the visible band in **viewBox units** on
-  each side (`1…12`, default `2` when the field is present but broken).
-  `color` is optional; absent means the item's resolved colour
-  (`color ?? config.ink`).
+* `border.width` is the **switch**: `0` means no border; `0 < width ≤ 12` is
+  the visible band in **viewBox units** on each side. A broken width is the
+  absent state. The slider in the editor works in whole units from `0` to
+  `12`.
+* `border.color` is the border's own colour. New borders store black
+  (`#000000`) unless the user picks another; an empty or missing stored colour
+  also resolves to black. It is never the item's ink colour.
 * A border is **the item's own path stroked once, before the item**, in the
   border colour — never a translated copy, a second shape or a filter:
   * a **stroked** item (a polyline, an arc, a diagonal line fallback) is
@@ -107,10 +105,10 @@ that omits them renders **exactly** like a v2 file written before they existed.
     half, so the band is exactly `border.width` outside every edge and corner —
     rounded corners, circles, pills and concave shapes included.
 * Normalisation on read/write (backend and file import): radius clamped to
-  `[0, 0.5]`, masks masked to the four legacy bits, width clamped to `[1, 12]`,
-  colours capped at `MAX_COLOR_LENGTH`. A zero radius drops `rounding`; a
-  zero mask (or a broken/absent one) drops `border` — absent is the canonical
-  “off” state, so a round-trip stays byte-stable.
+  `[0, 0.5]`, border width clamped to `[0, 12]`, colours capped at
+  `MAX_COLOR_LENGTH`. A zero radius drops `rounding`; a zero (or broken) border
+  width drops `border` — absent is the canonical “off” state, so a round-trip
+  stays byte-stable. An empty border colour normalises to black.
 
 ## Rules
 

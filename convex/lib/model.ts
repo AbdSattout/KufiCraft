@@ -247,23 +247,15 @@ export const CORNER_ALL =
 export const MAX_ROUNDING_RADIUS = 0.5;
 
 /**
- * Legacy side bits of a border mask. Rendering no longer selects sides: any
- * non-zero mask means "border on" and the border surrounds the whole shape
- * (`docs/FORMAT.md` §Style fields). The bits are kept so old documents load
- * unchanged and their mask survives a round-trip; new borders write
- * `BORDER_ALL`.
+ * Border band width in viewBox units. The width is the switch: `0` means no
+ * border, anything above it outlines the whole shape on every side.
  */
-export const BORDER_TOP = 1;
-export const BORDER_RIGHT = 2;
-export const BORDER_BOTTOM = 4;
-export const BORDER_LEFT = 8;
-export const BORDER_ALL =
-  BORDER_TOP | BORDER_RIGHT | BORDER_BOTTOM | BORDER_LEFT;
-
-/** Border line width in viewBox units. */
-export const MIN_BORDER_WIDTH = 1;
+export const MIN_BORDER_WIDTH = 0;
 export const MAX_BORDER_WIDTH = 12;
-export const DEFAULT_BORDER_WIDTH = 2;
+export const DEFAULT_BORDER_WIDTH = 0;
+
+/** A border's colour until the user picks another. */
+export const DEFAULT_BORDER_COLOR = "#000000";
 
 /**
  * NaN-safe clamp of a rounding radius. A missing / broken value is `0` — the
@@ -280,13 +272,7 @@ export function clampCornerMask(value: number): number {
   return Math.trunc(value) & CORNER_ALL;
 }
 
-/** A mask with only the four legacy bits set (unknown bits dropped). */
-export function clampBorderSides(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.trunc(value) & BORDER_ALL;
-}
-
-/** NaN-safe clamp of a border width: `[MIN_BORDER_WIDTH, MAX_BORDER_WIDTH]`. */
+/** NaN-safe clamp of a border width: `[0, MAX_BORDER_WIDTH]`. */
 export function clampBorderWidth(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_BORDER_WIDTH;
   return Math.min(MAX_BORDER_WIDTH, Math.max(MIN_BORDER_WIDTH, value));
@@ -306,21 +292,18 @@ export function sanitizeRounding(
 }
 
 /**
- * Normalises a stored border: the legacy mask is masked to its four known bits
- * but **not rewritten** (any non-zero mask is an all-around border at render
- * time), the width is clamped and an empty colour is dropped (it would mean
- * "no override", not "no border"). Returns `undefined` when the mask is zero
- * or broken — the absent state.
+ * Normalises a stored border: the width is clamped and an empty colour falls
+ * back to black. Returns `undefined` when the width is zero (or broken) — the
+ * **absent** state, which renders exactly like an item without a border.
  */
 export function sanitizeBorder(border: ItemBorder): ItemBorder | undefined {
-  const sides = clampBorderSides(border.sides);
-  if (sides === 0) return undefined;
-  const next: ItemBorder = { sides, width: clampBorderWidth(border.width) };
-  const color = border.color;
-  if (color !== undefined && color.length > 0) {
-    next.color = color.slice(0, MAX_COLOR_LENGTH);
-  }
-  return next;
+  const width = clampBorderWidth(border.width);
+  if (width <= 0) return undefined;
+  const color =
+    typeof border.color === "string" && border.color.length > 0
+      ? border.color.slice(0, MAX_COLOR_LENGTH)
+      : DEFAULT_BORDER_COLOR;
+  return { width, color };
 }
 
 /** Default palette. */
@@ -426,19 +409,21 @@ export interface ItemRounding {
 
 /**
  * A border drawn around the item's whole shape, as one stroke of the item's
- * own path: `sides` is a **legacy mask** — any non-zero value means "on" (the
- * border is all-around regardless of which bits are set), `0` means none;
- * `width` is the visible band in viewBox units on each side; `color` is an
- * optional override. Absent means no border. The same field works for every
- * item type without filters: a stroke is widened, a fill is outlined before it
- * is painted.
+ * own path: `width` is the visible band in viewBox units on each side (`0`
+ * means no border), and `color` is the border colour. The same field works for
+ * every item type without filters: a stroke is widened, a fill is outlined
+ * before it is painted.
  */
 export interface ItemBorder {
-  sides: number;
   width: number;
-  /** Colour override; absent means the item's own resolved colour. */
-  color?: string;
+  color: string;
 }
+
+/** The draw style's border before the user raises its width: off, black. */
+export const DEFAULT_BORDER: ItemBorder = {
+  width: 0,
+  color: DEFAULT_BORDER_COLOR,
+};
 
 /**
  * A position inside one **fragment**, as fractions of that fragment's extent
@@ -947,7 +932,7 @@ function roundingField(rounding: ItemRounding | undefined): string {
 /** Border as one signature field (`""` when there is none). */
 function borderField(border: ItemBorder | undefined): string {
   if (border === undefined) return "";
-  return `b${border.sides}:${border.width}:${border.color ?? ""}`;
+  return `b${border.width}:${border.color}`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1003,10 +988,9 @@ export const cellValidator = v.object({
 });
 
 /**
- * Rounding + border. The numeric fields are **required** and clamped by
+ * Rounding + border. The fields are **required** and clamped by
  * `sanitizeRounding` / `sanitizeBorder` on every write, so a document can
- * never carry a radius, a legacy mask bit or a width outside the model's
- * range.
+ * never carry a radius or a border width outside the model's range.
  */
 export const roundingValidator = v.object({
   radius: v.number(),
@@ -1014,9 +998,8 @@ export const roundingValidator = v.object({
 });
 
 export const borderValidator = v.object({
-  sides: v.number(),
   width: v.number(),
-  color: v.optional(v.string()),
+  color: v.string(),
 });
 
 /**
