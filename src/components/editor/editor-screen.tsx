@@ -107,7 +107,10 @@ function Panels({ editor }: { editor: EditorController }) {
 /** Skeleton shell: also the route's Suspense fallback (`useParams` suspends). */
 export function EditorLoading() {
   return (
-    <div className="flex h-dvh flex-col bg-background" aria-busy="true">
+    <div
+      className="fixed inset-x-0 top-0 flex h-dvh flex-col overflow-hidden bg-background"
+      aria-busy="true"
+    >
       <div className="flex h-14 shrink-0 items-center gap-2 border-b border-border/70 px-2 sm:px-3">
         <Skeleton className="size-7 rounded-lg" />
         <Skeleton className="h-7 w-40" />
@@ -250,7 +253,11 @@ export function EditorScreen() {
   const panels = <Panels editor={editor} />;
 
   return (
-    <div className="flex h-dvh flex-col overflow-hidden bg-background">
+    // The editor is an app shell: fixed to the viewport, not merely 100dvh
+    // tall. Taking it out of the document flow leaves the page with no scroll
+    // range at all — no empty band under the shell when a browser rounds dvh,
+    // when a mobile toolbar moves, or when a scroller below reaches its end.
+    <div className="fixed inset-x-0 top-0 flex h-dvh flex-col overflow-hidden bg-background">
       <EditorTopBar
         name={editor.name}
         rename={editor.rename}
@@ -315,9 +322,14 @@ export function EditorScreen() {
 
         <aside
           aria-label={MESSAGES.settings}
-          className="hidden w-72 shrink-0 flex-col overflow-y-auto border-s border-border/70 bg-background md:flex"
+          className="hidden min-h-0 w-72 shrink-0 flex-col border-s border-border/70 bg-background md:flex"
         >
-          <div className="flex flex-col gap-5 p-4">{panels}</div>
+          {/* The rail is the fixed-height sidebar; only its content scrolls,
+              and `overscroll-contain` keeps the wheel from chaining to the
+              page when the panel reaches its end. */}
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+            <div className="flex flex-col gap-5 p-4">{panels}</div>
+          </div>
         </aside>
       </div>
 
@@ -326,7 +338,7 @@ export function EditorScreen() {
           <SheetHeader>
             <SheetTitle>{MESSAGES.settings}</SheetTitle>
           </SheetHeader>
-          <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 pb-6">
+          <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto overscroll-contain px-4 pb-6">
             {panels}
           </div>
         </SheetContent>

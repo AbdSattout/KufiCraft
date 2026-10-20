@@ -104,7 +104,7 @@ export function CanvasStage({
       */}
       <div
         ref={viewportRef}
-        className="min-h-0 flex-1 overflow-auto bg-muted/30 p-3 sm:p-5"
+        className="min-h-0 flex-1 overflow-auto overscroll-contain bg-muted/30 p-3 sm:p-5"
       >
         <div className="flex min-h-full">
           <div

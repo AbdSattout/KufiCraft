@@ -87,7 +87,7 @@ export function ToolRail({
         "flex gap-1 bg-background",
         vertical
           ? "w-16 shrink-0 flex-col items-stretch border-e border-border/70 p-1.5"
-          : "flex-row items-center overflow-x-auto border-t border-border/70 p-1.5",
+          : "flex-row items-center overflow-x-auto overscroll-x-contain border-t border-border/70 p-1.5",
         className,
       )}
     >

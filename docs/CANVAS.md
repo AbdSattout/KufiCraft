@@ -603,8 +603,9 @@ retraces itself does not brush a chord.
 
 ### Viewport: pan, zoom range and anchoring
 
-The hand tool pans, the wheel zooms. The maths is pure, lives in
-`interaction.ts` and is covered by `interaction.test.ts`:
+The hand tool pans, `Shift` + wheel zooms, and the plain wheel scrolls the
+canvas pane. The maths is pure, lives in `interaction.ts` and is covered by
+`interaction.test.ts`:
 
 * **Pan** (`panScrollOffset`) — the board follows the hand: a rightward drag
   subtracts the pointer's X delta from `scrollLeft`, and `scrollTop` never
@@ -622,8 +623,11 @@ The hand tool pans, the wheel zooms. The maths is pure, lives in
   surface is `min(100%, 100svh - 14rem) × zoom`, so at 10 % a whole 1000-unit
   board is 100 px, and at 32× a `base` = 4 cell is ~87 px on a 900-px-tall
   window — drawing size, which the old 4× ceiling was not.
-* **Wheel zoom** — the plain wheel (no `Ctrl`/`Cmd`) over the canvas **zooms**:
-  a **gesture** is a run of events with no quiet gap longer than
+* **Plain wheel** — scrolls the canvas pane like any other scroller. It is
+  never `preventDefault()`ed, so vertical and horizontal wheel/trackpad travel
+  keep their normal browser behaviour (and the sidebar keeps its own).
+* **Wheel zoom (`Shift` + wheel)** — only the Shift-modified wheel zooms. A
+  **gesture** is a run of events with no quiet gap longer than
   `WHEEL_GESTURE_GAP_MS` (100 ms) travelling the same way, and its first event
   walks **exactly one stop** through `nextZoom`, whatever its size or
   `deltaMode` — one scroll must *visibly* zoom (Firefox's 3-line notch is
@@ -638,12 +642,13 @@ The hand tool pans, the wheel zooms. The maths is pure, lives in
   trackpad pinch and page zoom are accessibility features this pane must not
   swallow. The listener is attached by hand on the viewport (so the sidebar and
   panels keep their own wheel behaviour) because React's `onWheel` is passive
-  and could not `preventDefault()` the pane's own scroll; a wheel during a live
-  pointer gesture is swallowed — a mid-drag zoom would remap the gesture's
-  coordinates — but only while the primary button is really down
-  (`event.buttons`), so a missed pointer-up cannot mute the wheel for the rest
-  of the session. The consequence is intended: the viewport no longer
-  wheel-scrolls; the hand tool and the scrollbars still pan.
+  and could not `preventDefault()` a zoom. `Shift`+wheel during a live pointer
+  gesture is ignored — a mid-drag zoom would remap the gesture's coordinates —
+  but only while the primary button is really down (`event.buttons`), so a
+  missed pointer-up cannot mute the wheel for the rest of the session. A plain
+  wheel still scrolls the pane mid-drag; a mid-drag Shift-wheel is swallowed
+  rather than zoomed or scrolled, because either would move the board under
+  the gesture.
 * **Anchoring** (`zoomScrollOffset`) — a zoom keeps one board point fixed on
   screen: the **pointer** for a wheel notch, the **middle of the pane** for
   the ± buttons (which are not on the canvas, so there is no pointer to

@@ -32,6 +32,12 @@ import {
 } from "./tools";
 import type { ToolState } from "./tools";
 import { shortcutFor } from "./shortcuts";
+import {
+  EMPTY_HISTORY,
+  pushHistory,
+  redoHistory,
+  undoHistory,
+} from "./history";
 
 const CONFIG: ProjectConfig = { ...DEFAULT_PROJECT_CONFIG };
 
@@ -927,7 +933,67 @@ describe("SelectTool", () => {
       other.key,
       tileKey(2, 1, 0),
     ]);
-    expect(out.commit?.selection).toEqual([tile.key]);
+    // The key embeds the cell: the moved fragment's selection must follow it
+    // to its new identity, or the next render drops the selection.
+    expect(out.commit?.selection).toEqual([tileKey(2, 1, 0)]);
+    expect(out.commit?.selection).not.toContain(tile.key);
+    const selected = new Set(out.commit?.selection);
+    expect(out.commit?.items.some((item) => selected.has(item.key))).toBe(true);
+  });
+
+  it("keeps a multi-selection on every moved item", () => {
+    const first = makeTile({ column: 0, row: 0, zone: 0 });
+    const second = makeTile({ column: 2, row: 0, zone: 0 });
+    const untouched = makeTile({ column: 8, row: 8, zone: 0 });
+    const items = [first, second, untouched];
+    const ctx = context(items, {
+      tool: "select",
+      selection: [first.key, second.key],
+    });
+
+    const start = beginTool("select", ctx, NO_STATE, input(pointOf(0, 0)));
+    expect(start.selection).toEqual([first.key, second.key]);
+    const dragged = moveTool("select", ctx, start.state, input(pointOf(1, 2)));
+    const out = endTool("select", ctx, dragged.state);
+
+    expect(out.commit?.selection).toEqual([
+      tileKey(1, 2, 0),
+      tileKey(3, 2, 0),
+    ]);
+    const selected = new Set(out.commit?.selection);
+    const boardKeys = new Set(out.commit?.items.map((item) => item.key));
+    for (const key of selected) expect(boardKeys.has(key)).toBe(true);
+    expect(selected.has(untouched.key)).toBe(false);
+  });
+
+  it("keeps undo on the old keys and redo on the new ones", () => {
+    const tile = makeTile({ column: 0, row: 0, zone: 0 });
+    const ctx = context([tile], { tool: "select", selection: [tile.key] });
+    const start = beginTool("select", ctx, NO_STATE, input(pointOf(0, 0)));
+    const dragged = moveTool("select", ctx, start.state, input(pointOf(2, 1)));
+    const out = endTool("select", ctx, dragged.state);
+    const movedKey = tileKey(2, 1, 0);
+
+    // The controller records the pre-move state as the undo entry.
+    const history = pushHistory(EMPTY_HISTORY, {
+      items: ctx.items,
+      selection: start.selection ?? [],
+      label: "تحريك",
+    });
+    const afterMove = {
+      items: out.commit?.items ?? [],
+      selection: out.commit?.selection ?? [],
+      label: "تحريك",
+    };
+    const undo = undoHistory(history, afterMove);
+    expect(undo?.entry.selection).toEqual([tile.key]);
+    expect(undo?.entry.items.map((item) => item.key)).toContain(tile.key);
+
+    // Undo restores the old board and selection; redo gets the moved state,
+    // whose selection already points at the new keys.
+    const redo = redoHistory(undo!.state, undo!.entry);
+    expect(redo?.entry.selection).toEqual([movedKey]);
+    expect(redo?.entry.items.map((item) => item.key)).toContain(movedKey);
   });
 });
 

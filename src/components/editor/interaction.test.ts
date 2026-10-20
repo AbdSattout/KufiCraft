@@ -51,6 +51,7 @@ import {
   lineRun,
   marqueeSelection,
   moveItems,
+  moveItemsWithSelection,
   nextZoom,
   panScrollOffset,
   pruneSelection,
@@ -61,6 +62,7 @@ import {
   shiftSelection,
   styleForSelection,
   wheelSteps,
+  wheelZoomDelta,
   zoomPercent,
   zoomScrollOffset,
   ZOOM_STOPS,
@@ -417,6 +419,57 @@ describe("selection operations", () => {
       tileKey(1, 0, 0),
       tileKey(10, 9, 0),
     ]);
+  });
+
+  it("remaps every moved key, keeping the selection's order", () => {
+    const moved = moveItemsWithSelection(
+      square,
+      items,
+      [tileKey(9, 9, 0), tileKey(0, 0, 0), tileKey(1, 0, 0)],
+      2,
+      3,
+    );
+    // Keys embed the cell, so every moved item has a new identity. The
+    // returned keys follow the selection order, not the board order.
+    expect(moved.keys).toEqual([
+      tileKey(11, 12, 0),
+      tileKey(2, 3, 0),
+      tileKey(3, 3, 0),
+    ]);
+    const onBoard = new Set(moved.items.map((item) => item.key));
+    for (const key of moved.keys) expect(onBoard.has(key)).toBe(true);
+    expect(moved.items).toEqual(
+      moveItems(
+        square,
+        items,
+        [tileKey(9, 9, 0), tileKey(0, 0, 0), tileKey(1, 0, 0)],
+        2,
+        3,
+      ),
+    );
+  });
+
+  it("keeps the selection's keys when clamping turns a move into a no-op", () => {
+    const corner = [tile(99, 99, 0)];
+    // A stray key is kept too: `pruneSelection` owns dropping keys that have
+    // no item, so the move helper never silently rewrites the selection.
+    const keys = [tileKey(99, 99, 0), "ghost"];
+    const moved = moveItemsWithSelection(square, corner, keys, 5, 5);
+    expect(moved.keys).toEqual(keys);
+    expect(moved.items).toEqual(corner);
+  });
+
+  it("remaps a wrapped key on the circular grid", () => {
+    const ring = [tile(2, 35, 0)];
+    const moved = moveItemsWithSelection(
+      circular,
+      ring,
+      [tileKey(2, 35, 0)],
+      1,
+      2,
+    );
+    expect(moved.keys).toEqual([tileKey(3, 1, 0)]);
+    expect(moved.items.map((item) => item.key)).toEqual([tileKey(3, 1, 0)]);
   });
 
   it("clamps a move to the grid", () => {
@@ -1144,9 +1197,36 @@ describe("zoom controls", () => {
 });
 
 describe("wheel zoom normalisation", () => {
+  it("zooms only on Shift + wheel and leaves the rest to the browser", () => {
+    const wheel = (overrides: Partial<Parameters<typeof wheelZoomDelta>[0]>) => ({
+      deltaX: 0,
+      deltaY: 100,
+      shiftKey: false,
+      ctrlKey: false,
+      metaKey: false,
+      ...overrides,
+    });
+
+    // Plain wheel: no zoom, and the listener must not preventDefault it.
+    expect(wheelZoomDelta(wheel({}))).toBeNull();
+    expect(wheelZoomDelta(wheel({ deltaY: 0, deltaX: 100 }))).toBeNull();
+    // Shift + wheel: the travel keeps its sign (down zooms out).
+    expect(wheelZoomDelta(wheel({ shiftKey: true }))).toBe(100);
+    expect(wheelZoomDelta(wheel({ shiftKey: true, deltaY: -100 }))).toBe(-100);
+    // Some browsers report a Shift-wheel as horizontal travel.
+    expect(
+      wheelZoomDelta(wheel({ shiftKey: true, deltaY: 0, deltaX: -80 })),
+    ).toBe(-80);
+    // Ctrl/Cmd + wheel is the browser's own zoom, Shift or not.
+    expect(wheelZoomDelta(wheel({ shiftKey: true, ctrlKey: true }))).toBeNull();
+    expect(wheelZoomDelta(wheel({ shiftKey: true, metaKey: true }))).toBeNull();
+    // No travel is not a gesture.
+    expect(wheelZoomDelta(wheel({ shiftKey: true, deltaY: 0 }))).toBeNull();
+  });
+
   it("walks one stop on a gesture's first event, whatever its size or mode", () => {
-    // The acceptance criterion: one scroll must *visibly* zoom. Banking alone
-    // left a 48 px Firefox notch (deltaMode 1) and a ~53 px Linux trackpad
+    // The acceptance criterion: one Shift + scroll must *visibly* zoom.
+    // Banking alone left a 48 px Firefox notch (deltaMode 1) and a ~53 px trackpad
     // event under the 60 px stop — they did nothing at all.
     expect(wheelSteps(WHEEL_IDLE, 53, 0, 0)).toEqual({
       pending: 0,
@@ -1292,7 +1372,7 @@ describe("wheel zoom normalisation", () => {
     }
   });
 
-  it("maps one scroll-up notch to one ladder stop in", () => {
+  it("maps one Shift + scroll-up notch to one ladder stop in", () => {
     const { steps } = wheelSteps(WHEEL_IDLE, -100, 0, 0);
     expect(steps).toBe(-1);
     // The handler's rule: `deltaY > 0` (wheel down) zooms out.

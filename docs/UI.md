@@ -137,6 +137,9 @@ board link — it would point at the page you are already on.
 Layout (RTL): top bar (project name inline-edit, save state “محفوظ تلقائيًا”,
 undo/redo, export menu, back to dashboard) + right toolbar (RTL: the
 primary/right side holds tools) + canvas center + bottom-left zoom/status.
+The editor is a viewport-sized app shell (`fixed`, `h-dvh`), so the page
+itself never scrolls; the settings column is the only sidebar scroller, and
+it scrolls only when its panels exceed the viewport.
 
 Tools are **one class each in a registry** (`src/components/editor/tools.ts`,
 `REGISTRY`); the rail, the shortcuts and the dispatcher all read the registry —

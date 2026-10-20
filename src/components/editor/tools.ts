@@ -46,7 +46,7 @@ import {
   linePreview,
   lineRun,
   marqueeSelection,
-  moveItems,
+  moveItemsWithSelection,
   rectFromPoints,
   shiftSelection,
   type ArcStyle,
@@ -287,22 +287,22 @@ class SelectTool extends KufiTool {
     if (state.kind === "move") {
       const delta = moveDelta(ctx, state);
       if (delta.dColumn === 0 && delta.dRow === 0) return { state: NO_STATE };
+      // The committed selection is the moved items' **new** keys: a key
+      // embeds the cell, so keeping `state.keys` would leave the selection
+      // pointing at fragments that no longer exist (`pruneSelection` drops
+      // them on the next render). The whole board rides along because a commit
+      // is diffed against the document (`toOps`); fragments alone would read as
+      // "delete everything else".
+      const moved = moveItemsWithSelection(
+        ctx.config,
+        ctx.items,
+        [...state.keys],
+        delta.dColumn,
+        delta.dRow,
+      );
       return {
         state: NO_STATE,
-        commit: commit(
-          // The **whole board** with the moved items on top: a commit's items
-          // are diffed against the document (`toOps`), so handing it only the
-          // fragments would read as "delete everything else".
-          moveItems(
-            ctx.config,
-            ctx.items,
-            [...state.keys],
-            delta.dColumn,
-            delta.dRow,
-          ),
-          state.keys,
-          "تحريك",
-        ),
+        commit: commit(moved.items, moved.keys, "تحريك"),
       };
     }
     return { state: NO_STATE };

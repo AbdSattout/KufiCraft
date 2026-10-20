@@ -474,10 +474,54 @@ export function shiftSelection(
   return moved;
 }
 
+/** One move: the next board and the old-key → new-key map of what moved. */
+interface MovePlan {
+  items: CanvasItem[];
+  /**
+   * Identity of every moved item **after** the move. A key embeds the cell
+   * coordinates (`tile:5:19:0`), so this is the only way a caller can keep a
+   * selection pointing at the fragments it just moved.
+   */
+  movedByKey: ReadonlyMap<string, string>;
+}
+
 /**
  * Moves the listed items by whole cells (clamped to the grid). Shape,
  * rotation, colour and the arc's direction/size are preserved; keys follow the
  * anchors. Moved items keep their relative order and land on top.
+ */
+function movePlan(
+  config: ProjectConfig,
+  items: readonly CanvasItem[],
+  keys: readonly string[],
+  dColumn: number,
+  dRow: number,
+): MovePlan {
+  const delta = clampDelta(config, items, keys, dColumn, dRow);
+  if (delta.dColumn === 0 && delta.dRow === 0) {
+    return { items: [...items], movedByKey: new Map() };
+  }
+  const wanted = new Set(keys);
+  const rest: CanvasItem[] = [];
+  const moved: CanvasItem[] = [];
+  const movedByKey = new Map<string, string>();
+  for (const item of items) {
+    if (wanted.has(item.key)) {
+      const next = shiftedItem(config, item, delta.dColumn, delta.dRow);
+      moved.push(next);
+      movedByKey.set(item.key, next.key);
+    } else {
+      rest.push(item);
+    }
+  }
+  return { items: [...rest, ...moved], movedByKey };
+}
+
+/**
+ * Moves the listed items by whole cells (clamped to the grid) and answers with
+ * the whole board. Shape, rotation, colour and the arc's direction/size are
+ * preserved; keys follow the anchors. Moved items keep their relative order
+ * and land on top.
  */
 export function moveItems(
   config: ProjectConfig,
@@ -486,19 +530,43 @@ export function moveItems(
   dColumn: number,
   dRow: number,
 ): CanvasItem[] {
-  const delta = clampDelta(config, items, keys, dColumn, dRow);
-  if (delta.dColumn === 0 && delta.dRow === 0) return [...items];
-  const wanted = new Set(keys);
-  const rest: CanvasItem[] = [];
-  const moved: CanvasItem[] = [];
-  for (const item of items) {
-    if (wanted.has(item.key)) {
-      moved.push(shiftedItem(config, item, delta.dColumn, delta.dRow));
-    } else {
-      rest.push(item);
-    }
+  return movePlan(config, items, keys, dColumn, dRow).items;
+}
+
+/** A move with the selection remapped to the moved items' new keys. */
+export interface MoveSelectionResult {
+  items: CanvasItem[];
+  /** New keys of the moved items, in `keys` order (duplicates dropped). */
+  keys: string[];
+}
+
+/**
+ * Moves the listed items and keeps their keys selected.
+ *
+ * Item keys embed the cell coordinates, so every move renames its items. This
+ * is the move entry point gesture code should use: `moveItems` alone returns
+ * the board, and a caller that then keeps the **old** keys would silently drop
+ * the selection on the next render (`pruneSelection` drops keys with no item).
+ * `keys` comes back in the same order so a multi-selection stays in the order
+ * the user built it; a move clamped to zero keeps every key as it is.
+ */
+export function moveItemsWithSelection(
+  config: ProjectConfig,
+  items: readonly CanvasItem[],
+  keys: readonly string[],
+  dColumn: number,
+  dRow: number,
+): MoveSelectionResult {
+  const plan = movePlan(config, items, keys, dColumn, dRow);
+  const seen = new Set<string>();
+  const remapped: string[] = [];
+  for (const key of keys) {
+    const next = plan.movedByKey.get(key) ?? key;
+    if (seen.has(next)) continue;
+    seen.add(next);
+    remapped.push(next);
   }
-  return [...rest, ...moved];
+  return { items: plan.items, keys: remapped };
 }
 
 /** Applies a colour override (`undefined` → back to the project ink). */
@@ -879,7 +947,36 @@ export function zoomPercent(zoom: number): number {
   return Math.round(zoom * 100);
 }
 
-/* Wheel delta normalisation (plain-wheel zoom). */
+/* Wheel delta normalisation (Shift + wheel zoom). */
+
+/** The wheel-event fields the zoom gate reads. */
+export interface WheelZoomInput {
+  deltaX: number;
+  deltaY: number;
+  shiftKey: boolean;
+  ctrlKey: boolean;
+  metaKey: boolean;
+}
+
+/**
+ * The travel a wheel event contributes to a zoom, or `null` when the event is
+ * not ours and must keep the browser's own behaviour.
+ *
+ * Zoom is **Shift + wheel** only: a plain wheel scrolls the canvas pane like
+ * any other scroller (the listener must not `preventDefault` it), and
+ * `Ctrl`/`Cmd` + wheel stays the browser's page zoom / trackpad pinch. Browsers
+ * disagree on which axis a Shift-wheel reports — some keep it vertical
+ * (`deltaY`), others turn it into horizontal travel (`deltaX`) — so the axis
+ * with the larger travel wins.
+ */
+export function wheelZoomDelta(event: WheelZoomInput): number | null {
+  if (!event.shiftKey || event.ctrlKey || event.metaKey) return null;
+  const travel =
+    Math.abs(event.deltaY) >= Math.abs(event.deltaX)
+      ? event.deltaY
+      : event.deltaX;
+  return Number.isFinite(travel) && travel !== 0 ? travel : null;
+}
 
 /** Pixels of wheel travel that count as one stop on the zoom ladder. */
 const WHEEL_NOTCH_PX = 60;
