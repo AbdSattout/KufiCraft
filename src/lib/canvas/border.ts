@@ -6,7 +6,7 @@
  *
  *   • a stroked item (line fallback, polyline, arc) is stroked again first,
  *     wider by the border band on each side: `itemWidth + 2 × width`, with the
- *     same butt caps and mitre joins as the ink;
+ *     same cap and join as the ink, so the border wraps a round end;
  *   • a filled item (tiles, line bars) gets a native stroke of the same path,
  *     `2 × width` wide, painted **before** the fill. The fill covers the inner
  *     half, so exactly `width` remains visible outside every edge and corner.

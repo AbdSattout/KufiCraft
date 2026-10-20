@@ -49,6 +49,8 @@ function sampleItems(): CanvasItem[] {
       key: lineKey({ column: 2, row: 3 }, { column: 4, row: 3 }),
       from: { column: 2, row: 3 },
       to: { column: 4, row: 3 },
+      cap: "round",
+      join: "bevel",
     },
     {
       type: "stroke",
@@ -65,6 +67,8 @@ function sampleItems(): CanvasItem[] {
         { column: 2, row: 2 },
         { column: 3, row: 1 },
       ],
+      cap: "square",
+      join: "round",
     },
     {
       type: "arc",
@@ -78,6 +82,8 @@ function sampleItems(): CanvasItem[] {
       to: { column: 4, row: 2 },
       direction: "counterclockwise",
       size: "half",
+      cap: "round",
+      join: "bevel",
     },
   ];
 }
@@ -691,6 +697,23 @@ describe("normalizeItem", () => {
         config,
       )?.border,
     ).toEqual({ width: 2, color: DEFAULT_BORDER_COLOR });
+  });
+
+  it("keeps stroke caps and joins, dropping defaults and unknown values", () => {
+    const config = sampleConfig();
+    const line = sampleItems()[2];
+    expect(normalizeItem({ ...line, cap: "round", join: "bevel" }, config)).toMatchObject({
+      cap: "round",
+      join: "bevel",
+    });
+    for (const style of [
+      { cap: "butt", join: "miter" },
+      { cap: "bogus", join: "bogus" },
+    ]) {
+      const clean = normalizeItem({ ...line, ...style }, config);
+      expect(clean).not.toHaveProperty("cap");
+      expect(clean).not.toHaveProperty("join");
+    }
   });
 
   it("keeps a border on every item type and rounding where it applies", () => {

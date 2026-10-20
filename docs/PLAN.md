@@ -83,7 +83,7 @@ backend) · Better Auth (passkeys, local-install component) · Bun · vitest.
   identity dedup and no hover preview (see the follow-up below). Line and arc
   take **click-click as well as drag**; both show the armed start cell as a
   filled highlight. Arc geometry was ported from `kufi.js` and now exposes
-  direction + size controls with butt/mitre heads.
+  direction + size controls and configurable cap/join ends.
 * Colour is **per fragment** (`resolvedColor`), so changing the document ink
   never repaints what is already drawn; the toolbar shape icons respect rotation.
 * The sidebar was reorganised: **one** colour control (`لون الحبر` is the pen's

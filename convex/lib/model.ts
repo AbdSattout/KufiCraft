@@ -258,6 +258,21 @@ export const DEFAULT_BORDER_WIDTH = 0;
 export const DEFAULT_BORDER_COLOR = "#000000";
 
 /**
+ * Stroke ends and joins for the stroked items (a diagonal `line`, a `stroke`
+ * polyline and an `arc`). They are the SVG vocabulary, so a renderer can pass
+ * them straight through.
+ */
+export const STROKE_CAPS = ["butt", "round", "square"] as const;
+export type StrokeCap = (typeof STROKE_CAPS)[number];
+
+export const STROKE_JOINS = ["miter", "round", "bevel"] as const;
+export type StrokeJoin = (typeof STROKE_JOINS)[number];
+
+/** Fresh strokes end flush and meet at a mitre — the pre-option rendering. */
+export const DEFAULT_STROKE_CAP: StrokeCap = "butt";
+export const DEFAULT_STROKE_JOIN: StrokeJoin = "miter";
+
+/**
  * NaN-safe clamp of a rounding radius. A missing / broken value is `0` — the
  * safe end: there is no rounding at all.
  */
@@ -304,6 +319,36 @@ export function sanitizeBorder(border: ItemBorder): ItemBorder | undefined {
       ? border.color.slice(0, MAX_COLOR_LENGTH)
       : DEFAULT_BORDER_COLOR;
   return { width, color };
+}
+
+/** A stored stroke cap, falling back to the flush default when unrecognised. */
+export function normalizeStrokeCap(value: unknown): StrokeCap {
+  return (STROKE_CAPS as readonly unknown[]).includes(value)
+    ? (value as StrokeCap)
+    : DEFAULT_STROKE_CAP;
+}
+
+/** A stored stroke join, falling back to the mitre default when unrecognised. */
+export function normalizeStrokeJoin(value: unknown): StrokeJoin {
+  return (STROKE_JOINS as readonly unknown[]).includes(value)
+    ? (value as StrokeJoin)
+    : DEFAULT_STROKE_JOIN;
+}
+
+/**
+ * Normalises a stored cap: the default is the absent state, exactly like a
+ * zero rounding radius or border width, so documents drawn before the option
+ * existed round-trip without new fields.
+ */
+export function sanitizeStrokeCap(value: unknown): StrokeCap | undefined {
+  const cap = normalizeStrokeCap(value);
+  return cap === DEFAULT_STROKE_CAP ? undefined : cap;
+}
+
+/** Normalises a stored join; the default (`miter`) is the absent state. */
+export function sanitizeStrokeJoin(value: unknown): StrokeJoin | undefined {
+  const join = normalizeStrokeJoin(value);
+  return join === DEFAULT_STROKE_JOIN ? undefined : join;
 }
 
 /** Default palette. */
@@ -528,6 +573,10 @@ export interface LineItem {
   /** Corner rounding of the bar's box; absent means square corners. */
   rounding?: ItemRounding;
   border?: ItemBorder;
+  /** End shape when the pair falls back to a stroke; absent means butt. */
+  cap?: StrokeCap;
+  /** Turn shape when the pair falls back to a stroke; absent means miter. */
+  join?: StrokeJoin;
   color?: string;
 }
 
@@ -545,6 +594,10 @@ export interface StrokeItem {
   /** Rounding of the polyline's turns; absent means sharp corners. */
   rounding?: ItemRounding;
   border?: ItemBorder;
+  /** End shape of an open polyline; absent means butt. */
+  cap?: StrokeCap;
+  /** Shape of the polyline's turns; absent means miter. */
+  join?: StrokeJoin;
   color?: string;
 }
 
@@ -563,6 +616,10 @@ export interface ArcItem {
   direction: ArcDirection;
   size: ArcSize;
   border?: ItemBorder;
+  /** End shape; absent means butt. */
+  cap?: StrokeCap;
+  /** Turn shape carried with the stroke style; absent means miter. */
+  join?: StrokeJoin;
   color?: string;
 }
 
@@ -901,6 +958,7 @@ export function itemSignature(item: CanvasItem): string {
         item.color ?? "",
         roundingField(item.rounding),
         borderField(item.border),
+        strokeField(item.cap, item.join),
       ].join("|");
     case "stroke":
       return [
@@ -910,6 +968,7 @@ export function itemSignature(item: CanvasItem): string {
         item.color ?? "",
         roundingField(item.rounding),
         borderField(item.border),
+        strokeField(item.cap, item.join),
       ].join("|");
     case "arc":
       return [
@@ -920,6 +979,7 @@ export function itemSignature(item: CanvasItem): string {
         item.size,
         item.color ?? "",
         borderField(item.border),
+        strokeField(item.cap, item.join),
       ].join("|");
   }
 }
@@ -933,6 +993,19 @@ function roundingField(rounding: ItemRounding | undefined): string {
 function borderField(border: ItemBorder | undefined): string {
   if (border === undefined) return "";
   return `b${border.width}:${border.color}`;
+}
+
+/** Stroke ends and joins as one signature field (`""` at their defaults). */
+function strokeField(cap: StrokeCap | undefined, join: StrokeJoin | undefined): string {
+  const normalizedCap = normalizeStrokeCap(cap);
+  const normalizedJoin = normalizeStrokeJoin(join);
+  if (
+    normalizedCap === DEFAULT_STROKE_CAP &&
+    normalizedJoin === DEFAULT_STROKE_JOIN
+  ) {
+    return "";
+  }
+  return `s${normalizedCap}:${normalizedJoin}`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -980,6 +1053,18 @@ export const arcSizeValidator = v.union(
   v.literal("quarter"),
   v.literal("half"),
   v.literal("threeQuarter"),
+);
+
+export const strokeCapValidator = v.union(
+  v.literal("butt"),
+  v.literal("round"),
+  v.literal("square"),
+);
+
+export const strokeJoinValidator = v.union(
+  v.literal("miter"),
+  v.literal("round"),
+  v.literal("bevel"),
 );
 
 export const cellValidator = v.object({
@@ -1049,6 +1134,8 @@ export const canvasItemValidator = v.union(
     to: fragmentValidator,
     rounding: v.optional(roundingValidator),
     border: v.optional(borderValidator),
+    cap: v.optional(strokeCapValidator),
+    join: v.optional(strokeJoinValidator),
     color: v.optional(v.string()),
   }),
   v.object({
@@ -1058,6 +1145,8 @@ export const canvasItemValidator = v.union(
     closed: v.optional(v.boolean()),
     rounding: v.optional(roundingValidator),
     border: v.optional(borderValidator),
+    cap: v.optional(strokeCapValidator),
+    join: v.optional(strokeJoinValidator),
     color: v.optional(v.string()),
   }),
   v.object({
@@ -1068,6 +1157,8 @@ export const canvasItemValidator = v.union(
     direction: arcDirectionValidator,
     size: arcSizeValidator,
     border: v.optional(borderValidator),
+    cap: v.optional(strokeCapValidator),
+    join: v.optional(strokeJoinValidator),
     color: v.optional(v.string()),
   }),
 );

@@ -83,6 +83,8 @@ function Panels({ editor }: { editor: EditorController }) {
         previewRounding={editor.previewRounding}
         setBorder={editor.setBorder}
         previewBorderWidth={editor.previewBorderWidth}
+        setStrokeCap={editor.setStrokeCap}
+        setStrokeJoin={editor.setStrokeJoin}
         recolourSelection={editor.recolourSelection}
         duplicateSelection={editor.duplicateSelection}
         deleteSelection={editor.deleteSelection}

@@ -48,6 +48,9 @@ describe("editor preferences", () => {
     // No `window` in the node test environment → the default resolver is null.
     expect(loadEditorPrefs()).toEqual(DEFAULT_EDITOR_PREFS);
     expect(DEFAULT_EDITOR_PREFS.border).toEqual(DEFAULT_BORDER);
+    expect(DEFAULT_EDITOR_PREFS.border.width).toBe(0);
+    expect(DEFAULT_EDITOR_PREFS.cap).toBe("butt");
+    expect(DEFAULT_EDITOR_PREFS.join).toBe("miter");
   });
 
   it("round-trips every field", () => {
@@ -66,6 +69,8 @@ describe("editor preferences", () => {
       inkSwatches: ["#111827", "#7c2d12"],
       rounding: { radius: 0.15, corners: 5 },
       border: { width: 4, color: "#123456" },
+      cap: "round" as const,
+      join: "bevel" as const,
     };
     saveEditorPrefs(prefs, storage);
     expect(loadEditorPrefs(storage)).toEqual(prefs);
@@ -104,6 +109,40 @@ describe("editor preferences", () => {
       }),
     );
     expect(defaulted.border).toEqual({ width: 4, color: "#000000" });
+  });
+
+  it("resets a pre-width-switch border once, so its old width is not carried", () => {
+    const storage = new MemoryStorage({
+      [EDITOR_PREFS_KEY]: JSON.stringify({
+        border: { sides: 15, width: 2, color: "#123456" },
+      }),
+    });
+    expect(loadEditorPrefs(storage).border).toEqual(DEFAULT_BORDER);
+    // Saving writes the current shape, so the stale mask is gone for good.
+    saveEditorPrefs(loadEditorPrefs(storage), storage);
+    const stored = JSON.parse(storage.getItem(EDITOR_PREFS_KEY) ?? "{}") as {
+      border?: Record<string, unknown>;
+    };
+    expect(stored.border).toEqual(DEFAULT_BORDER);
+    expect(stored.border).not.toHaveProperty("sides");
+  });
+
+  it("reads stroke caps and joins, falling back to the defaults", () => {
+    const explicit = loadEditorPrefs(
+      new MemoryStorage({
+        [EDITOR_PREFS_KEY]: JSON.stringify({ cap: "round", join: "bevel" }),
+      }),
+    );
+    expect(explicit.cap).toBe("round");
+    expect(explicit.join).toBe("bevel");
+
+    const broken = loadEditorPrefs(
+      new MemoryStorage({
+        [EDITOR_PREFS_KEY]: JSON.stringify({ cap: "bogus", join: 3 }),
+      }),
+    );
+    expect(broken.cap).toBe("butt");
+    expect(broken.join).toBe("miter");
   });
 
   it("remembers the hand tool — it is a rail tool like any other", () => {

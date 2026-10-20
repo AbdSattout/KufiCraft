@@ -860,7 +860,7 @@ describe("arcBetween + linePreview", () => {
     );
   });
 
-  it("previews with the draw style's rounding and border", () => {
+  it("previews with the draw style's rounding, border, cap and join", () => {
     const rounding = { radius: 0.2, corners: CORNER_ALL };
     const border = { width: 2, color: "#000000" };
     // Rounding turns the straight run into one roundable bar in the preview,
@@ -872,10 +872,16 @@ describe("arcBetween + linePreview", () => {
         { column: 2, row: 0 },
       ],
       null,
-      { rounding, border },
+      { rounding, border, cap: "round", join: "bevel" },
     );
     expect(preview).toHaveLength(1);
-    expect(preview[0]).toMatchObject({ type: "line", rounding, border });
+    expect(preview[0]).toMatchObject({
+      type: "line",
+      rounding,
+      border,
+      cap: "round",
+      join: "bevel",
+    });
   });
 });
 
@@ -886,16 +892,32 @@ describe("styleForSelection", () => {
     expect(DEFAULT_STYLE.border).toEqual(DEFAULT_BORDER);
   });
 
-  it("shows the selected item's own rounding and border", () => {
+  it("shows the selected item's own rounding, border, cap and join", () => {
     const rounding = { radius: 0.2, corners: CORNER_ALL };
     const border = { width: 3, color: "#ff0000" };
-    const item: CanvasItem = { ...tile(0, 0), rounding, border };
+    const item: CanvasItem = {
+      ...makeStroke(
+        [
+          { column: 0, row: 0 },
+          { column: 2, row: 2 },
+        ],
+        false,
+      ),
+      rounding,
+      border,
+      cap: "round",
+      join: "bevel",
+    };
     expect(styleForSelection(DEFAULT_STYLE, item)).toMatchObject({
       rounding,
       border,
+      cap: "round",
+      join: "bevel",
     });
     // The draw style itself is never mutated by the panel's view.
     expect(DEFAULT_STYLE.rounding).toEqual({ radius: 0, corners: CORNER_ALL });
+    expect(DEFAULT_STYLE.cap).toBe("butt");
+    expect(DEFAULT_STYLE.join).toBe("miter");
   });
 
   it("shows the off states for an item without style and no rounding on an arc", () => {
@@ -913,6 +935,8 @@ describe("styleForSelection", () => {
     expect(styleForSelection(DEFAULT_STYLE, arc)).toMatchObject({
       rounding: { radius: 0, corners: CORNER_ALL },
       border: { width: 2, color: "#000000" },
+      cap: "butt",
+      join: "miter",
     });
   });
 });

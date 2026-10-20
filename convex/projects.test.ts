@@ -1733,6 +1733,76 @@ describe("item sanitisation", () => {
     });
   });
 
+  it("keeps cap and join on stroked items, dropping the defaults", async () => {
+    const t = newTest();
+    const asA = t.withIdentity(USER_A);
+    const projectId = await createProject(t, USER_A, "أطراف الخط", { base: 10 });
+    const line = {
+      type: "line",
+      key: lineKey({ column: 0, row: 5 }, { column: 4, row: 5 }),
+      from: { column: 0, row: 5 },
+      to: { column: 4, row: 5 },
+      cap: "round",
+      join: "bevel",
+    } satisfies CanvasItem;
+    const stroke = {
+      type: "stroke",
+      key: strokeKey(
+        [
+          { column: 0, row: 2 },
+          { column: 2, row: 2 },
+          { column: 2, row: 4 },
+        ],
+        false,
+      ),
+      points: [
+        { column: 0, row: 2 },
+        { column: 2, row: 2 },
+        { column: 2, row: 4 },
+      ],
+      cap: "square",
+      join: "round",
+    } satisfies CanvasItem;
+    const arc = {
+      type: "arc",
+      key: arcKey(
+        { column: 0, row: 6 },
+        { column: 4, row: 6 },
+        "clockwise",
+        "half",
+      ),
+      from: { column: 0, row: 6 },
+      to: { column: 4, row: 6 },
+      direction: "clockwise",
+      size: "half",
+      cap: "round",
+      join: "bevel",
+    } satisfies CanvasItem;
+    const plain = {
+      type: "line",
+      key: lineKey({ column: 0, row: 8 }, { column: 4, row: 8 }),
+      from: { column: 0, row: 8 },
+      to: { column: 4, row: 8 },
+      cap: "butt",
+      join: "miter",
+    } satisfies CanvasItem;
+
+    await asA.mutation(api.projects.applyOps, {
+      projectId,
+      ops: [{ type: "add", items: [line, stroke, arc, plain] }],
+    });
+
+    const doc = required(
+      await asA.query(api.projects.get, { projectId }),
+      "project should exist",
+    );
+    expect(doc.items[0]).toMatchObject({ cap: "round", join: "bevel" });
+    expect(doc.items[1]).toMatchObject({ cap: "square", join: "round" });
+    expect(doc.items[2]).toMatchObject({ cap: "round", join: "bevel" });
+    expect(doc.items[3]).not.toHaveProperty("cap");
+    expect(doc.items[3]).not.toHaveProperty("join");
+  });
+
   it("uses the configured base to size the legal coordinate range", async () => {
     const t = newTest();
     const asA = t.withIdentity(USER_A);

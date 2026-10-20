@@ -5,7 +5,8 @@
  *
  *   • `kuficraft.editor-prefs.v1` — how the editor opens: tool, shape and
  *     rotation, the arc style (direction + size), zoom, the construction grid,
- *     the last few ink colours and the next stroke's style (rounding + border).
+ *     the last few ink colours and the next stroke's style (rounding, border,
+ *     cap + join).
  *   • `kuficraft.last-config.v1` — the last committed project config, used as
  *     the default in the dashboard's «لوحة جديدة» dialog. The ratio, cell size,
  *     grid type, colours and line shape live here, not in the prefs: they are
@@ -28,6 +29,8 @@ import type {
   ItemRounding,
   ProjectConfig,
   ShapeId,
+  StrokeCap,
+  StrokeJoin,
 } from "@/lib/canvas/model";
 import {
   ARC_DIRECTIONS,
@@ -35,9 +38,13 @@ import {
   CORNER_ALL,
   DEFAULT_BORDER,
   DEFAULT_BORDER_COLOR,
+  DEFAULT_STROKE_CAP,
+  DEFAULT_STROKE_JOIN,
   MAX_BORDER_WIDTH,
   MAX_COLOR_LENGTH,
   MAX_ROUNDING_RADIUS,
+  normalizeStrokeCap,
+  normalizeStrokeJoin,
 } from "@/lib/canvas/model";
 import { SHAPE_ORDER } from "@/lib/canvas/shapes";
 import { TOOL_ORDER } from "@/components/editor/tools";
@@ -72,6 +79,10 @@ export interface EditorPrefs {
   rounding: ItemRounding;
   /** Outside border of the next drawn items (width 0 = none). */
   border: ItemBorder;
+  /** End shape of the next stroked item. */
+  cap: StrokeCap;
+  /** Turn shape of the next stroked item. */
+  join: StrokeJoin;
 }
 
 export const DEFAULT_EDITOR_PREFS: EditorPrefs = {
@@ -84,6 +95,8 @@ export const DEFAULT_EDITOR_PREFS: EditorPrefs = {
   inkSwatches: [],
   rounding: { radius: 0, corners: CORNER_ALL },
   border: { ...DEFAULT_BORDER },
+  cap: DEFAULT_STROKE_CAP,
+  join: DEFAULT_STROKE_JOIN,
 };
 
 /** The slice of the Web Storage API this module needs (easy to stub). */
@@ -187,9 +200,18 @@ function roundingPref(value: unknown): ItemRounding {
   return { radius, corners };
 }
 
-/** Border from prefs: width is the switch, colour defaults to black. */
+/**
+ * Border from prefs: width is the switch, colour defaults to black.
+ *
+ * Prefs written before the width switch carried a `sides` mask and remembered
+ * an always-on width (the old default was 2). That width must not turn the new
+ * default of 0 into an unexpected outline, so a stored mask resets the whole
+ * border once; the next save writes the new shape and the guard stops
+ * matching. The current build never writes `sides`.
+ */
 function borderPref(value: unknown): ItemBorder {
   const record = isRecord(value) ? value : {};
+  if (record.sides !== undefined) return { ...DEFAULT_EDITOR_PREFS.border };
   const width =
     typeof record.width === "number" && Number.isFinite(record.width)
       ? Math.min(MAX_BORDER_WIDTH, Math.max(0, record.width))
@@ -242,6 +264,8 @@ export function loadEditorPrefs(
     inkSwatches: normalizeSwatches(record.inkSwatches),
     rounding: roundingPref(record.rounding),
     border: borderPref(record.border),
+    cap: normalizeStrokeCap(record.cap),
+    join: normalizeStrokeJoin(record.join),
   };
 }
 

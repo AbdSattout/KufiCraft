@@ -870,6 +870,8 @@ describe("lineItems with anchored points", () => {
       path: cmdsToPath([M(at.x, at.y), L(at.x, at.y)]),
       mode: "stroke",
       width: inkUnit(config),
+      cap: "butt",
+      join: "miter",
     });
   });
 
@@ -943,6 +945,41 @@ describe("lineItems with anchored points", () => {
     expect(polyline[0]).toMatchObject({ type: "stroke", border });
   });
 
+  it("carries cap and join to bars and polylines, not filled squares", () => {
+    const style = { cap: "round" as const, join: "bevel" as const };
+    const bar = lineItems(
+      makeConfig({ straightLinesAsSquares: false }),
+      [{ column: 0, row: 4 }, { column: 2, row: 4 }],
+      false,
+      undefined,
+      style,
+    );
+    expect(bar[0]).toMatchObject({ type: "line", ...style });
+
+    const polyline = lineItems(
+      config,
+      [{ column: 0, row: 0 }, { column: 2, row: 2 }],
+      false,
+      undefined,
+      style,
+    );
+    expect(polyline[0]).toMatchObject({ type: "stroke", ...style });
+    expect(itemRender(config, polyline[0])).toMatchObject({
+      cap: "round",
+      join: "bevel",
+    });
+
+    const squares = lineItems(
+      config,
+      [{ column: 0, row: 4 }, { column: 2, row: 4 }],
+      false,
+      undefined,
+      style,
+    );
+    expect(squares.every((item) => item.type === "tile")).toBe(true);
+    expect(squares.every((item) => !("cap" in item))).toBe(true);
+  });
+
   it("draws the anchored points, not the cell centres", () => {
     const points = [linePoint(0, 0, undefined, { x: 0, y: 0 }), linePoint(2, 0, undefined, { x: 1, y: 1 })];
     const items = lineItems(config, points, false);
@@ -954,6 +991,8 @@ describe("lineItems with anchored points", () => {
       path: cmdsToPath([M(0, 0), L(2 * cell + ink, ink)]),
       mode: "stroke",
       width: ink,
+      cap: "butt",
+      join: "miter",
     });
   });
 

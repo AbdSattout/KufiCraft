@@ -106,21 +106,20 @@ function renderSvgString(
     // The border is the item's own path stroked once, before the ink: a wider
     // copy of a stroked item, or a native outline under a filled one. The fill
     // (or the ink stroke) covers the inner half, leaving exactly the border
-    // band outside.
+    // band outside. It inherits the item's cap and join, so a round end wraps
+    // the border around the ink.
     if (rendered.border !== undefined) {
       out.push(
         `<path${key} d="${d}" fill="none" stroke="${escapeXml(rendered.border.color)}"` +
           ` stroke-width="${num(rendered.border.width)}"` +
-          ` stroke-linecap="butt" stroke-linejoin="miter"/>`,
+          ` stroke-linecap="${rendered.cap}" stroke-linejoin="${rendered.join}"/>`,
       );
     }
     if (rendered.mode === "stroke") {
-      // Butt caps and mitre joins: a rib ends flush with the ink edge, exactly
-      // like the reference app (no rounded heads).
       out.push(
         `<path${key} d="${d}" fill="none" stroke="${color}"` +
           ` stroke-width="${num(rendered.width)}"` +
-          ` stroke-linecap="butt" stroke-linejoin="miter"/>`,
+          ` stroke-linecap="${rendered.cap}" stroke-linejoin="${rendered.join}"/>`,
       );
     } else {
       out.push(`<path${key} d="${d}" fill="${color}"/>`);
