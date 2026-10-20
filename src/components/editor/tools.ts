@@ -26,7 +26,6 @@ import type {
   ArcPoint,
   CanvasItem,
   CanvasItemType,
-  Cell,
   GridType,
   LinePoint,
 } from "@/lib/canvas/model";
@@ -40,18 +39,20 @@ import {
   anchorsAlongLine,
   arcBetween,
   arcPointAt,
-  clampDelta,
+  clampMoveOffset,
   hitTest,
   linePointAt,
   linePreview,
   lineRun,
   marqueeSelection,
   moveItemsWithSelection,
+  moveOffset,
   rectFromPoints,
   shiftSelection,
   type ArcStyle,
   type DrawStyle,
   type LineRun,
+  type MoveOffset,
   type ToolContext,
   type ToolId,
 } from "./interaction";
@@ -81,7 +82,13 @@ export type ToolState =
   | { kind: "arc"; from: LinePoint | null; to: LinePoint }
   | { kind: "line"; points: LinePoint[]; hover: LinePoint | null }
   | { kind: "marquee"; from: Point; to: Point; base: readonly string[] }
-  | { kind: "move"; from: Cell; to: Cell; keys: readonly string[] };
+  | {
+      kind: "move";
+      /** Pointer anchors: the cell delta and the 1:1 zone toggle both ride here. */
+      from: Anchor;
+      to: Anchor;
+      keys: readonly string[];
+    };
 
 export const NO_STATE: ToolState = { kind: "none" };
 
@@ -232,7 +239,7 @@ class SelectTool extends KufiTool {
   begin(ctx: ToolContext, state: ToolState, input: ToolInput): ToolOutcome {
     void state;
     const hit = hitTest(ctx.config, ctx.items, input.point);
-    const cell = cellAt(ctx, input.point);
+    const anchor = anchorAt(ctx.config, input.point);
     if (hit) {
       const already = ctx.selection.includes(hit.key);
       const selection = input.shift
@@ -243,7 +250,7 @@ class SelectTool extends KufiTool {
           ? ctx.selection
           : [hit.key];
       return {
-        state: { kind: "move", from: cell, to: cell, keys: selection },
+        state: { kind: "move", from: anchor, to: anchor, keys: selection },
         selection,
       };
     }
@@ -266,11 +273,15 @@ class SelectTool extends KufiTool {
       return tiny ? unchanged(state) : { state: { ...state, to: input.point } };
     }
     if (state.kind === "move") {
-      const cell = cellAt(ctx, input.point);
-      if (cell.column === state.to.column && cell.row === state.to.row) {
+      const anchor = anchorAt(ctx.config, input.point);
+      if (
+        anchor.column === state.to.column &&
+        anchor.row === state.to.row &&
+        anchor.zone === state.to.zone
+      ) {
         return unchanged(state);
       }
-      return { state: { ...state, to: cell } };
+      return { state: { ...state, to: anchor } };
     }
     return unchanged(state);
   }
@@ -285,20 +296,23 @@ class SelectTool extends KufiTool {
       return { state: NO_STATE, selection: [...merged] };
     }
     if (state.kind === "move") {
-      const delta = moveDelta(ctx, state);
-      if (delta.dColumn === 0 && delta.dRow === 0) return { state: NO_STATE };
+      const offset = moveFor(ctx, state);
+      if (offset.dColumn === 0 && offset.dRow === 0 && offset.zone === 0) {
+        return { state: NO_STATE };
+      }
       // The committed selection is the moved items' **new** keys: a key
-      // embeds the cell, so keeping `state.keys` would leave the selection
-      // pointing at fragments that no longer exist (`pruneSelection` drops
-      // them on the next render). The whole board rides along because a commit
-      // is diffed against the document (`toOps`); fragments alone would read as
-      // "delete everything else".
+      // embeds the cell and zone, so keeping `state.keys` would leave the
+      // selection pointing at fragments that no longer exist (`pruneSelection`
+      // drops them on the next render). The whole board rides along because a
+      // commit is diffed against the document (`toOps`); fragments alone would
+      // read as "delete everything else".
       const moved = moveItemsWithSelection(
         ctx.config,
         ctx.items,
         [...state.keys],
-        delta.dColumn,
-        delta.dRow,
+        offset.dColumn,
+        offset.dRow,
+        offset.zone,
       );
       return {
         state: NO_STATE,
@@ -323,15 +337,20 @@ class SelectTool extends KufiTool {
       };
     }
     if (state.kind === "move") {
-      const delta = moveDelta(ctx, state);
-      if (delta.dColumn === 0 && delta.dRow === 0) return EMPTY_PREVIEW;
+      const offset = moveFor(ctx, state);
+      if (offset.dColumn === 0 && offset.dRow === 0 && offset.zone === 0) {
+        return EMPTY_PREVIEW;
+      }
+      // The same offset the commit resolves: a 1:1 zone drag previews the
+      // fragments in their new zones, not only their new cells.
       return {
         items: shiftSelection(
           ctx.config,
           ctx.items,
           [...state.keys],
-          delta.dColumn,
-          delta.dRow,
+          offset.dColumn,
+          offset.dRow,
+          offset.zone,
         ),
         mode: "ghost",
         keys: [],
@@ -344,22 +363,23 @@ class SelectTool extends KufiTool {
   }
 }
 
-/** The cell under a pointer — moves are cell-quantised (zones ride along). */
-function cellAt(ctx: ToolContext, point: Point): Cell {
-  const anchor = anchorAt(ctx.config, point);
-  return { column: anchor.column, row: anchor.row };
-}
-
-function moveDelta(
+/**
+ * The move a drag has resolved so far, clamped to the grid. Preview and
+ * commit both call this, so the ghost and the stored board cannot disagree.
+ *
+ * At 1:1 a pointer that changes zone inside a cell still moves the item by the
+ * zone toggle (`moveOffset`); at denser ratios the toggle is zero and the
+ * zones ride along unchanged, because changing one would resize the fragment.
+ */
+function moveFor(
   ctx: ToolContext,
   state: Extract<ToolState, { kind: "move" }>,
-): { dColumn: number; dRow: number } {
-  return clampDelta(
+): MoveOffset {
+  return clampMoveOffset(
     ctx.config,
     ctx.items,
     state.keys,
-    state.to.column - state.from.column,
-    state.to.row - state.from.row,
+    moveOffset(ctx.config, state.from, state.to),
   );
 }
 

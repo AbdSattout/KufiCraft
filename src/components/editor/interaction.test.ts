@@ -34,6 +34,7 @@ import {
   cellLimits,
   centreScroll,
   clampDelta,
+  clampMoveOffset,
   clampToCanvas,
   clientToViewBox,
   configsEqual,
@@ -52,6 +53,7 @@ import {
   marqueeSelection,
   moveItems,
   moveItemsWithSelection,
+  moveOffset,
   nextZoom,
   panScrollOffset,
   pruneSelection,
@@ -565,6 +567,146 @@ describe("selection operations", () => {
       tileKey(1, 0, 0),
       tileKey(9, 9, 0),
     ]);
+  });
+});
+
+describe("1:1 zone-aware moves", () => {
+  it("turns a same-cell zone change into a move", () => {
+    const from: Anchor = { column: 2, row: 2, zone: 0 };
+    const to: Anchor = { column: 2, row: 2, zone: 1 };
+    // At 1:1 the two fragments are congruent, so the zone difference is the
+    // half-cell translation the item must make.
+    expect(moveOffset(equal, from, to)).toEqual({
+      dColumn: 0,
+      dRow: 0,
+      zone: 1,
+    });
+
+    const item = tile(2, 2, 0);
+    const moved = moveItemsWithSelection(equal, [item], [item.key], 0, 0, 1);
+    expect(moved.items).toEqual([tile(2, 2, 1)]);
+    expect(moved.keys).toEqual([tileKey(2, 2, 1)]);
+  });
+
+  it("toggles every fragment an item carries, anchors included", () => {
+    const ink = tile(0, 0, 0);
+    const line = makeLine(
+      { column: 0, row: 1, zone: 0 },
+      { column: 3, row: 1, zone: 0 },
+    );
+    const arc = makeArc({
+      from: { column: 0, row: 2, zone: 0 },
+      to: { column: 3, row: 2, zone: 0 },
+      direction: "clockwise",
+      size: "half",
+    });
+    const stroke = makeStroke(
+      [
+        linePoint(0, 3, 0, { x: 0, y: 1 }),
+        linePoint(1, 3, 3),
+      ],
+      false,
+    );
+    const board = [ink, line, arc, stroke];
+    const moved = shiftSelection(
+      equal,
+      board,
+      board.map((item) => item.key),
+      0,
+      0,
+      1,
+    );
+
+    expect(moved[0]).toMatchObject({ zone: 1 });
+    expect(moved[1]).toMatchObject({
+      from: { zone: 1 },
+      to: { zone: 1 },
+    });
+    expect(moved[2]).toMatchObject({
+      from: { zone: 1 },
+      to: { zone: 1 },
+    });
+    // A stroke point keeps its anchor relative to the translated fragment.
+    expect((moved[3] as StrokeItem).points).toMatchObject([
+      { column: 0, row: 3, zone: 1, anchor: { x: 0, y: 1 } },
+      { column: 1, row: 3, zone: 2 },
+    ]);
+  });
+
+  it("combines the cell delta with the zone toggle across cells", () => {
+    const from: Anchor = { column: 2, row: 2, zone: 0 };
+    const to: Anchor = { column: 4, row: 3, zone: 2 };
+    expect(moveOffset(equal, from, to)).toEqual({
+      dColumn: 2,
+      dRow: 1,
+      zone: 2,
+    });
+
+    const item = tile(2, 2, 0);
+    const moved = moveItemsWithSelection(equal, [item], [item.key], 2, 1, 2);
+    expect(moved.items).toEqual([tile(4, 3, 2)]);
+    expect(moved.keys).toEqual([tileKey(4, 3, 2)]);
+  });
+
+  it("applies one toggle to a multi-selection and remaps every key", () => {
+    const first = tile(2, 2, 0);
+    const second = tile(3, 2, 1);
+    const board = [first, second];
+    // The selection order is the user's, the board order is unchanged.
+    const moved = moveItemsWithSelection(
+      equal,
+      board,
+      [second.key, first.key],
+      1,
+      1,
+      1,
+    );
+    expect(moved.items).toEqual([tile(3, 3, 1), tile(4, 3, 0)]);
+    expect(moved.keys).toEqual([tileKey(4, 3, 0), tileKey(3, 3, 1)]);
+  });
+
+  it("keeps zones on denser grids", () => {
+    const from: Anchor = { column: 2, row: 2, zone: 0 };
+    // A zone change in the same cell is not a translation at 1:2 and denser.
+    expect(moveOffset(square, from, { column: 2, row: 2, zone: 1 })).toEqual({
+      dColumn: 0,
+      dRow: 0,
+      zone: 0,
+    });
+    expect(moveOffset(square, from, { column: 4, row: 3, zone: 2 })).toEqual({
+      dColumn: 2,
+      dRow: 1,
+      zone: 0,
+    });
+
+    const item = tile(2, 2, 0);
+    const moved = moveItemsWithSelection(square, [item], [item.key], 2, 1);
+    expect(moved.items).toEqual([tile(4, 3, 0)]);
+    expect(moved.keys).toEqual([tileKey(4, 3, 0)]);
+  });
+
+  it("clamps the cells at the edge but keeps the zone toggle", () => {
+    const board = [tile(99, 99, 0)];
+    const keys = [board[0].key];
+    const offset = clampMoveOffset(equal, board, keys, {
+      dColumn: 5,
+      dRow: 5,
+      zone: 3,
+    });
+    // The item cannot leave the board, but a fragment toggle lives inside its
+    // existing cell and is still a legal translation.
+    expect(offset).toEqual({ dColumn: 0, dRow: 0, zone: 3 });
+
+    const moved = moveItemsWithSelection(
+      equal,
+      board,
+      keys,
+      offset.dColumn,
+      offset.dRow,
+      offset.zone,
+    );
+    expect(moved.items).toEqual([tile(99, 99, 3)]);
+    expect(moved.keys).toEqual([tileKey(99, 99, 3)]);
   });
 });
 
@@ -1197,7 +1339,7 @@ describe("zoom controls", () => {
 });
 
 describe("wheel zoom normalisation", () => {
-  it("zooms only on Shift + wheel and leaves the rest to the browser", () => {
+  it("zooms only on Ctrl/Cmd + wheel and leaves the rest to the browser", () => {
     const wheel = (overrides: Partial<Parameters<typeof wheelZoomDelta>[0]>) => ({
       deltaX: 0,
       deltaY: 100,
@@ -1210,24 +1352,30 @@ describe("wheel zoom normalisation", () => {
     // Plain wheel: no zoom, and the listener must not preventDefault it.
     expect(wheelZoomDelta(wheel({}))).toBeNull();
     expect(wheelZoomDelta(wheel({ deltaY: 0, deltaX: 100 }))).toBeNull();
-    // Shift + wheel: the travel keeps its sign (down zooms out).
-    expect(wheelZoomDelta(wheel({ shiftKey: true }))).toBe(100);
-    expect(wheelZoomDelta(wheel({ shiftKey: true, deltaY: -100 }))).toBe(-100);
-    // Some browsers report a Shift-wheel as horizontal travel.
+    // Ctrl + wheel (Cmd on macOS): the travel keeps its sign (down zooms out).
+    expect(wheelZoomDelta(wheel({ ctrlKey: true }))).toBe(100);
+    expect(wheelZoomDelta(wheel({ ctrlKey: true, deltaY: -100 }))).toBe(-100);
+    expect(wheelZoomDelta(wheel({ metaKey: true }))).toBe(100);
+    // Some trackpads report a pinch as horizontal travel.
     expect(
-      wheelZoomDelta(wheel({ shiftKey: true, deltaY: 0, deltaX: -80 })),
+      wheelZoomDelta(wheel({ ctrlKey: true, deltaY: 0, deltaX: -80 })),
     ).toBe(-80);
-    // Ctrl/Cmd + wheel is the browser's own zoom, Shift or not.
+    // Shift + wheel is the browser's horizontal scroll, not our zoom.
+    expect(wheelZoomDelta(wheel({ shiftKey: true }))).toBeNull();
+    expect(
+      wheelZoomDelta(wheel({ shiftKey: true, deltaY: 0, deltaX: 100 })),
+    ).toBeNull();
+    // Shift wins over Ctrl/Cmd: the modified wheel keeps scrolling.
     expect(wheelZoomDelta(wheel({ shiftKey: true, ctrlKey: true }))).toBeNull();
     expect(wheelZoomDelta(wheel({ shiftKey: true, metaKey: true }))).toBeNull();
     // No travel is not a gesture.
-    expect(wheelZoomDelta(wheel({ shiftKey: true, deltaY: 0 }))).toBeNull();
+    expect(wheelZoomDelta(wheel({ ctrlKey: true, deltaY: 0 }))).toBeNull();
   });
 
   it("walks one stop on a gesture's first event, whatever its size or mode", () => {
-    // The acceptance criterion: one Shift + scroll must *visibly* zoom.
-    // Banking alone left a 48 px Firefox notch (deltaMode 1) and a ~53 px trackpad
-    // event under the 60 px stop — they did nothing at all.
+    // The acceptance criterion: one Ctrl/Cmd + scroll must *visibly* zoom.
+    // Banking alone left a 48 px Firefox notch (deltaMode 1) and a ~53 px
+    // trackpad event under the 60 px stop — they did nothing at all.
     expect(wheelSteps(WHEEL_IDLE, 53, 0, 0)).toEqual({
       pending: 0,
       direction: 1,
@@ -1372,7 +1520,7 @@ describe("wheel zoom normalisation", () => {
     }
   });
 
-  it("maps one Shift + scroll-up notch to one ladder stop in", () => {
+  it("maps one Ctrl/Cmd + scroll-up notch to one ladder stop in", () => {
     const { steps } = wheelSteps(WHEEL_IDLE, -100, 0, 0);
     expect(steps).toBe(-1);
     // The handler's rule: `deltaY > 0` (wheel down) zooms out.

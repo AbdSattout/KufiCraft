@@ -824,13 +824,15 @@ export function useEditor(
     view.scrollTop = next.top;
   }, [zoom]);
 
-  // Shift-wheel zoom over the canvas, anchored at the pointer, stepped by
-  // gestures (docs/CANVAS.md §6). A plain wheel is left to the browser: it
-  // scrolls the canvas pane like any other scroller, and the listener never
-  // calls `preventDefault()` for it. React attaches `wheel` passively, so a
-  // `preventDefault()` in `onWheel` would be a no-op (with a warning); the
-  // listener is attached by hand instead. It lives on the viewport element
-  // only, so the sidebar and panels keep their own wheel behaviour.
+  // Ctrl/Cmd-wheel zoom over the canvas, anchored at the pointer, stepped by
+  // gestures (docs/CANVAS.md §6). The zoom is ours, so the listener calls
+  // `preventDefault()` to keep the browser's page zoom out of the pane. A
+  // plain wheel is left to the browser and scrolls the canvas pane; Shift-wheel
+  // is left to the browser too, as its horizontal scroll. React attaches
+  // `wheel` passively, so a `preventDefault()` in `onWheel` would be a no-op
+  // (with a warning); the listener is attached by hand instead. It lives on
+  // the viewport element only, so the sidebar and panels keep their own wheel
+  // behaviour.
   useEffect(() => {
     if (!enabled || document.status !== "ready") return;
     const view = viewportRef.current;
@@ -840,17 +842,18 @@ export function useEditor(
     // gesture.
     let gesture: WheelGesture = WHEEL_IDLE;
     const onWheel = (event: WheelEvent) => {
-      // Only Shift + wheel zooms. The helper also leaves Ctrl/Cmd + wheel to
-      // the browser (trackpad pinch and page zoom are accessibility features
-      // this pane must not swallow), and a plain wheel to the pane's scroll.
+      // Only Ctrl/Cmd + wheel zooms (a trackpad pinch reports Ctrl). The helper
+      // leaves Shift + wheel to the browser's horizontal scroll and a plain
+      // wheel to the pane's own scroll.
       const travel = wheelZoomDelta(event);
       if (travel === null) return;
       if (pointerDownRef.current) {
         if (event.buttons & 1) {
           // A live gesture owns the mapping: zooming now would remap the
           // pointer mid-drag, and the next interpolated position would jump.
-          // Shift-wheel is a zoom gesture, so it is swallowed rather than
-          // allowed to scroll (a scroll would remap the pointer just the same).
+          // Ctrl/Cmd-wheel is a zoom gesture, so it is swallowed rather than
+          // allowed to reach the browser (a browser zoom would remap the
+          // pointer just the same).
           event.preventDefault();
           return;
         }

@@ -169,6 +169,17 @@ move, duplicate and erase treat it exactly like ink. **Only rendering differs**:
 tiles paint their own fragment's box, and the line/arc geometry springs off it
 (§5).
 
+* **Moves at 1:1 are zone-aware.** A drag tracks the pointer's anchor — cell
+  **and** zone — and resolves a `moveOffset`: the cell delta plus a uniform
+  XOR of the start/end zones. At the equal `1:1`, where the four fragments are
+  congruent, that toggle is a half-cell translation, so it applies to every
+  fragment a moved item carries (tile zone, line/arc endpoints, stroke points)
+  and each anchor stays relative to its own fragment. A same-cell drag between
+  two zones therefore moves the item instead of doing nothing. At denser
+  presets the toggle is zero — a zone change would resize the fragment — so
+  the zones ride along and only the cells move. Preview and commit resolve the
+  same offset, and the returned selection keys follow the new cells and zones.
+
 * **Zone 0 is canonical storage of nothing.** `fragmentPoint()` / `linePoint()`
   drop an absent *or* zero zone, so every item, key and file written before
   fragments existed round-trips byte-identically; a space zone is stored as
@@ -271,7 +282,7 @@ which owns the geometry for that item and nothing else:
 | `draw(config)` | `render` plus one optional border paint: a wider stroke of the same path |
 | `bounds(config)` / `contains(config, point)` | hit-testing and marquee geometry |
 | `cellRange()` | the cell box the item occupies (move/duplicate maths) |
-| `moved(dColumn, dRow)` / `withColor(color)` | copy-on-write edits |
+| `moved(dColumn, dRow, zoneMask?)` / `withColor(color)` | copy-on-write edits (the optional mask is the 1:1 zone toggle) |
 | `toJSON()` | the stored `CanvasItem` (omits absent optional fields) |
 
 `parseItem(item)` / `itemOf(item)` map a stored item onto its class;
@@ -472,7 +483,7 @@ name. Adding a tool = one class + one registry line.
 
 | id | label | key | gesture |
 | --- | --- | --- | --- |
-| `select` | تحديد | `V` | click selects (shift toggles), drag on an item moves the selection (clamped to the grid), drag on empty space marquee-selects |
+| `select` | تحديد | `V` | click selects (shift toggles), drag on an item moves the selection (clamped to the grid; at 1:1 the pointer's zone toggles the moved fragments' zones), drag on empty space marquee-selects |
 | `pen` | قلم | `P` | press/drag colours the cells the pointer is moved over — one fragment per cell, and a fast drag fills the cells it flew over (`anchorsAlongLine`) |
 | `line` | خط | `L` | **square grid only** (`creates: ["line"]`). Click sequence: click A, click B… commits an open run; click the last point again ends it, click the first one closes it. A drag also works (pointer-up ends the *drag*, not the run). Every click snaps to one of the nine anchors of the **fragment** under the cursor (ink or space), and the overlay's dot shows the point the next click would store; a run with no diagonal segment is squares (`straightLinesAsSquares`, default) or one bar |
 | `eraser` | ممحاة | `E` | click/drag removes whatever the pointer touches; a fast drag sweeps the cells it flew over (hidden items are never touched) |
@@ -603,9 +614,9 @@ retraces itself does not brush a chord.
 
 ### Viewport: pan, zoom range and anchoring
 
-The hand tool pans, `Shift` + wheel zooms, and the plain wheel scrolls the
-canvas pane. The maths is pure, lives in `interaction.ts` and is covered by
-`interaction.test.ts`:
+The hand tool pans, `Ctrl`/`Cmd` + wheel zooms, `Shift` + wheel scrolls
+horizontally, and the plain wheel scrolls the canvas pane. The maths is pure,
+lives in `interaction.ts` and is covered by `interaction.test.ts`:
 
 * **Pan** (`panScrollOffset`) — the board follows the hand: a rightward drag
   subtracts the pointer's X delta from `scrollLeft`, and `scrollTop` never
@@ -626,11 +637,14 @@ canvas pane. The maths is pure, lives in `interaction.ts` and is covered by
 * **Plain wheel** — scrolls the canvas pane like any other scroller. It is
   never `preventDefault()`ed, so vertical and horizontal wheel/trackpad travel
   keep their normal browser behaviour (and the sidebar keeps its own).
-* **Wheel zoom (`Shift` + wheel)** — only the Shift-modified wheel zooms. A
-  **gesture** is a run of events with no quiet gap longer than
-  `WHEEL_GESTURE_GAP_MS` (100 ms) travelling the same way, and its first event
-  walks **exactly one stop** through `nextZoom`, whatever its size or
-  `deltaMode` — one scroll must *visibly* zoom (Firefox's 3-line notch is
+  `Shift` + wheel stays the browser's horizontal scroll for the same reason.
+* **Wheel zoom (`Ctrl`/`Cmd` + wheel)** — only the Ctrl- or Cmd-modified wheel
+  zooms, including the `Ctrl` a macOS trackpad pinch reports. The zoom is ours,
+  so the listener calls `preventDefault()` and the browser's page zoom never
+  fires over the canvas. A **gesture** is a run of events with no quiet gap
+  longer than `WHEEL_GESTURE_GAP_MS` (100 ms) travelling the same way, and its
+  first event walks **exactly one stop** through `nextZoom`, whatever its size
+  or `deltaMode` — one scroll must *visibly* zoom (Firefox's 3-line notch is
   48 px and a Linux trackpad event ~53 px, both under the 60 px stop, so
   banking alone left them doing nothing). Events continuing the gesture bank
   their pixels in ~60 px stops (`deltaMode` lines ×16, pages ×100) up to
@@ -638,17 +652,17 @@ canvas pane. The maths is pure, lives in `interaction.ts` and is covered by
   whole ladder at once; a direction flip starts a fresh gesture, so the bank of
   one way can never cancel the first stop of the other. The board fraction
   under the **pointer** stays under it.
-* **Wheel zoom, modified** — `Ctrl`/`Cmd`+wheel is left to the browser:
-  trackpad pinch and page zoom are accessibility features this pane must not
-  swallow. The listener is attached by hand on the viewport (so the sidebar and
-  panels keep their own wheel behaviour) because React's `onWheel` is passive
-  and could not `preventDefault()` a zoom. `Shift`+wheel during a live pointer
-  gesture is ignored — a mid-drag zoom would remap the gesture's coordinates —
-  but only while the primary button is really down (`event.buttons`), so a
-  missed pointer-up cannot mute the wheel for the rest of the session. A plain
-  wheel still scrolls the pane mid-drag; a mid-drag Shift-wheel is swallowed
-  rather than zoomed or scrolled, because either would move the board under
-  the gesture.
+* **Modifiers and mid-drag** — `Shift` + wheel is not ours: the browser maps
+  it to horizontal scrolling and the listener returns without
+  `preventDefault()`. The listener is attached by hand on the viewport (so the
+  sidebar and panels keep their own wheel behaviour) because React's `onWheel`
+  is passive and could not `preventDefault()` the Ctrl/Cmd zoom.
+  `Ctrl`/`Cmd` + wheel during a live pointer gesture is swallowed — a mid-drag
+  zoom would remap the gesture's coordinates — but only while the primary
+  button is really down (`event.buttons`), so a missed pointer-up cannot mute
+  the wheel for the rest of the session. A plain wheel still scrolls the pane
+  mid-drag; a mid-drag Ctrl/Cmd-wheel is swallowed rather than zoomed,
+  because a zoom would move the board under the gesture.
 * **Anchoring** (`zoomScrollOffset`) — a zoom keeps one board point fixed on
   screen: the **pointer** for a wheel notch, the **middle of the pane** for
   the ± buttons (which are not on the canvas, so there is no pointer to

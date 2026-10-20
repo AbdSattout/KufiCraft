@@ -227,8 +227,13 @@ export abstract class KufiItem {
 
   abstract cellRange(): CellRange;
 
-  /** The same item shifted by whole cells (keys are derived, so they follow). */
-  abstract moved(columns: number, rows: number): KufiItem;
+  /**
+   * The same item shifted by whole cells, with an optional XOR of its zone
+   * bits (keys are derived, so they follow). The mask is only a translation
+   * at 1:1, where the four fragments are congruent; callers pass `0` at every
+   * denser ratio.
+   */
+  abstract moved(columns: number, rows: number, zoneMask?: Zone): KufiItem;
 
   /** Colour override; `undefined` returns the item to the config ink. */
   withColor(color: string | undefined): KufiItem {
@@ -396,11 +401,11 @@ export class Tile extends KufiItem {
     };
   }
 
-  moved(columns: number, rows: number): Tile {
+  moved(columns: number, rows: number, zoneMask = 0): Tile {
     return new Tile({
       column: this.column + columns,
       row: this.row + rows,
-      zone: this.zone,
+      zone: (this.zone ^ zoneMask) as Zone,
       shape: this.shape,
       rotation: this.rotation,
       rounding: this.rounding,
@@ -609,17 +614,17 @@ export class Line extends KufiItem {
     };
   }
 
-  moved(columns: number, rows: number): Line {
+  moved(columns: number, rows: number, zoneMask = 0): Line {
     return new Line({
       from: {
         column: this.from.column + columns,
         row: this.from.row + rows,
-        zone: this.from.zone,
+        zone: (zoneOf(this.from) ^ zoneMask) as Zone,
       },
       to: {
         column: this.to.column + columns,
         row: this.to.row + rows,
-        zone: this.to.zone,
+        zone: (zoneOf(this.to) ^ zoneMask) as Zone,
       },
       rounding: this.rounding,
       border: this.border,
@@ -802,13 +807,13 @@ export class Stroke extends KufiItem {
     return cellRangeOf(this.points);
   }
 
-  moved(columns: number, rows: number): Stroke {
+  moved(columns: number, rows: number, zoneMask = 0): Stroke {
     return new Stroke({
       points: this.points.map((point) =>
         linePoint(
           point.column + columns,
           point.row + rows,
-          point.zone,
+          (zoneOf(point) ^ zoneMask) as Zone,
           point.anchor,
         ),
       ),
@@ -1060,18 +1065,18 @@ export class Arc extends KufiItem {
     };
   }
 
-  moved(columns: number, rows: number): Arc {
+  moved(columns: number, rows: number, zoneMask = 0): Arc {
     return new Arc({
       from: arcPoint(
         this.from.column + columns,
         this.from.row + rows,
-        this.from.zone,
+        (zoneOf(this.from) ^ zoneMask) as Zone,
         this.from.anchor,
       ),
       to: arcPoint(
         this.to.column + columns,
         this.to.row + rows,
-        this.to.zone,
+        (zoneOf(this.to) ^ zoneMask) as Zone,
         this.to.anchor,
       ),
       direction: this.direction,
@@ -1236,8 +1241,9 @@ export function moveItem(
   item: CanvasItem,
   columns: number,
   rows: number,
+  zoneMask: Zone = 0,
 ): CanvasItem {
-  return itemOf(item).moved(columns, rows).toJSON();
+  return itemOf(item).moved(columns, rows, zoneMask).toJSON();
 }
 
 export function colorItem(item: CanvasItem, color: string | undefined): CanvasItem {

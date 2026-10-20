@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_PROJECT_CONFIG,
+  RATIO_PRESETS,
   arcKey,
   cellSize,
   linePoint,
@@ -40,6 +41,8 @@ import {
 } from "./history";
 
 const CONFIG: ProjectConfig = { ...DEFAULT_PROJECT_CONFIG };
+/** The equal 1:1 cell, where the four fragments are congruent. */
+const EQUAL: ProjectConfig = { ...CONFIG, ratio: RATIO_PRESETS[0].ratio };
 
 function context(
   items: readonly CanvasItem[] = [],
@@ -105,8 +108,9 @@ function fragmentPointOf(
   column: number,
   row: number,
   zone: Zone,
+  config: ProjectConfig = CONFIG,
 ): { x: number; y: number } {
-  return linePointPosition(CONFIG, linePoint(column, row, zone));
+  return linePointPosition(config, linePoint(column, row, zone));
 }
 
 function input(point: { x: number; y: number }, shift = false) {
@@ -994,6 +998,139 @@ describe("SelectTool", () => {
     const redo = redoHistory(undo!.state, undo!.entry);
     expect(redo?.entry.selection).toEqual([movedKey]);
     expect(redo?.entry.items.map((item) => item.key)).toContain(movedKey);
+  });
+
+  it("moves between zones within one cell at 1:1", () => {
+    const tile = makeTile({ column: 2, row: 2, zone: 0 });
+    const ctx = context([tile], { config: EQUAL, tool: "select" });
+    const start = beginTool(
+      "select",
+      ctx,
+      NO_STATE,
+      input(fragmentPointOf(2, 2, 0, EQUAL)),
+    );
+    const dragged = moveTool(
+      "select",
+      ctx,
+      start.state,
+      input(fragmentPointOf(2, 2, 1, EQUAL)),
+    );
+
+    // The preview is the commit: both resolve the same zone toggle.
+    expect(previewTool("select", ctx, dragged.state).items).toEqual([
+      makeTile({ column: 2, row: 2, zone: 1 }),
+    ]);
+    const out = endTool("select", ctx, dragged.state);
+    expect(out.commit?.items).toEqual([
+      makeTile({ column: 2, row: 2, zone: 1 }),
+    ]);
+    expect(out.commit?.selection).toEqual([tileKey(2, 2, 1)]);
+  });
+
+  it("combines a zone change with a cell move at 1:1", () => {
+    const tile = makeTile({ column: 2, row: 2, zone: 0 });
+    const ctx = context([tile], { config: EQUAL, tool: "select" });
+    const start = beginTool(
+      "select",
+      ctx,
+      NO_STATE,
+      input(fragmentPointOf(2, 2, 0, EQUAL)),
+    );
+    const dragged = moveTool(
+      "select",
+      ctx,
+      start.state,
+      input(fragmentPointOf(4, 3, 2, EQUAL)),
+    );
+    const out = endTool("select", ctx, dragged.state);
+
+    expect(out.commit?.items).toEqual([
+      makeTile({ column: 4, row: 3, zone: 2 }),
+    ]);
+    expect(out.commit?.selection).toEqual([tileKey(4, 3, 2)]);
+  });
+
+  it("applies the same zone toggle to a multi-selection", () => {
+    const first = makeTile({ column: 2, row: 2, zone: 0 });
+    const second = makeTile({ column: 5, row: 2, zone: 1 });
+    const ctx = context([first, second], {
+      config: EQUAL,
+      tool: "select",
+      selection: [first.key, second.key],
+    });
+    const start = beginTool(
+      "select",
+      ctx,
+      NO_STATE,
+      input(fragmentPointOf(2, 2, 0, EQUAL)),
+    );
+    // One cell right, zone 0 -> 1: both items get the same half-cell shift.
+    const dragged = moveTool(
+      "select",
+      ctx,
+      start.state,
+      input(fragmentPointOf(3, 2, 1, EQUAL)),
+    );
+    const out = endTool("select", ctx, dragged.state);
+
+    expect(out.commit?.selection).toEqual([
+      tileKey(3, 2, 1),
+      tileKey(6, 2, 0),
+    ]);
+    expect(out.commit?.items.map((item) => item.key)).toEqual([
+      tileKey(3, 2, 1),
+      tileKey(6, 2, 0),
+    ]);
+  });
+
+  it("keeps zones on denser grids", () => {
+    const tile = makeTile({ column: 2, row: 2, zone: 0 });
+    const ctx = context([tile], { tool: "select" });
+    const start = beginTool(
+      "select",
+      ctx,
+      NO_STATE,
+      input(fragmentPointOf(2, 2, 0)),
+    );
+    const dragged = moveTool(
+      "select",
+      ctx,
+      start.state,
+      input(fragmentPointOf(3, 3, 1)),
+    );
+    const out = endTool("select", ctx, dragged.state);
+
+    // The pointer changed zone, but at 1:2+ that would resize the fragment.
+    expect(out.commit?.items).toEqual([
+      makeTile({ column: 3, row: 3, zone: 0 }),
+    ]);
+    expect(out.commit?.selection).toEqual([tileKey(3, 3, 0)]);
+  });
+
+  it("clamps the pointer at the edge but still applies its zone toggle", () => {
+    // Last column, middle row: the x edge has no space fragment left of the
+    // board, but the y zone is still on it. A pointer dragged off the right
+    // edge clamps into the last cell's ink zone; its y zone still toggles.
+    const tile = makeTile({ column: 99, row: 50, zone: 0 });
+    const ctx = context([tile], { config: EQUAL, tool: "select" });
+    const start = beginTool(
+      "select",
+      ctx,
+      NO_STATE,
+      input(fragmentPointOf(99, 50, 0, EQUAL)),
+    );
+    const dragged = moveTool(
+      "select",
+      ctx,
+      start.state,
+      input({ x: 2_000, y: fragmentPointOf(99, 50, 2, EQUAL).y }),
+    );
+    const out = endTool("select", ctx, dragged.state);
+
+    expect(out.commit?.items).toEqual([
+      makeTile({ column: 99, row: 50, zone: 2 }),
+    ]);
+    expect(out.commit?.selection).toEqual([tileKey(99, 50, 2)]);
   });
 });
 
