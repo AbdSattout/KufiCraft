@@ -54,6 +54,7 @@ import {
   centreScroll,
   clientToViewBox,
   clampToCanvas,
+  applyDrawStyle,
   deleteItems,
   duplicateItems,
   isProjectId,
@@ -334,17 +335,27 @@ export function useEditor(
   }, [config, items, selectionState]);
 
   /**
-   * The panel follows the selection: a selected item's actual rounding,
-   * border, cap and join are shown, so the controls never lie about what is on
-   * the board. With nothing selected the draw style is shown (initially all
-   * fields at their off/default values).
+   * The panel follows the selection: a selected item's actual shape, rotation,
+   * rounding, border, cap and join are shown, so the controls never lie about
+   * what is on the board. With nothing selected the draw style is shown
+   * (initially all fields at their off/default values).
    */
   const panelStyle = useMemo(() => {
     const first =
       selection.length === 0
         ? undefined
         : items.find((item) => item.key === selection[0]);
-    return styleForSelection(style, first);
+    const shown = styleForSelection(style, first);
+    // Shape and rotation live on tiles; `styleForSelection` shows the draw
+    // style for them. A selection edit no longer mirrors into that draw style,
+    // so show the first selected tile's own values instead — otherwise the
+    // palette and rotation label would keep highlighting the next shape.
+    if (first?.type !== "tile") return shown;
+    return {
+      ...shown,
+      shape: first.shape ?? "square",
+      rotation: first.rotation ?? 0,
+    };
   }, [items, selection, style]);
 
   /**
@@ -531,34 +542,58 @@ export function useEditor(
   /* Selection + style operations                                      */
   /* ---------------------------------------------------------------- */
 
+  /**
+   * A sidebar edit sets the next shape's style only when nothing is selected.
+   * With a selection it is a one-off item patch, so `style` (and the prefs it
+   * feeds) must not learn the value. See `applyDrawStyle`.
+   */
+  const updateDrawStyle = useCallback(
+    (patch: Partial<DrawStyle>) => {
+      setStyle((previous) =>
+        applyDrawStyle(previous, selection.length, patch),
+      );
+    },
+    [selection.length],
+  );
+
   const selectShape = useCallback(
     (shape: ShapeId) => {
-      setStyle((previous) => ({ ...previous, shape }));
+      updateDrawStyle({ shape });
       if (selection.length > 0) {
         applyCommit(reshapeItems(items, selection, { shape }), "شكل", selection);
       }
     },
-    [applyCommit, items, selection],
+    [applyCommit, items, selection, updateDrawStyle],
   );
 
   const rotateShape = useCallback(() => {
-    const rotation = nextRotation(style.rotation);
-    setStyle((previous) => ({ ...previous, rotation }));
+    // With a selection the draw style does not advance, so cycle from the
+    // first selected tile; otherwise repeated clicks would keep applying the
+    // same quarter turn. A non-tile selection falls back to the draw style.
+    const first =
+      selection.length === 0
+        ? undefined
+        : items.find((item) => item.key === selection[0]);
+    const base =
+      first?.type === "tile" ? (first.rotation ?? 0) : style.rotation;
+    const rotation = nextRotation(base);
+    updateDrawStyle({ rotation });
     if (selection.length > 0) {
       applyCommit(reshapeItems(items, selection, { rotation }), "تدوير", selection);
     }
-  }, [applyCommit, items, selection, style.rotation]);
+  }, [applyCommit, items, selection, style.rotation, updateDrawStyle]);
 
   /**
-   * Rounding and the border are style fields *and* item patches: the next
-   * stroke is drawn with them, and a live selection is re-styled in the same
-   * click (`reshapeItems`), exactly like the shape palette. The `preview*`
-   * variants only move the style while a slider is dragged — one backend write
-   * when the thumb is released (`SliderField` in `editor-controls.tsx`).
+   * Rounding and the border are style fields *and* item patches: with nothing
+   * selected they set the next stroke's style; with a live selection they only
+   * re-style the items (`reshapeItems`), never the draw style. The `preview*`
+   * variants also leave the draw style alone during a selection drag — one
+   * backend write when the thumb is released (`SliderField` in
+   * `editor-controls.tsx`).
    */
   const setRounding = useCallback(
     (rounding: ItemRounding) => {
-      setStyle((previous) => ({ ...previous, rounding }));
+      updateDrawStyle({ rounding });
       if (selection.length > 0) {
         applyCommit(
           reshapeItems(items, selection, { rounding }),
@@ -567,16 +602,23 @@ export function useEditor(
         );
       }
     },
-    [applyCommit, items, selection],
+    [applyCommit, items, selection, updateDrawStyle],
   );
 
-  const previewRounding = useCallback((radius: number) => {
-    setStyle((previous) => ({ ...previous, rounding: { ...previous.rounding, radius } }));
-  }, []);
+  const previewRounding = useCallback(
+    (radius: number) => {
+      setStyle((previous) =>
+        applyDrawStyle(previous, selection.length, {
+          rounding: { ...previous.rounding, radius },
+        }),
+      );
+    },
+    [selection.length],
+  );
 
   const setBorder = useCallback(
     (border: ItemBorder) => {
-      setStyle((previous) => ({ ...previous, border }));
+      updateDrawStyle({ border });
       if (selection.length > 0) {
         applyCommit(
           reshapeItems(items, selection, { border }),
@@ -585,16 +627,23 @@ export function useEditor(
         );
       }
     },
-    [applyCommit, items, selection],
+    [applyCommit, items, selection, updateDrawStyle],
   );
 
-  const previewBorderWidth = useCallback((width: number) => {
-    setStyle((previous) => ({ ...previous, border: { ...previous.border, width } }));
-  }, []);
+  const previewBorderWidth = useCallback(
+    (width: number) => {
+      setStyle((previous) =>
+        applyDrawStyle(previous, selection.length, {
+          border: { ...previous.border, width },
+        }),
+      );
+    },
+    [selection.length],
+  );
 
   const setStrokeCap = useCallback(
     (cap: StrokeCap) => {
-      setStyle((previous) => ({ ...previous, cap }));
+      updateDrawStyle({ cap });
       if (selection.length > 0) {
         applyCommit(
           reshapeItems(items, selection, { cap }),
@@ -603,12 +652,12 @@ export function useEditor(
         );
       }
     },
-    [applyCommit, items, selection],
+    [applyCommit, items, selection, updateDrawStyle],
   );
 
   const setStrokeJoin = useCallback(
     (join: StrokeJoin) => {
-      setStyle((previous) => ({ ...previous, join }));
+      updateDrawStyle({ join });
       if (selection.length > 0) {
         applyCommit(
           reshapeItems(items, selection, { join }),
@@ -617,7 +666,7 @@ export function useEditor(
         );
       }
     },
-    [applyCommit, items, selection],
+    [applyCommit, items, selection, updateDrawStyle],
   );
 
   /**

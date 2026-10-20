@@ -26,6 +26,7 @@ import {
   DEFAULT_ARC_STYLE,
   DEFAULT_STYLE,
   WHEEL_GESTURE_GAP_MS,
+  applyDrawStyle,
   WHEEL_GESTURE_MAX_STOPS,
   WHEEL_IDLE,
   anchorAt,
@@ -69,7 +70,12 @@ import {
   zoomScrollOffset,
   ZOOM_STOPS,
 } from "./interaction";
-import type { ScrollLike, ToolContext, WheelGesture } from "./interaction";
+import type {
+  DrawStyle,
+  ScrollLike,
+  ToolContext,
+  WheelGesture,
+} from "./interaction";
 
 const square: ProjectConfig = { ...DEFAULT_PROJECT_CONFIG };
 const circular: ProjectConfig = { ...square, gridType: "circular" };
@@ -935,6 +941,39 @@ describe("styleForSelection", () => {
     expect(styleForSelection(DEFAULT_STYLE, arc)).toMatchObject({
       rounding: { radius: 0, corners: CORNER_ALL },
       border: { width: 2, color: "#000000" },
+      cap: "butt",
+      join: "miter",
+    });
+  });
+});
+
+describe("applyDrawStyle", () => {
+  it("persists an edit only while nothing is selected", () => {
+    const patch: Partial<DrawStyle> = {
+      shape: "circle",
+      rotation: 2,
+      rounding: { radius: 0.2, corners: CORNER_ALL },
+      border: { width: 3, color: "#ff0000" },
+      cap: "round",
+      join: "bevel",
+    };
+
+    const persisted = applyDrawStyle(DEFAULT_STYLE, 0, patch);
+    expect(persisted).not.toBe(DEFAULT_STYLE);
+    expect(persisted).toMatchObject(patch);
+    // The source style is a template, never mutated.
+    expect(DEFAULT_STYLE.rounding.radius).toBe(0);
+    expect(DEFAULT_STYLE.shape).toBe("square");
+
+    // A selection edit is an item patch: it must not leak into the draw style
+    // (or the prefs written from it) for every future shape.
+    const selected = applyDrawStyle(DEFAULT_STYLE, 1, patch);
+    expect(selected).toBe(DEFAULT_STYLE);
+    expect(selected).toMatchObject({
+      shape: "square",
+      rotation: 0,
+      rounding: { radius: 0, corners: CORNER_ALL },
+      border: DEFAULT_BORDER,
       cap: "butt",
       join: "miter",
     });

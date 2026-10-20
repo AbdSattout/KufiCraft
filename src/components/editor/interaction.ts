@@ -139,12 +139,29 @@ export const DEFAULT_STYLE: DrawStyle = {
 };
 
 /**
+ * A sidebar style edit changes the draw style only when **nothing** is
+ * selected. With a live selection the same click is a one-off item patch
+ * (`reshapeItems`), not the next shape's default: persisting it would make a
+ * selected tile's radius, border or cap leak into the next shape and the
+ * prefs file. After deselecting, `styleForSelection` falls back to this
+ * unchanged draw style.
+ */
+export function applyDrawStyle(
+  style: DrawStyle,
+  selectionCount: number,
+  patch: Partial<DrawStyle>,
+): DrawStyle {
+  return selectionCount === 0 ? { ...style, ...patch } : style;
+}
+
+/**
  * The style the shape panel displays. With nothing selected it is the draw
  * style; with a selection it is the first selected item's own rounding,
  * border, cap and join — the panel reflects what is on the board, while the
- * **draw** style (`context.style`) stays what the tools paint with until an
- * edit is made. An item without a field shows the off/default state: no
- * rounding, no border, butt caps and mitre joins.
+ * **draw** style (`context.style`) stays what the tools paint with. A
+ * selection edit never rewrites that draw style (`applyDrawStyle`). An item
+ * without a field shows the off/default state: no rounding, no border, butt
+ * caps and mitre joins.
  */
 export function styleForSelection(
   style: DrawStyle,

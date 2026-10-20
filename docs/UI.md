@@ -184,10 +184,13 @@ canvas fragment, so the palette icon **respects the current rotation**
 (0° → 90° → 180° → 270° → 0°, `R` from the keyboard too). There is deliberately
 **no “إعادة الشكل” button**: the cycle comes back around, and the palette
 re-selects a shape, so a reset only ever saved a click. The style itself is the
-user's, not the board's — see *Settings persistence*.
-With something selected the same section reveals the selection actions
-(«التحديد»: recolour with the ink colour, duplicate, delete) — with nothing
-selected they are absent, not disabled.
+user's, not the board's — see *Settings persistence*. With a selection, a style
+edit is a one-off item patch: the draw style (and the prefs written from it)
+changes only when nothing is selected, so a selected tile's radius, border,
+cap or join never becomes the next shape's default. With something selected the
+same section reveals the selection actions («التحديد»: recolour with the ink
+colour, duplicate, delete) — with nothing selected they are absent, not
+disabled.
 
 The style blocks under the palette are rounding, stroke ends/joins and borders.
 The stroke block has two three-button rows — نهاية الخط (`مسطّحة`, `دائرية`,
@@ -257,10 +260,12 @@ line it draws between the **user** and the **board**:
   arc direction and size, zoom, the grid guide (إظهار الشبكة, default on) and
   the colour swatches history (last ≤ 8 ink colours). Loaded synchronously when
   the editor mounts and applied to the toolbar so the app “opens the way you
-  left it”, and written as each change happens (never per project): the shape
-  and rotation a designer set on one board are what the next board opens with.
-  Zoom runs **0.1×–32×**, so a board far larger than the pane is viewable whole
-  and a dense one (a `base` = 4 cell is ~3 px at 1×) is workable up close.
+  left it”, and written as each change happens (never per project). The draw
+  style is learned only from edits with **nothing selected**: a style click with
+  a selection patches those items alone, so a one-off radius or border does not
+  become the next board's default. Zoom runs **0.1×–32×**, so a board far
+  larger than the pane is viewable whole and a dense one (a `base` = 4 cell is
+  ~3 px at 1×) is workable up close.
 * `kuficraft.last-config.v1` — the last committed project config, used as the
   default in the dashboard’s «لوحة جديدة» dialog and for new projects. The
   artwork settings — ink ratio, cell size, grid type, circular sector count, ink
