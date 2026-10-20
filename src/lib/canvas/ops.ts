@@ -30,6 +30,8 @@ import type {
   ProjectConfig,
   Rotation,
   ShapeId,
+  StrokeCap,
+  StrokeJoin,
 } from "./model";
 import { runOf } from "./grid";
 import { makeLine, makeStroke, makeTile } from "./items";
@@ -245,6 +247,10 @@ export interface InkStyle {
   rounding?: ItemRounding;
   /** Outside border for the drawn items. */
   border?: ItemBorder;
+  /** End shape of a drawn stroked item (default `butt`). */
+  cap?: StrokeCap;
+  /** Turn shape of a drawn stroked item (default `miter`). */
+  join?: StrokeJoin;
 }
 
 /** Consecutive identical anchors collapse to one. */
@@ -358,12 +364,14 @@ export function lineItems(
   points: readonly LinePoint[],
   closed: boolean,
   color?: string,
-  style: Pick<InkStyle, "rounding" | "border"> = {},
+  style: Pick<InkStyle, "rounding" | "border" | "cap" | "join"> = {},
 ): CanvasItem[] {
   if (points.length < 2) return [];
   const lineColor = resolvedColor(config, color);
   const rounding = activeRounding(style.rounding);
   const border = activeBorder(style.border);
+  const cap = style.cap;
+  const join = style.join;
   if (!points.some(hasAnchor)) {
     const unique = dedupeFragments(points, closed);
     if (unique.length < 2) return [];
@@ -398,10 +406,12 @@ export function lineItems(
         makeLine(unique[0], unique[unique.length - 1], lineColor, {
           rounding,
           border,
+          cap,
+          join,
         }),
       ];
     }
-    return [makeStroke(unique, closed, lineColor, { rounding, border })];
+    return [makeStroke(unique, closed, lineColor, { rounding, border, cap, join })];
   }
   if (mergesToEnds(config, points, closed)) {
     const last = points.length - 1;
@@ -409,10 +419,12 @@ export function lineItems(
       makeStroke([points[0], points[last]], false, lineColor, {
         rounding,
         border,
+        cap,
+        join,
       }),
     ];
   }
-  return [makeStroke(points, closed, lineColor, { rounding, border })];
+  return [makeStroke(points, closed, lineColor, { rounding, border, cap, join })];
 }
 
 /**

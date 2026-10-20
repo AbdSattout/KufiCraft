@@ -54,10 +54,11 @@ apps never had (see “Legacy” below).
   is repaired on read to the `quarter` that was already being drawn (same
   pixels; only that arc's key changes, on the next write).
 
-### Style fields (`rounding`, `border`)
+### Style fields (`rounding`, `border`, `cap`, `join`)
 
-Two optional fields extend an item without changing its key or geometry — a file
-that omits them renders **exactly** like a v2 file written before they existed.
+These optional fields extend an item without changing its key or geometry — a
+file that omits them renders **exactly** like a v2 file written before they
+existed.
 
 ```jsonc
 // tiles, line bars and polylines — rounded corners
@@ -65,6 +66,10 @@ that omits them renders **exactly** like a v2 file written before they existed.
 
 // any item — one stroke around the whole shape
 "border": { "width": 2, "color": "#7c2d12" }
+
+// a stroked item (diagonal line, polyline or arc) — how its ink ends and turns
+"cap": "round",
+"join": "bevel"
 ```
 
 * `rounding.radius` is a **fraction of the shorter side** of the item's box,
@@ -87,6 +92,15 @@ that omits them renders **exactly** like a v2 file written before they existed.
   reference's mutating “virtual close line” is replaced by trimming each edge
   exactly at the closing corner, and the radius is relative rather than a
   length.
+* `cap` is how a stroked item's open ends finish: `butt` (flush, the default),
+  `round` (a half-disc past the endpoint) or `square` (a half-square past it).
+  `join` is how its turns meet: `miter` (pointed, the default), `round` or
+  `bevel` (cut flat). Both are per item and apply to a diagonal `line` fallback,
+  a `stroke` polyline and an `arc`; a plain line bar is filled and has no ink
+  ends to shape. The default values are the absent state and are never written,
+  so pre-option files round-trip byte-stable. The arc's endpoints and a
+  polyline's turns use the stored values; a **border** on the same item inherits
+  them, so a round end wraps the border around the ink.
 * `border.width` is the **switch**: `0` means no border; `0 < width ≤ 12` is
   the visible band in **viewBox units** on each side. A broken width is the
   absent state. The slider in the editor works in whole units from `0` to
@@ -97,8 +111,8 @@ that omits them renders **exactly** like a v2 file written before they existed.
 * A border is **the item's own path stroked once, before the item**, in the
   border colour — never a translated copy, a second shape or a filter:
   * a **stroked** item (a polyline, an arc, a diagonal line fallback) is
-    stroked again with `stroke-width = itemWidth + 2 × border.width`, same butt
-    caps and mitre joins, so the visible band is exactly `border.width` on each
+    stroked again with `stroke-width = itemWidth + 2 × border.width`, same cap
+    and join as its ink, so the visible band is exactly `border.width` on each
     side of the ink;
   * a **filled** item (tile, line bar) gets a native stroke of the same path,
     `2 × border.width` wide, painted before the fill. The fill covers the inner
@@ -107,7 +121,8 @@ that omits them renders **exactly** like a v2 file written before they existed.
 * Normalisation on read/write (backend and file import): radius clamped to
   `[0, 0.5]`, border width clamped to `[0, 12]`, colours capped at
   `MAX_COLOR_LENGTH`. A zero radius drops `rounding`; a zero (or broken) border
-  width drops `border` — absent is the canonical “off” state, so a round-trip
+  width drops `border`; an unknown cap/join falls back to `butt`/`miter` and the
+  defaults are dropped. Absent is the canonical “off” state, so a round-trip
   stays byte-stable. An empty border colour normalises to black.
 
 ## Rules

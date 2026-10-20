@@ -23,6 +23,8 @@
 import {
   CORNER_ALL,
   DEFAULT_BORDER,
+  DEFAULT_STROKE_CAP,
+  DEFAULT_STROKE_JOIN,
   VIEWBOX_SIZE,
   cellSize,
   circularSectors,
@@ -46,6 +48,8 @@ import type {
   ProjectConfig,
   Rotation,
   ShapeId,
+  StrokeCap,
+  StrokeJoin,
 } from "@/lib/canvas/model";
 import {
   cellCentre,
@@ -107,16 +111,19 @@ export function nextRotation(rotation: Rotation): Rotation {
  * picking a new ink never repaints what is already on the canvas
  * (docs/CANVAS.md §Items + §Editing).
  *
- * Rounding and the outside border are part of the style too, so a pen stroke
- * is drawn exactly the way the panel shows it. `rounding.radius === 0` and
- * `border.width === 0` are the "off" ends and are what a fresh editor opens
- * with — a document drawn with the defaults stores neither field.
+ * Rounding, the outside border and the stroke ends/joins are part of the style
+ * too, so a pen stroke is drawn exactly the way the panel shows it.
+ * `rounding.radius === 0`, `border.width === 0` and the butt/miter cap/join
+ * defaults are the "off" ends and are what a fresh editor opens with — a
+ * document drawn with the defaults stores none of those fields.
  */
 export interface DrawStyle {
   shape: ShapeId;
   rotation: Rotation;
   rounding: ItemRounding;
   border: ItemBorder;
+  cap: StrokeCap;
+  join: StrokeJoin;
 }
 
 export const DEFAULT_STYLE: DrawStyle = {
@@ -125,14 +132,17 @@ export const DEFAULT_STYLE: DrawStyle = {
   // All four corners on: the switch a designer expects when first enabling it.
   rounding: { radius: 0, corners: CORNER_ALL },
   border: { ...DEFAULT_BORDER },
+  cap: DEFAULT_STROKE_CAP,
+  join: DEFAULT_STROKE_JOIN,
 };
 
 /**
  * The style the shape panel displays. With nothing selected it is the draw
- * style; with a selection it is the first selected item's own rounding and
- * border — the panel reflects what is on the board, while the **draw** style
- * (`context.style`) stays what the tools paint with until an edit is made.
- * An item without a field shows the off state: no rounding, no border.
+ * style; with a selection it is the first selected item's own rounding,
+ * border, cap and join — the panel reflects what is on the board, while the
+ * **draw** style (`context.style`) stays what the tools paint with until an
+ * edit is made. An item without a field shows the off/default state: no
+ * rounding, no border, butt caps and mitre joins.
  */
 export function styleForSelection(
   style: DrawStyle,
@@ -141,10 +151,14 @@ export function styleForSelection(
   if (item === undefined) return style;
   const rounding =
     item.type === "arc" ? undefined : item.rounding;
+  const stroked =
+    item.type === "line" || item.type === "stroke" || item.type === "arc";
   return {
     ...style,
     rounding: rounding ?? { radius: 0, corners: CORNER_ALL },
     border: item.border ?? { ...DEFAULT_BORDER },
+    cap: stroked ? (item.cap ?? DEFAULT_STROKE_CAP) : style.cap,
+    join: stroked ? (item.join ?? DEFAULT_STROKE_JOIN) : style.join,
   };
 }
 
@@ -599,6 +613,8 @@ export function arcBetween(
     direction: ctx.arc.direction,
     size: ctx.arc.size,
     border: ctx.style.border.width > 0 ? ctx.style.border : undefined,
+    cap: ctx.style.cap,
+    join: ctx.style.join,
     color: ctx.config.ink,
   });
 }
@@ -657,7 +673,7 @@ export function linePreview(
   config: ProjectConfig,
   points: readonly LinePoint[],
   hover: LinePoint | null,
-  style: Pick<DrawStyle, "rounding" | "border"> = DEFAULT_STYLE,
+  style: Pick<DrawStyle, "rounding" | "border" | "cap" | "join"> = DEFAULT_STYLE,
 ): CanvasItem[] {
   const run = lineRun(points, hover);
   return lineItems(config, run.points, run.closed, undefined, style);

@@ -47,7 +47,7 @@ export const CanvasItemShape = memo(function CanvasItemShape({
   className,
   opacity,
 }: CanvasItemShapeProps) {
-  const { path, mode, width, border } = useMemo(
+  const { path, mode, width, cap, join, border } = useMemo(
     () => itemOf(item).draw(config),
     [config, item],
   );
@@ -61,8 +61,8 @@ export const CanvasItemShape = memo(function CanvasItemShape({
           fill="none"
           stroke={border.color}
           strokeWidth={border.width}
-          strokeLinecap="butt"
-          strokeLinejoin="miter"
+          strokeLinecap={cap}
+          strokeLinejoin={join}
           className={className}
           opacity={opacity}
         />
@@ -74,8 +74,8 @@ export const CanvasItemShape = memo(function CanvasItemShape({
           fill="none"
           stroke={color}
           strokeWidth={width}
-          strokeLinecap="butt"
-          strokeLinejoin="miter"
+          strokeLinecap={cap}
+          strokeLinejoin={join}
           className={className}
           opacity={opacity}
         />

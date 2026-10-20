@@ -401,6 +401,41 @@ describe("style in the SVG renderer", () => {
     expect(barInk.attrs.fill).toBe("#123456");
   });
 
+  it("uses a stroked item's cap and join on its ink and its border", () => {
+    const item: CanvasItem = {
+      type: "stroke",
+      key: strokeKey(
+        [
+          { column: 0, row: 0 },
+          { column: 2, row: 2 },
+        ],
+        false,
+      ),
+      points: [
+        { column: 0, row: 0 },
+        { column: 2, row: 2 },
+      ],
+      cap: "round",
+      join: "bevel",
+      border: { width: 2, color: "#ff0000" },
+    };
+    const [outline, ink] = find(rootOf(renderSvg(makeConfig(), [item])), "path");
+    for (const path of [outline, ink]) {
+      expect(path.attrs["stroke-linecap"]).toBe("round");
+      expect(path.attrs["stroke-linejoin"]).toBe("bevel");
+    }
+    // The default stays exactly the pre-option rendering.
+    const plain: CanvasItem = {
+      type: "line",
+      key: lineKey({ column: 0, row: 0 }, { column: 2, row: 2 }),
+      from: { column: 0, row: 0 },
+      to: { column: 2, row: 2 },
+    };
+    const [plainInk] = find(rootOf(renderSvg(makeConfig(), [plain])), "path");
+    expect(plainInk.attrs["stroke-linecap"]).toBe("butt");
+    expect(plainInk.attrs["stroke-linejoin"]).toBe("miter");
+  });
+
   it("uses the stored border colour, independently of the item colour", () => {
     const config = makeConfig({ ink: "#123456" });
     const item: CanvasItem = {
@@ -448,6 +483,21 @@ describe("style in the SVG renderer", () => {
     expect(paths[2].attrs.fill).not.toBe("none");
   });
 
+  it("keeps stroke caps and joins in thumbnails", () => {
+    const item: CanvasItem = {
+      ...STROKE,
+      cap: "square",
+      join: "round",
+      border: { width: 2, color: "#ff0000" },
+    };
+    const paths = find(rootOf(renderThumbnail(makeConfig(), [item])), "path");
+    expect(paths).toHaveLength(2);
+    for (const path of paths) {
+      expect(path.attrs["stroke-linecap"]).toBe("square");
+      expect(path.attrs["stroke-linejoin"]).toBe("round");
+    }
+  });
+
   it("paints the same border paths in the SVG export and thumbnail", () => {
     const config = makeConfig();
     const items = [ROUNDED, BORDERED];
@@ -471,6 +521,12 @@ describe("style in the SVG renderer", () => {
       expect(path.attrs.fill).toBe(thumbnail.attrs.fill);
       expect(path.attrs.stroke).toBe(thumbnail.attrs.stroke);
       expect(path.attrs["stroke-width"]).toBe(thumbnail.attrs["stroke-width"]);
+      expect(path.attrs["stroke-linecap"]).toBe(
+        thumbnail.attrs["stroke-linecap"],
+      );
+      expect(path.attrs["stroke-linejoin"]).toBe(
+        thumbnail.attrs["stroke-linejoin"],
+      );
       expect(path.attrs.transform).toBeUndefined();
     }
   });

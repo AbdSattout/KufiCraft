@@ -34,6 +34,8 @@ import type {
   LinePoint,
   ProjectConfig,
   ShapeId,
+  StrokeCap,
+  StrokeJoin,
 } from "@/lib/canvas/model";
 import type { Id } from "../../../convex/_generated/dataModel";
 import {
@@ -130,7 +132,7 @@ export interface EditorController {
   style: DrawStyle;
   /**
    * What the shape panel shows: the draw style, or the first selected item's
-   * rounding and border while a selection is active.
+   * rounding, border, cap and join while a selection is active.
    */
   panelStyle: DrawStyle;
   arc: ArcStyle;
@@ -148,6 +150,10 @@ export interface EditorController {
   setBorder: (border: ItemBorder) => void;
   /** Border width while a slider is dragged — style only, no write. */
   previewBorderWidth: (width: number) => void;
+  /** Cap of the next stroked item, also applied to the selection. */
+  setStrokeCap: (cap: StrokeCap) => void;
+  /** Join of the next stroked item, also applied to the selection. */
+  setStrokeJoin: (join: StrokeJoin) => void;
   /** The ink colour is the pen's colour *and* the project's ink. */
   setInkColor: (color: string) => void;
 
@@ -229,6 +235,8 @@ export function useEditor(
     rotation: initialPrefs.rotation,
     rounding: initialPrefs.rounding,
     border: initialPrefs.border,
+    cap: initialPrefs.cap,
+    join: initialPrefs.join,
   });
   const [arc, setArc] = useState<ArcStyle>(initialPrefs.arc);
   const [inkSwatches, setInkSwatches] = useState<readonly string[]>(
@@ -325,9 +333,10 @@ export function useEditor(
   }, [config, items, selectionState]);
 
   /**
-   * The panel follows the selection: a selected item's actual rounding and
-   * border are shown, so the controls never lie about what is on the board.
-   * With nothing selected the draw style is shown (initially both fields off).
+   * The panel follows the selection: a selected item's actual rounding,
+   * border, cap and join are shown, so the controls never lie about what is on
+   * the board. With nothing selected the draw style is shown (initially all
+   * fields at their off/default values).
    */
   const panelStyle = useMemo(() => {
     const first =
@@ -581,6 +590,34 @@ export function useEditor(
   const previewBorderWidth = useCallback((width: number) => {
     setStyle((previous) => ({ ...previous, border: { ...previous.border, width } }));
   }, []);
+
+  const setStrokeCap = useCallback(
+    (cap: StrokeCap) => {
+      setStyle((previous) => ({ ...previous, cap }));
+      if (selection.length > 0) {
+        applyCommit(
+          reshapeItems(items, selection, { cap }),
+          "نهاية الخط",
+          selection,
+        );
+      }
+    },
+    [applyCommit, items, selection],
+  );
+
+  const setStrokeJoin = useCallback(
+    (join: StrokeJoin) => {
+      setStyle((previous) => ({ ...previous, join }));
+      if (selection.length > 0) {
+        applyCommit(
+          reshapeItems(items, selection, { join }),
+          "وصلة الخط",
+          selection,
+        );
+      }
+    },
+    [applyCommit, items, selection],
+  );
 
   /**
    * The ink colour is a project field, so the panel writes it through the
@@ -900,12 +937,16 @@ export function useEditor(
       inkSwatches: [...inkSwatches],
       rounding: style.rounding,
       border: style.border,
+      cap: style.cap,
+      join: style.join,
     });
   }, [
     arc,
     inkSwatches,
     showGrid,
     style.border,
+    style.cap,
+    style.join,
     style.rotation,
     style.rounding,
     style.shape,
@@ -954,6 +995,8 @@ export function useEditor(
     previewRounding,
     setBorder,
     previewBorderWidth,
+    setStrokeCap,
+    setStrokeJoin,
     setInkColor,
     selection,
     setSelection,

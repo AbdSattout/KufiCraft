@@ -23,6 +23,8 @@
 
 import {
   DEFAULT_PROJECT_CONFIG,
+  DEFAULT_STROKE_CAP,
+  DEFAULT_STROKE_JOIN,
   arcKey,
   arcPoint,
   cellSize,
@@ -31,6 +33,8 @@ import {
   hasAnchor,
   lineKey,
   linePoint,
+  normalizeStrokeCap,
+  normalizeStrokeJoin,
   sanitizeBorder,
   sanitizeRounding,
   strokeKey,
@@ -55,7 +59,9 @@ import type {
   ProjectConfig,
   Rotation,
   ShapeId,
+  StrokeCap,
   StrokeItem,
+  StrokeJoin,
   TileItem,
   Zone,
 } from "./model";
@@ -97,10 +103,15 @@ export interface Rendered {
   mode: "fill" | "stroke";
   /** Stroke width in viewBox units (0 for fills). */
   width: number;
+  /** End shape of a stroked path; every renderer passes it to SVG. */
+  cap: StrokeCap;
+  /** Turn shape of a stroked path; every renderer passes it to SVG. */
+  join: StrokeJoin;
   /**
    * The item's border, when it carries one (`draw`, not `render`): one wider
    * stroke of the same `path`, in the border colour, painted **before** the
-   * item's own paint. No duplicate path and no translation.
+   * item's own paint. No duplicate path and no translation. The border uses
+   * the same `cap` and `join`, so a round end wraps the border with the ink.
    */
   border?: BorderPaint;
 }
@@ -115,14 +126,17 @@ export interface CellRange {
 
 /**
  * Style patch applied to an item. Shape and rotation are the tile's own;
- * rounding belongs to tiles, lines and strokes, and a border to every type.
- * `null` clears a field, `undefined` leaves it alone.
+ * rounding belongs to tiles, lines and strokes, cap/join to stroked items, and
+ * a border to every type. `null` clears a field, `undefined` leaves it alone;
+ * cap/join use their default values as the clearing value.
  */
 export interface ItemStyle {
   shape?: ShapeId;
   rotation?: Rotation;
   rounding?: ItemRounding | null;
   border?: ItemBorder | null;
+  cap?: StrokeCap;
+  join?: StrokeJoin;
 }
 
 /** `rect ∪ rect` for the empty case. */
@@ -316,13 +330,21 @@ export class Tile extends KufiItem {
 
   render(config: ProjectConfig): Rendered {
     if (config.gridType === "circular") {
-      return { path: this.circularPath(config), mode: "fill", width: 0 };
+      return {
+        path: this.circularPath(config),
+        mode: "fill",
+        width: 0,
+        cap: DEFAULT_STROKE_CAP,
+        join: DEFAULT_STROKE_JOIN,
+      };
     }
     const box = zoneRect(config, this.column, this.row, this.zone);
     return {
       path: shapePath(this.shape, box, this.rotation ?? 0, this.rounding),
       mode: "fill",
       width: 0,
+      cap: DEFAULT_STROKE_CAP,
+      join: DEFAULT_STROKE_JOIN,
     };
   }
 
@@ -470,6 +492,18 @@ export function sameBorder(
   return a.width === b.width && a.color === b.color;
 }
 
+/** The stored form of a cap: the default is the absent state. */
+function activeCap(cap: StrokeCap | undefined): StrokeCap | undefined {
+  const normalized = normalizeStrokeCap(cap);
+  return normalized === DEFAULT_STROKE_CAP ? undefined : normalized;
+}
+
+/** The stored form of a join: the default is the absent state. */
+function activeJoin(join: StrokeJoin | undefined): StrokeJoin | undefined {
+  const normalized = normalizeStrokeJoin(join);
+  return normalized === DEFAULT_STROKE_JOIN ? undefined : normalized;
+}
+
 /* ------------------------------------------------------------------ */
 /* Line                                                                */
 /* ------------------------------------------------------------------ */
@@ -479,6 +513,8 @@ export interface LineInit {
   to: FragmentPoint;
   rounding?: ItemRounding;
   border?: ItemBorder;
+  cap?: StrokeCap;
+  join?: StrokeJoin;
   color?: string;
 }
 
@@ -501,6 +537,8 @@ export class Line extends KufiItem {
   readonly to: FragmentPoint;
   readonly rounding?: ItemRounding;
   readonly border?: ItemBorder;
+  readonly cap?: StrokeCap;
+  readonly join?: StrokeJoin;
   readonly color?: string;
 
   constructor(init: LineInit) {
@@ -513,6 +551,8 @@ export class Line extends KufiItem {
     this.to = plainFragment(to);
     this.rounding = init.rounding;
     this.border = init.border;
+    this.cap = activeCap(init.cap);
+    this.join = activeJoin(init.join);
     this.color = init.color;
   }
 
@@ -531,6 +571,8 @@ export class Line extends KufiItem {
       item.rounding = this.rounding;
     }
     if (this.border !== undefined) item.border = this.border;
+    if (this.cap !== undefined) item.cap = this.cap;
+    if (this.join !== undefined) item.join = this.join;
     if (this.color !== undefined) item.color = this.color;
     return item;
   }
@@ -570,7 +612,13 @@ export class Line extends KufiItem {
         this.rounding !== undefined && this.rounding.radius > 0
           ? shapePath("square", bar, 0, this.rounding)
           : rectToPath(bar);
-      return { path, mode: "fill", width: 0 };
+      return {
+        path,
+        mode: "fill",
+        width: 0,
+        cap: DEFAULT_STROKE_CAP,
+        join: DEFAULT_STROKE_JOIN,
+      };
     }
     // Not a straight run (invalid item): join the two cell centres.
     const p1 = cellCentre(config, this.from);
@@ -579,6 +627,8 @@ export class Line extends KufiItem {
       path: cmdsToPath([M(p1.x, p1.y), L(p2.x, p2.y)]),
       mode: "stroke",
       width: inkUnit(config),
+      cap: this.cap ?? DEFAULT_STROKE_CAP,
+      join: this.join ?? DEFAULT_STROKE_JOIN,
     };
   }
 
@@ -623,6 +673,8 @@ export class Line extends KufiItem {
       },
       rounding: this.rounding,
       border: this.border,
+      cap: this.cap,
+      join: this.join,
       color: this.color,
     });
   }
@@ -633,20 +685,34 @@ export class Line extends KufiItem {
       to: this.to,
       rounding: this.rounding,
       border: this.border,
+      cap: this.cap,
+      join: this.join,
       color,
     });
   }
 
-  /** A line bar can round the corners of its box; any line can be bordered. */
+  /** A line can round its box and, when diagonal, its ink ends. */
   withStyle(style: ItemStyle): Line {
-    if (style.border === undefined && style.rounding === undefined) {
+    if (
+      style.border === undefined &&
+      style.rounding === undefined &&
+      style.cap === undefined &&
+      style.join === undefined
+    ) {
       return this;
     }
     const rounding =
       style.rounding === undefined ? this.rounding : (style.rounding ?? undefined);
     const border =
       style.border === undefined ? this.border : (style.border ?? undefined);
-    if (sameRounding(rounding, this.rounding) && sameBorder(border, this.border)) {
+    const cap = style.cap === undefined ? this.cap : activeCap(style.cap);
+    const join = style.join === undefined ? this.join : activeJoin(style.join);
+    if (
+      sameRounding(rounding, this.rounding) &&
+      sameBorder(border, this.border) &&
+      cap === this.cap &&
+      join === this.join
+    ) {
       return this;
     }
     return new Line({
@@ -654,6 +720,8 @@ export class Line extends KufiItem {
       to: this.to,
       rounding,
       border,
+      cap,
+      join,
       color: this.color,
     });
   }
@@ -668,6 +736,8 @@ export interface StrokeInit {
   closed?: boolean;
   rounding?: ItemRounding;
   border?: ItemBorder;
+  cap?: StrokeCap;
+  join?: StrokeJoin;
   color?: string;
 }
 
@@ -686,6 +756,8 @@ export class Stroke extends KufiItem {
   readonly closed: boolean;
   readonly rounding?: ItemRounding;
   readonly border?: ItemBorder;
+  readonly cap?: StrokeCap;
+  readonly join?: StrokeJoin;
   readonly color?: string;
 
   constructor(init: StrokeInit) {
@@ -694,6 +766,8 @@ export class Stroke extends KufiItem {
     this.closed = init.closed ?? false;
     this.rounding = init.rounding;
     this.border = init.border;
+    this.cap = activeCap(init.cap);
+    this.join = activeJoin(init.join);
     this.color = init.color;
   }
 
@@ -712,13 +786,23 @@ export class Stroke extends KufiItem {
       item.rounding = this.rounding;
     }
     if (this.border !== undefined) item.border = this.border;
+    if (this.cap !== undefined) item.cap = this.cap;
+    if (this.join !== undefined) item.join = this.join;
     if (this.color !== undefined) item.color = this.color;
     return item;
   }
 
   render(config: ProjectConfig): Rendered {
     const points = this.anchorPoints(config);
-    if (points.length < 2) return { path: "", mode: "stroke", width: inkUnit(config) };
+    if (points.length < 2) {
+      return {
+        path: "",
+        mode: "stroke",
+        width: inkUnit(config),
+        cap: this.cap ?? DEFAULT_STROKE_CAP,
+        join: this.join ?? DEFAULT_STROKE_JOIN,
+      };
+    }
     let cmds: PathCmd[] = [M(points[0].x, points[0].y)];
     for (let index = 1; index < points.length; index++) {
       cmds.push(L(points[index].x, points[index].y));
@@ -735,6 +819,8 @@ export class Stroke extends KufiItem {
       path: cmdsToPath(cmds),
       mode: "stroke",
       width: inkUnit(config),
+      cap: this.cap ?? DEFAULT_STROKE_CAP,
+      join: this.join ?? DEFAULT_STROKE_JOIN,
     };
   }
 
@@ -815,6 +901,8 @@ export class Stroke extends KufiItem {
       closed: this.closed,
       rounding: this.rounding,
       border: this.border,
+      cap: this.cap,
+      join: this.join,
       color: this.color,
     });
   }
@@ -825,20 +913,34 @@ export class Stroke extends KufiItem {
       closed: this.closed,
       rounding: this.rounding,
       border: this.border,
+      cap: this.cap,
+      join: this.join,
       color,
     });
   }
 
-  /** A polyline rounds its turns; any stroke can be bordered. */
+  /** A polyline rounds its turns and sets its ink ends; it can be bordered. */
   withStyle(style: ItemStyle): Stroke {
-    if (style.border === undefined && style.rounding === undefined) {
+    if (
+      style.border === undefined &&
+      style.rounding === undefined &&
+      style.cap === undefined &&
+      style.join === undefined
+    ) {
       return this;
     }
     const rounding =
       style.rounding === undefined ? this.rounding : (style.rounding ?? undefined);
     const border =
       style.border === undefined ? this.border : (style.border ?? undefined);
-    if (sameRounding(rounding, this.rounding) && sameBorder(border, this.border)) {
+    const cap = style.cap === undefined ? this.cap : activeCap(style.cap);
+    const join = style.join === undefined ? this.join : activeJoin(style.join);
+    if (
+      sameRounding(rounding, this.rounding) &&
+      sameBorder(border, this.border) &&
+      cap === this.cap &&
+      join === this.join
+    ) {
       return this;
     }
     return new Stroke({
@@ -846,6 +948,8 @@ export class Stroke extends KufiItem {
       closed: this.closed,
       rounding,
       border,
+      cap,
+      join,
       color: this.color,
     });
   }
@@ -861,6 +965,8 @@ export interface ArcInit {
   direction: ArcDirection;
   size: ArcSize;
   border?: ItemBorder;
+  cap?: StrokeCap;
+  join?: StrokeJoin;
   color?: string;
 }
 
@@ -902,6 +1008,8 @@ export class Arc extends KufiItem {
   readonly direction: ArcDirection;
   readonly size: ArcSize;
   readonly border?: ItemBorder;
+  readonly cap?: StrokeCap;
+  readonly join?: StrokeJoin;
   readonly color?: string;
 
   constructor(init: ArcInit) {
@@ -915,6 +1023,8 @@ export class Arc extends KufiItem {
     this.direction = init.direction;
     this.size = init.size;
     this.border = init.border;
+    this.cap = activeCap(init.cap);
+    this.join = activeJoin(init.join);
     this.color = init.color;
   }
 
@@ -932,6 +1042,8 @@ export class Arc extends KufiItem {
       size: this.size,
     };
     if (this.border !== undefined) item.border = this.border;
+    if (this.cap !== undefined) item.cap = this.cap;
+    if (this.join !== undefined) item.join = this.join;
     if (this.color !== undefined) item.color = this.color;
     return item;
   }
@@ -1031,6 +1143,8 @@ export class Arc extends KufiItem {
       ]),
       mode: "stroke",
       width: inkUnit(config),
+      cap: this.cap ?? DEFAULT_STROKE_CAP,
+      join: this.join ?? DEFAULT_STROKE_JOIN,
     };
   }
 
@@ -1077,6 +1191,8 @@ export class Arc extends KufiItem {
       direction: this.direction,
       size: this.size,
       border: this.border,
+      cap: this.cap,
+      join: this.join,
       color: this.color,
     });
   }
@@ -1088,13 +1204,30 @@ export class Arc extends KufiItem {
       direction: this.direction,
       size: this.size,
       border: this.border,
+      cap: this.cap,
+      join: this.join,
       color,
     });
   }
 
-  /** An arc has no shape or rounding; a border is its one style field. */
+  /** An arc has no shape or rounding; border, cap and join are its style. */
   withStyle(style: ItemStyle): Arc {
-    if (style.border === undefined || sameBorder(style.border ?? undefined, this.border)) {
+    if (
+      style.border === undefined &&
+      style.cap === undefined &&
+      style.join === undefined
+    ) {
+      return this;
+    }
+    const border =
+      style.border === undefined ? this.border : (style.border ?? undefined);
+    const cap = style.cap === undefined ? this.cap : activeCap(style.cap);
+    const join = style.join === undefined ? this.join : activeJoin(style.join);
+    if (
+      sameBorder(border, this.border) &&
+      cap === this.cap &&
+      join === this.join
+    ) {
       return this;
     }
     return new Arc({
@@ -1102,7 +1235,9 @@ export class Arc extends KufiItem {
       to: this.to,
       direction: this.direction,
       size: this.size,
-      border: style.border ?? undefined,
+      border,
+      cap,
+      join,
       color: this.color,
     });
   }
@@ -1163,6 +1298,8 @@ export function parseItem(item: CanvasItem): KufiItem {
         to: item.to,
         rounding: item.rounding,
         border: item.border,
+        cap: item.cap,
+        join: item.join,
         color: item.color,
       });
     case "stroke":
@@ -1171,6 +1308,8 @@ export function parseItem(item: CanvasItem): KufiItem {
         closed: item.closed,
         rounding: item.rounding,
         border: item.border,
+        cap: item.cap,
+        join: item.join,
         color: item.color,
       });
     case "arc":
@@ -1180,6 +1319,8 @@ export function parseItem(item: CanvasItem): KufiItem {
         direction: item.direction,
         size: item.size,
         border: item.border,
+        cap: item.cap,
+        join: item.join,
         color: item.color,
       });
   }
@@ -1261,8 +1402,12 @@ export function styleItem(item: CanvasItem, style: ItemStyle): CanvasItem {
       : style.border === null
         ? null
         : (sanitizeBorder(style.border) ?? null);
+  const cap =
+    style.cap === undefined ? undefined : normalizeStrokeCap(style.cap);
+  const join =
+    style.join === undefined ? undefined : normalizeStrokeJoin(style.join);
   const wrapper = itemOf(item);
-  const styled = wrapper.withStyle({ ...style, rounding, border });
+  const styled = wrapper.withStyle({ ...style, rounding, border, cap, join });
   // A patch that asks nothing of this item type leaves the object identity
   // alone, so a React layer can skip it.
   return styled === wrapper ? item : styled.toJSON();
@@ -1328,6 +1473,8 @@ export function makeTile(init: TileInit): TileItem {
 export interface StrokeStyle {
   rounding?: ItemRounding;
   border?: ItemBorder;
+  cap?: StrokeCap;
+  join?: StrokeJoin;
 }
 
 export function makeLine(

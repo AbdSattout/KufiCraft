@@ -3,20 +3,21 @@
 /**
  * KufiCraft — shape palette (and the selection it acts on).
  *
- * One panel, four jobs: the palette feeds the next drawn tiles *and* reshapes
+ * One panel, five jobs: the palette feeds the next drawn tiles *and* reshapes
  * the current selection (docs/UI.md §Editor) — rotation cycles `r` in quarter
  * turns (`R` on the keyboard too), the rounding block sets the corners of
- * tiles, line bars and polyline turns, and the border block sets the band
- * width and colour around the whole shape; picking a shape is the way back to
- * the plain square, so the panel carries no separate reset button.
+ * tiles, line bars and polyline turns, the stroke block sets the cap and join
+ * of stroked items, and the border block sets the band width and colour around
+ * the whole shape; picking a shape is the way back to the plain square, so the
+ * panel carries no separate reset button.
  *
- * Rounding and the border work like the shape buttons: they set the **draw
- * style** (what the pen paints next) and, when a selection is live, re-style it
- * in the same click. The displayed values follow the selection — the first
- * selected item's own rounding and border while one is active, the draw style
- * otherwise (initially: no rounding, no border). The rounding slider is a
- * per-item fraction of the shorter side, so the panel shows it as a percentage
- * of the model's `0…0.5`.
+ * Rounding, stroke ends/joins and the border work like the shape buttons: they
+ * set the **draw style** (what the pen paints next) and, when a selection is
+ * live, re-style it in the same click. The displayed values follow the
+ * selection — the first selected item's own rounding, border, cap and join
+ * while one is active, the draw style otherwise (initially: no rounding, no
+ * border, butt/miter). The rounding slider is a per-item fraction of the
+ * shorter side, so the panel shows it as a percentage of the model's `0…0.5`.
  *
  * The selection actions are revealed by the selection itself: with nothing
  * selected there is no “التحديد” block and no disabled buttons.
@@ -29,7 +30,6 @@ import {
   Copy,
   Layers,
   PaintBucket,
-  RotateCcw,
   RotateCw,
   SendToBack,
   Trash2,
@@ -52,8 +52,17 @@ import {
   MAX_BORDER_WIDTH,
   MAX_ROUNDING_RADIUS,
   MIN_BORDER_WIDTH,
+  STROKE_CAPS,
+  STROKE_JOINS,
 } from "@/lib/canvas/model";
-import type { ItemBorder, ItemRounding, Rotation, ShapeId } from "@/lib/canvas/model";
+import type {
+  ItemBorder,
+  ItemRounding,
+  Rotation,
+  ShapeId,
+  StrokeCap,
+  StrokeJoin,
+} from "@/lib/canvas/model";
 import type { ArrangeAction } from "@/lib/canvas/ops";
 import { MESSAGES } from "./messages";
 import { INK_SWATCHES, formatCount, mergedSwatches, swatchLabel } from "./editor-palette";
@@ -141,9 +150,21 @@ function GlyphToggle({
   );
 }
 
+const CAP_LABELS: Record<StrokeCap, string> = {
+  butt: MESSAGES.strokeCapButt,
+  round: MESSAGES.strokeCapRound,
+  square: MESSAGES.strokeCapSquare,
+};
+
+const JOIN_LABELS: Record<StrokeJoin, string> = {
+  miter: MESSAGES.strokeJoinMiter,
+  round: MESSAGES.strokeJoinRound,
+  bevel: MESSAGES.strokeJoinBevel,
+};
+
 export interface ShapePanelProps {
   style: DrawStyle;
-  /** The ink colour, used by “تلوين التحديد” and «استخدام لون الحبر». */
+  /** The ink colour, used by “تلوين التحديد”. */
   inkColor: string;
   /** Recent ink colours, offered by the border colour field. */
   inkSwatches: readonly string[];
@@ -158,6 +179,10 @@ export interface ShapePanelProps {
   setBorder: (border: ItemBorder) => void;
   /** Live width while the slider is dragged (style only, no write). */
   previewBorderWidth: (width: number) => void;
+  /** End shape of the next stroked item (and of the selection). */
+  setStrokeCap: (cap: StrokeCap) => void;
+  /** Turn shape of the next stroked item (and of the selection). */
+  setStrokeJoin: (join: StrokeJoin) => void;
   recolourSelection: (color: string) => void;
   duplicateSelection: () => void;
   deleteSelection: () => void;
@@ -206,6 +231,8 @@ export function ShapePanel({
   previewRounding,
   setBorder,
   previewBorderWidth,
+  setStrokeCap,
+  setStrokeJoin,
   recolourSelection,
   duplicateSelection,
   deleteSelection,
@@ -310,6 +337,56 @@ export function ShapePanel({
       </div>
 
       <div className="flex flex-col gap-2 border-t border-border/60 pt-2">
+        <p className="text-xs text-muted-foreground">{MESSAGES.strokeStyle}</p>
+        <div className="flex flex-col gap-1">
+          <span className="text-xs text-muted-foreground/80">
+            {MESSAGES.strokeCap}
+          </span>
+          <div
+            role="group"
+            aria-label={MESSAGES.strokeCap}
+            className="grid grid-cols-3 gap-1"
+          >
+            {STROKE_CAPS.map((cap) => (
+              <Button
+                key={cap}
+                variant={style.cap === cap ? "secondary" : "outline"}
+                size="sm"
+                aria-pressed={style.cap === cap}
+                title={CAP_LABELS[cap]}
+                onClick={() => setStrokeCap(cap)}
+              >
+                {CAP_LABELS[cap]}
+              </Button>
+            ))}
+          </div>
+        </div>
+        <div className="flex flex-col gap-1">
+          <span className="text-xs text-muted-foreground/80">
+            {MESSAGES.strokeJoin}
+          </span>
+          <div
+            role="group"
+            aria-label={MESSAGES.strokeJoin}
+            className="grid grid-cols-3 gap-1"
+          >
+            {STROKE_JOINS.map((join) => (
+              <Button
+                key={join}
+                variant={style.join === join ? "secondary" : "outline"}
+                size="sm"
+                aria-pressed={style.join === join}
+                title={JOIN_LABELS[join]}
+                onClick={() => setStrokeJoin(join)}
+              >
+                {JOIN_LABELS[join]}
+              </Button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-2 border-t border-border/60 pt-2">
         <p className="text-xs text-muted-foreground">{MESSAGES.borders}</p>
         <SliderField
           label={MESSAGES.borderWidth}
@@ -320,28 +397,14 @@ export function ShapePanel({
           onPreview={previewBorderWidth}
           onCommit={(value) => setBorder({ ...style.border, width: value })}
         />
-        <div className="flex items-end gap-2">
-          <div className="flex-1">
-            <ColourField
-              label={MESSAGES.borderColor}
-              value={color}
-              colors={swatches}
-              onPick={(next) => setBorder({ ...style.border, color: next })}
-              labelFor={(next) => swatchLabel(MESSAGES.borderColor, next)}
-              hideLabel
-            />
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-label={MESSAGES.borderUseInk}
-            title={MESSAGES.borderUseInk}
-            onClick={() => setBorder({ ...style.border, color: inkColor })}
-          >
-            <RotateCcw />
-            {MESSAGES.borderUseInk}
-          </Button>
-        </div>
+        <ColourField
+          label={MESSAGES.borderColor}
+          value={color}
+          colors={swatches}
+          onPick={(next) => setBorder({ ...style.border, color: next })}
+          labelFor={(next) => swatchLabel(MESSAGES.borderColor, next)}
+          hideLabel
+        />
       </div>
 
       {selectionCount > 0 ? (

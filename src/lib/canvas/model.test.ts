@@ -9,6 +9,8 @@ import {
   DEFAULT_BORDER_COLOR,
   DEFAULT_BORDER_WIDTH,
   DEFAULT_RATIO,
+  DEFAULT_STROKE_CAP,
+  DEFAULT_STROKE_JOIN,
   MAX_BORDER_WIDTH,
   MAX_COLOR_LENGTH,
   MAX_RATIO,
@@ -30,11 +32,15 @@ import {
   normalizeAnchor,
   normalizeArcAnchor,
   normalizeArcSize,
+  normalizeStrokeCap,
+  normalizeStrokeJoin,
   ratioLabel,
   repairArcSize,
   sameLinePoint,
   sanitizeBorder,
   sanitizeRounding,
+  sanitizeStrokeCap,
+  sanitizeStrokeJoin,
   snapRatio,
   strokeKey,
   tileKey,
@@ -209,6 +215,28 @@ describe("rounding / border model", () => {
     expect(sanitizeBorder({ width: 2, color: long })?.color).toBe(
       long.slice(0, MAX_COLOR_LENGTH),
     );
+  });
+
+  it("normalises caps and joins, dropping the defaults from storage", () => {
+    expect(DEFAULT_STROKE_CAP).toBe("butt");
+    expect(DEFAULT_STROKE_JOIN).toBe("miter");
+    expect(normalizeStrokeCap("round")).toBe("round");
+    expect(normalizeStrokeCap("square")).toBe("square");
+    expect(normalizeStrokeCap("bevel")).toBe("butt");
+    expect(normalizeStrokeCap(undefined)).toBe("butt");
+    expect(normalizeStrokeJoin("round")).toBe("round");
+    expect(normalizeStrokeJoin("bevel")).toBe("bevel");
+    expect(normalizeStrokeJoin("square")).toBe("miter");
+    expect(normalizeStrokeJoin(undefined)).toBe("miter");
+
+    expect(sanitizeStrokeCap("butt")).toBeUndefined();
+    expect(sanitizeStrokeCap("round")).toBe("round");
+    expect(sanitizeStrokeCap("square")).toBe("square");
+    expect(sanitizeStrokeCap("nope")).toBeUndefined();
+    expect(sanitizeStrokeJoin("miter")).toBeUndefined();
+    expect(sanitizeStrokeJoin("round")).toBe("round");
+    expect(sanitizeStrokeJoin("bevel")).toBe("bevel");
+    expect(sanitizeStrokeJoin("nope")).toBeUndefined();
   });
 });
 
@@ -591,6 +619,22 @@ describe("itemSignature", () => {
     expect(
       itemSignature({ ...line, border: { width: 2, color: "#000000" } }),
     ).not.toBe(itemSignature(line));
+  });
+
+  it("gives stroke caps and joins their own signature slots", () => {
+    expect(itemSignature({ ...stroke, cap: "round" })).not.toBe(
+      itemSignature(stroke),
+    );
+    expect(itemSignature({ ...stroke, join: "bevel" })).not.toBe(
+      itemSignature(stroke),
+    );
+    expect(
+      itemSignature({ ...arc, cap: "square", join: "round" }),
+    ).not.toBe(itemSignature(arc));
+    // The defaults paint exactly like absent fields.
+    expect(
+      itemSignature({ ...stroke, cap: "butt", join: "miter" }),
+    ).toBe(itemSignature(stroke));
   });
 
   it("tells a space-fragment end from the ink one", () => {

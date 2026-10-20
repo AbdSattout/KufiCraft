@@ -130,9 +130,9 @@ recolour behaviour), on the client (`paintItems`) and on the backend
 | type | fields | key |
 | --- | --- | --- |
 | `tile` | `column`, `row`, `zone`, `shape?`, `rotation?`, `color?` | `tile:<column>:<row>:<zone>` |
-| `line` | `from`, `to` (`FragmentPoint`), `color?` | `line:<f>><f>` (fragments canonical by column, then row, then zone) |
-| `stroke` | `points` (`LinePoint[]`), `closed?`, `color?` | `stroke:<digest>` (FNV-1a of the point list — a point list is unbounded, a key is not) |
-| `arc` | `from`, `to` (`ArcPoint` — a fragment + optional `anchor`), `direction`, `size`, `color?` | `arc:<f>><f>\|<direction>\|<size>` (fragments canonical by column, then row, then zone); an arc with a stored anchor ends in `\|<digest>` of its endpoints — an anchor-less arc keys exactly as before |
+| `line` | `from`, `to` (`FragmentPoint`), `cap?`, `join?`, `color?` | `line:<f>><f>` (fragments canonical by column, then row, then zone) |
+| `stroke` | `points` (`LinePoint[]`), `closed?`, `cap?`, `join?`, `color?` | `stroke:<digest>` (FNV-1a of the point list — a point list is unbounded, a key is not) |
+| `arc` | `from`, `to` (`ArcPoint` — a fragment + optional `anchor`), `direction`, `size`, `cap?`, `join?`, `color?` | `arc:<f>><f>\|<direction>\|<size>` (fragments canonical by column, then row, then zone); an arc with a stored anchor ends in `\|<digest>` of its endpoints — an anchor-less arc keys exactly as before |
 
 * `shape` is one of the ten `ShapeId`s (`SHAPE_IDS`), absent = `square`;
   `rotation` is quarter turns clockwise (`0…3`), absent = 0.
@@ -145,6 +145,11 @@ recolour behaviour), on the client (`paintItems`) and on the backend
 * A `line` is an axis-aligned bar of ink: a legal `line` shares one row **or**
   one column; a diagonal (or a 3+-point run) is a `stroke` polyline.
   `Arc.isSupported` accepts the same row / column / 45° diagonal cases.
+* A stroked item may carry `cap` (`butt | round | square`, default `butt`) and
+  `join` (`miter | round | bevel`, default `miter`). A line stores them for its
+  diagonal fallback, a `stroke` uses them at its open ends/turns, and an `arc`
+  uses them at its two endpoints. The defaults are the absent state; a border
+  on the same item uses the same cap and join.
 
 ### Fragments and line points
 
@@ -267,8 +272,8 @@ which owns the geometry for that item and nothing else:
 | --- | --- |
 | `key` | the identity above, derived from the geometry in the constructor |
 | `type` | the discriminant (`"tile" \| "line" \| "stroke" \| "arc"`) |
-| `render(config)` | `Rendered = { path, mode: "fill" \| "stroke", width }` |
-| `draw(config)` | `render` plus one optional border paint: a wider stroke of the same path |
+| `render(config)` | `Rendered = { path, mode: "fill" \| "stroke", width, cap, join }` |
+| `draw(config)` | `render` plus one optional border paint: a wider stroke of the same path, same cap/join |
 | `bounds(config)` / `contains(config, point)` | hit-testing and marquee geometry |
 | `cellRange()` | the cell box the item occupies (move/duplicate maths) |
 | `moved(dColumn, dRow)` / `withColor(color)` | copy-on-write edits |
@@ -340,10 +345,10 @@ Every function is deterministic and side-effect free.
   it is open, straight, on the square grid, every point agrees on the anchor
   **and zone**, and the run does not double back. A run with mixed anchors or
   zones is never merged, so no point a designer placed is dropped. The optional
-  `style` carries the draw style's `rounding` and `border` into the items; with
-  rounding on, a run is kept as **one** item — a `line` bar (its box corners
-  round) or a `stroke` (its turns round) — because rounding independently tiled
-  cells would notch the joins.
+  `style` carries the draw style's `rounding`, `border`, `cap` and `join` into
+  the items; with rounding on, a run is kept as **one** item — a `line` bar (its
+  box corners round) or a `stroke` (its turns round) — because rounding
+  independently tiled cells would notch the joins.
 * **`toOps(prev, next)`** — diffs two item lists into the backend batch
   (`remove` + `add`) around the longest common *content* prefix, so a stroke
   re-sends only the tail it touched, never the whole board.
@@ -351,11 +356,13 @@ Every function is deterministic and side-effect free.
 ## 5. Rendering contract
 
 * Every item renders through its class: `item.render(config)` →
-  `{ path, mode, width }`; `item.draw(config)` adds the border paint below and
-  is what renderers call.
+  `{ path, mode, width, cap, join }`; `item.draw(config)` adds the border paint
+  below and is what renderers call. Filled items answer the default `cap`/`join`
+  too, so every renderer can pass the pair through unconditionally.
   * `mode: "fill"` → `<path d fill={itemColor}>` (tiles, straight lines).
   * `mode: "stroke"` → `<path d fill="none" stroke={itemColor}
-    stroke-width={width}>` (polylines, arcs, diagonal `line` fallbacks) with
+    stroke-width={width} stroke-linecap={cap} stroke-linejoin={join}>`
+    (polylines, arcs, diagonal `line` fallbacks) with
     `width = inkUnit(config)`.
   * A stroke's path runs through each point's **anchored** position
     (`linePointPosition`). Only a **centre** end still takes the reference app's
@@ -368,14 +375,14 @@ Every function is deterministic and side-effect free.
   thumbnail.
 * **Style is part of the item, not the renderer**: a tile, a line bar and a
   polyline may carry `rounding` (radius as a fraction of the shorter side plus a
-  physical corner mask) and **every** item may carry a `border` (band width in
-  viewBox units, colour; width `0` means none). `item.draw(config)` computes
-  **one** border paint and paints it **before** `item.render(config)`, so the
-  item always wins:
+  physical corner mask), every item may carry a `border` (band width in viewBox
+  units, colour; width `0` means none), and a stroked item may carry `cap` and
+  `join`. `item.draw(config)` computes **one** border paint and paints it
+  **before** `item.render(config)`, so the item always wins:
   * a **stroked** item (polyline, arc, diagonal line fallback) is stroked again
-    with `stroke-width = item width + 2 × border width`, same path, same butt
-    caps and mitre joins, in the border colour — the visible band is exactly
-    `border width` on each side of the ink;
+    with `stroke-width = item width + 2 × border width`, same path, same cap and
+    join, in the border colour — the visible band is exactly `border width` on
+    each side of the ink;
   * a **filled** item (tile, line bar) gets a native stroke of its own path,
     `2 × border width` wide, painted before the fill; the fill covers the inner
     half, so the band is exactly `border width` outside every edge and corner
@@ -387,8 +394,11 @@ Every function is deterministic and side-effect free.
   created). Absent fields render exactly like a pre-style document. Rounding
   geometry is generated in `rounding.ts` (tiles, line bars and polyline
   turns).
-* **Butt caps and mitre joins** — a rib ends flush with the ink edge, exactly
-  like the reference app. No `stroke-linecap="round"` anywhere in artwork.
+* **Caps and joins are per item.** The defaults are butt caps and mitre joins —
+  a rib ends flush with the ink edge, exactly like the reference app — and the
+  cap/join controls store `round` or `square` ends and `round` or `bevel` turns
+  only when chosen. React canvas, SVG string/export, PNG and thumbnails all read
+  the same `Rendered` pair, and a border uses it too.
 * `itemColor(config, item)` = `item.color ?? config.ink`.
 * `config.background` paints the SVG background (`transparent` → no rect).
 * `config.showGrid` draws the two-family construction grid (`gridPaths`), and
@@ -735,8 +745,8 @@ preset, the touch relation is identical across all `5×5` ratio pairs, and a
 space fragment is a normal square — line points, tool runs and moves treat it
 exactly like ink),
 `items.test.ts`
-(item classes, keys, geometry, hit-testing, rounding / border styling, the
-stored shape against `canvasItemValidator`, the per-grid rules),
+(item classes, keys, geometry, hit-testing, rounding / border / cap / join
+styling, the stored shape against `canvasItemValidator`, the per-grid rules),
 `ops.test.ts` (add/remove/paint/
 replace, `toOps`, pen/line items, hidden items surviving the diff),
 `model.test.ts` (presets, snapping, keys, signatures, style clamping),

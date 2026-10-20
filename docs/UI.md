@@ -186,10 +186,14 @@ With something selected the same section reveals the selection actions
 («التحديد»: recolour with the ink colour, duplicate, delete) — with nothing
 selected they are absent, not disabled.
 
-The style blocks under the palette are rounding and borders. The border block
-has a width slider (`0` = no border), a colour field and «استخدام لون الحبر».
-The width is the switch: raising it above `0` adds the border, and a new border
-starts black until the user picks another colour.
+The style blocks under the palette are rounding, stroke ends/joins and borders.
+The stroke block has two three-button rows — نهاية الخط (`مسطّحة`, `دائرية`,
+`مربّعة`) and وصلة الخط (`حادّة`, `دائرية`, `مشطوفة`) — for the next diagonal
+line, polyline or arc and for any stroked item in the selection. The defaults
+are `مسطّحة` and `حادّة`; a border on the same item inherits both. The border
+block has only a width slider (`0` = no border) and a colour field; the width is
+the switch: raising it above `0` adds the border, and a new border starts black
+until the user picks another colour.
 
 Sidebar, top to bottom: الأشكال (palette + selection), لون الحبر, لون الورقة,
 then the board — نسبة الحبر as the five presets `1:1`…`1:5` (live re-render; the

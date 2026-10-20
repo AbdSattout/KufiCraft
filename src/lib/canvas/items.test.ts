@@ -362,6 +362,61 @@ describe("render", () => {
     }
   });
 
+  it("carries each stroked item's cap and join into the paint", () => {
+    const subjects = [
+      {
+        item: makeLine(
+          { column: 0, row: 0 },
+          { column: 2, row: 2 },
+          undefined,
+          { cap: "round", join: "bevel" },
+        ),
+        cap: "round",
+        join: "bevel",
+      },
+      {
+        item: makeStroke(
+          [
+            { column: 0, row: 0 },
+            { column: 2, row: 2 },
+          ],
+          false,
+          undefined,
+          { cap: "square", join: "round" },
+        ),
+        cap: "square",
+        join: "round",
+      },
+      {
+        item: makeArc({
+          from: { column: 0, row: 6 },
+          to: { column: 4, row: 6 },
+          direction: "clockwise",
+          size: "half",
+          cap: "round",
+          join: "bevel",
+        }),
+        cap: "round",
+        join: "bevel",
+      },
+    ] as const;
+
+    for (const { item, cap, join } of subjects) {
+      const rendered = itemRender(SQUARE, item);
+      expect(rendered.mode).toBe("stroke");
+      expect(rendered.cap).toBe(cap);
+      expect(rendered.join).toBe(join);
+      // The border is the same path with the same stroke settings.
+      const drawn = itemOf({
+        ...item,
+        border: { width: 2, color: "#7c2d12" },
+      }).draw(SQUARE);
+      expect(drawn.cap).toBe(cap);
+      expect(drawn.join).toBe(join);
+      expect(drawn.border).toBeDefined();
+    }
+  });
+
   it("strokes through a stroke's anchors, not its cell centres", () => {
     const cell = cellSize(SQUARE);
     const ink = inkUnit(SQUARE);
@@ -402,6 +457,8 @@ describe("render", () => {
       path: rectPath({ x: 0, y: 4 * cell, w: 4 * cell + ink, h: ink }),
       mode: "fill",
       width: 0,
+      cap: "butt",
+      join: "miter",
     });
   });
 
@@ -501,6 +558,8 @@ describe("render", () => {
       path: slicePath(circularSlice(twelve, 2, 11, 0)),
       mode: "fill",
       width: 0,
+      cap: "butt",
+      join: "miter",
     });
   });
 
@@ -802,6 +861,32 @@ describe("rounding / border", () => {
       rounding: ROUNDING,
       border: BORDER,
     });
+  });
+
+  it("stores cap and join only when they differ from the defaults", () => {
+    const subject = makeStroke(
+      [
+        { column: 0, row: 0 },
+        { column: 2, row: 2 },
+      ],
+      false,
+      undefined,
+      { cap: "round", join: "bevel" },
+    );
+    expect(subject).toMatchObject({ cap: "round", join: "bevel" });
+    expect(moveItem(subject, 1, 0)).toMatchObject({
+      cap: "round",
+      join: "bevel",
+    });
+    expect(colorItem(subject, "#ff0000")).toMatchObject({
+      cap: "round",
+      join: "bevel",
+    });
+
+    const cleared = styleItem(subject, { cap: "butt", join: "miter" });
+    expect(cleared).not.toHaveProperty("cap");
+    expect(cleared).not.toHaveProperty("join");
+    expect(styleItem(cleared, { cap: "butt", join: "miter" })).toBe(cleared);
   });
 
   it("adds one border paint in draw(), while render() stays the item's own paint", () => {

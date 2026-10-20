@@ -17,6 +17,8 @@ import {
   projectConfigValidator,
   sanitizeBorder,
   sanitizeRounding,
+  sanitizeStrokeCap,
+  sanitizeStrokeJoin,
   snapRatio,
   arcKey,
   arcPoint,
@@ -148,6 +150,10 @@ function sanitizeItem(item: CanvasItem, config: ProjectConfig): CanvasItem | nul
         if (rounding !== undefined) next.rounding = rounding;
       }
       if (border !== undefined) next.border = border;
+      const cap = sanitizeStrokeCap(item.cap);
+      const join = sanitizeStrokeJoin(item.join);
+      if (cap !== undefined) next.cap = cap;
+      if (join !== undefined) next.join = join;
       if (color !== undefined) next.color = color;
       return next;
     }
@@ -176,6 +182,10 @@ function sanitizeItem(item: CanvasItem, config: ProjectConfig): CanvasItem | nul
         if (rounding !== undefined) next.rounding = rounding;
       }
       if (border !== undefined) next.border = border;
+      const cap = sanitizeStrokeCap(item.cap);
+      const join = sanitizeStrokeJoin(item.join);
+      if (cap !== undefined) next.cap = cap;
+      if (join !== undefined) next.join = join;
       if (color !== undefined) next.color = color;
       return next;
     }
@@ -213,6 +223,10 @@ function sanitizeItem(item: CanvasItem, config: ProjectConfig): CanvasItem | nul
         size,
       };
       if (border !== undefined) next.border = border;
+      const cap = sanitizeStrokeCap(item.cap);
+      const join = sanitizeStrokeJoin(item.join);
+      if (cap !== undefined) next.cap = cap;
+      if (join !== undefined) next.join = join;
       if (color !== undefined) next.color = color;
       return next;
     }

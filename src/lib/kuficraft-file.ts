@@ -47,6 +47,8 @@ import {
   repairArcSize,
   sanitizeBorder,
   sanitizeRounding,
+  sanitizeStrokeCap,
+  sanitizeStrokeJoin,
   snapRatio,
   strokeKey,
   tileKey,
@@ -319,6 +321,8 @@ export function normalizeItem(
   const colour = itemColour(value.color);
   const border = itemBorder(value.border);
   const rounding = itemRounding(value.rounding);
+  const cap = sanitizeStrokeCap(value.cap);
+  const join = sanitizeStrokeJoin(value.join);
 
   switch (value.type) {
     case "tile": {
@@ -356,6 +360,8 @@ export function normalizeItem(
       };
       if (rounding !== undefined) item.rounding = rounding;
       if (border !== undefined) item.border = border;
+      if (cap !== undefined) item.cap = cap;
+      if (join !== undefined) item.join = join;
       if (colour !== undefined) item.color = colour;
       return item;
     }
@@ -389,6 +395,8 @@ export function normalizeItem(
       if (closed) item.closed = true;
       if (rounding !== undefined) item.rounding = rounding;
       if (border !== undefined) item.border = border;
+      if (cap !== undefined) item.cap = cap;
+      if (join !== undefined) item.join = join;
       if (colour !== undefined) item.color = colour;
       return item;
     }
@@ -431,6 +439,8 @@ export function normalizeItem(
         size,
       };
       if (border !== undefined) item.border = border;
+      if (cap !== undefined) item.cap = cap;
+      if (join !== undefined) item.join = join;
       if (colour !== undefined) item.color = colour;
       return item;
     }
