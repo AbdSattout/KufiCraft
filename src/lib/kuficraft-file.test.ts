@@ -360,6 +360,7 @@ describe("parseProjectFile — config and name", () => {
   it("defaults missing config fields", () => {
     const parsed = parseProjectFile(rawFile({ config: undefined }));
     expect(parsed.config).toEqual(DEFAULT_PROJECT_CONFIG);
+    expect(parsed.config.base).toBe(50);
   });
 
   it("defaults a missing / empty / oversized name", () => {

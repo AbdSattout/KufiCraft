@@ -79,25 +79,30 @@ function ProjectNameInput({ name, rename }: ProjectNameInputProps) {
   };
 
   return (
-    <Input
-      value={shown}
-      aria-label={MESSAGES.renameLabel}
-      title={MESSAGES.renameHint}
-      spellCheck={false}
-      onChange={(event) => setDraft(event.target.value)}
-      onBlur={commit}
-      onKeyDown={(event) => {
-        if (event.key === "Enter") {
-          event.currentTarget.blur();
-        } else if (event.key === "Escape") {
-          setDraft(null);
-          event.currentTarget.blur();
-        }
-      }}
-      className={cn(
-        "h-8 min-w-0 flex-1 border-transparent bg-transparent px-2 font-heading text-sm shadow-none",
-        "hover:border-input/60 focus-visible:border-input md:max-w-72 md:text-base",
-      )}
+    <ShortcutTooltip
+      label={MESSAGES.renameHint}
+      side="bottom"
+      trigger={
+        <Input
+          value={shown}
+          aria-label={MESSAGES.renameLabel}
+          spellCheck={false}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={commit}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.currentTarget.blur();
+            } else if (event.key === "Escape") {
+              setDraft(null);
+              event.currentTarget.blur();
+            }
+          }}
+          className={cn(
+            "h-8 min-w-0 flex-1 border-transparent bg-transparent px-2 font-heading text-sm shadow-none",
+            "hover:border-input/60 focus-visible:border-input md:max-w-72 md:text-base",
+          )}
+        />
+      }
     />
   );
 }

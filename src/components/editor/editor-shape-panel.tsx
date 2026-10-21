@@ -43,7 +43,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { tileIconPath } from "@/lib/canvas/items";
@@ -72,7 +71,7 @@ import { INK_SWATCHES, formatCount, mergedSwatches, swatchLabel } from "./editor
 import { ColourField, PanelSection, SliderField } from "./editor-controls";
 import { SHAPE_LABELS, SHAPE_ORDER } from "./interaction";
 import type { DrawStyle } from "./interaction";
-import { shapeDigit, shortcutAriaLabel, shortcutLabel } from "./shortcut-hints";
+import { shapeDigit, shortcutAriaLabel } from "./shortcut-hints";
 import { ShortcutTooltip } from "./shortcut-tooltip";
 import { usePrimaryModifier } from "./use-primary-modifier";
 
@@ -142,17 +141,21 @@ function GlyphToggle({
   children: React.ReactNode;
 }) {
   return (
-    <Button
-      variant={pressed ? "secondary" : "outline"}
-      size="icon"
-      className={position}
-      aria-pressed={pressed}
-      aria-label={label}
-      title={label}
-      onClick={onClick}
-    >
-      {children}
-    </Button>
+    <ShortcutTooltip
+      label={label}
+      trigger={
+        <Button
+          variant={pressed ? "secondary" : "outline"}
+          size="icon"
+          className={position}
+          aria-pressed={pressed}
+          aria-label={label}
+          onClick={onClick}
+        >
+          {children}
+        </Button>
+      }
+    />
   );
 }
 
@@ -379,16 +382,20 @@ export function ShapePanel({
               className="grid grid-cols-3 gap-1"
             >
               {STROKE_CAPS.map((cap) => (
-                <Button
+                <ShortcutTooltip
                   key={cap}
-                  variant={style.cap === cap ? "secondary" : "outline"}
-                  size="sm"
-                  aria-pressed={style.cap === cap}
-                  title={CAP_LABELS[cap]}
-                  onClick={() => setStrokeCap(cap)}
-                >
-                  {CAP_LABELS[cap]}
-                </Button>
+                  label={CAP_LABELS[cap]}
+                  trigger={
+                    <Button
+                      variant={style.cap === cap ? "secondary" : "outline"}
+                      size="sm"
+                      aria-pressed={style.cap === cap}
+                      onClick={() => setStrokeCap(cap)}
+                    >
+                      {CAP_LABELS[cap]}
+                    </Button>
+                  }
+                />
               ))}
             </div>
           </div>
@@ -402,16 +409,20 @@ export function ShapePanel({
               className="grid grid-cols-3 gap-1"
             >
               {STROKE_JOINS.map((join) => (
-                <Button
+                <ShortcutTooltip
                   key={join}
-                  variant={style.join === join ? "secondary" : "outline"}
-                  size="sm"
-                  aria-pressed={style.join === join}
-                  title={JOIN_LABELS[join]}
-                  onClick={() => setStrokeJoin(join)}
-                >
-                  {JOIN_LABELS[join]}
-                </Button>
+                  label={JOIN_LABELS[join]}
+                  trigger={
+                    <Button
+                      variant={style.join === join ? "secondary" : "outline"}
+                      size="sm"
+                      aria-pressed={style.join === join}
+                      onClick={() => setStrokeJoin(join)}
+                    >
+                      {JOIN_LABELS[join]}
+                    </Button>
+                  }
+                />
               ))}
             </div>
           </div>
@@ -502,11 +513,6 @@ export function ShapePanel({
                   >
                     <Icon />
                     {label}
-                    {/* Visual convention only: the accessible name stays the
-                        action, and `aria-keyshortcuts` above carries the key. */}
-                    <DropdownMenuShortcut dir="ltr" aria-hidden="true">
-                      {shortcutLabel({ kind: "arrange", action }, primary)}
-                    </DropdownMenuShortcut>
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuContent>

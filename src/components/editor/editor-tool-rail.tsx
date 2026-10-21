@@ -135,34 +135,42 @@ export function ToolRail({
               vertical ? "flex-col" : "flex-row items-center",
             )}
           >
-            <Button
-              variant={arc.direction === "clockwise" ? "secondary" : "ghost"}
-              aria-pressed={arc.direction === "clockwise"}
-              aria-label={MESSAGES.arcClockwise}
-              title={MESSAGES.arcClockwise}
-              onClick={() => setArcDirection("clockwise")}
-              className="h-auto flex-col gap-0.5 px-1 py-1.5 text-[0.7rem]"
-            >
-              <span aria-hidden className="text-base leading-none">
-                ⟳
-              </span>
-              <span>{MESSAGES.arcClockwiseShort}</span>
-            </Button>
-            <Button
-              variant={
-                arc.direction === "counterclockwise" ? "secondary" : "ghost"
+            <ShortcutTooltip
+              label={MESSAGES.arcClockwise}
+              trigger={
+                <Button
+                  variant={arc.direction === "clockwise" ? "secondary" : "ghost"}
+                  aria-pressed={arc.direction === "clockwise"}
+                  aria-label={MESSAGES.arcClockwise}
+                  onClick={() => setArcDirection("clockwise")}
+                  className="h-auto flex-col gap-0.5 px-1 py-1.5 text-[0.7rem]"
+                >
+                  <span aria-hidden className="text-base leading-none">
+                    ⟳
+                  </span>
+                  <span>{MESSAGES.arcClockwiseShort}</span>
+                </Button>
               }
-              aria-pressed={arc.direction === "counterclockwise"}
-              aria-label={MESSAGES.arcCounterclockwise}
-              title={MESSAGES.arcCounterclockwise}
-              onClick={() => setArcDirection("counterclockwise")}
-              className="h-auto flex-col gap-0.5 px-1 py-1.5 text-[0.7rem]"
-            >
-              <span aria-hidden className="text-base leading-none">
-                ⟲
-              </span>
-              <span>{MESSAGES.arcCounterclockwiseShort}</span>
-            </Button>
+            />
+            <ShortcutTooltip
+              label={MESSAGES.arcCounterclockwise}
+              trigger={
+                <Button
+                  variant={
+                    arc.direction === "counterclockwise" ? "secondary" : "ghost"
+                  }
+                  aria-pressed={arc.direction === "counterclockwise"}
+                  aria-label={MESSAGES.arcCounterclockwise}
+                  onClick={() => setArcDirection("counterclockwise")}
+                  className="h-auto flex-col gap-0.5 px-1 py-1.5 text-[0.7rem]"
+                >
+                  <span aria-hidden className="text-base leading-none">
+                    ⟲
+                  </span>
+                  <span>{MESSAGES.arcCounterclockwiseShort}</span>
+                </Button>
+              }
+            />
           </div>
 
           <div
@@ -173,45 +181,57 @@ export function ToolRail({
               vertical ? "flex-col" : "flex-row items-center",
             )}
           >
-            <Button
-              variant={arc.size === "quarter" ? "secondary" : "ghost"}
-              aria-pressed={arc.size === "quarter"}
-              aria-label={MESSAGES.arcQuarter}
-              title={MESSAGES.arcQuarter}
-              onClick={() => setArcSize("quarter")}
-              className="h-auto flex-col gap-0.5 px-1 py-1.5 text-[0.7rem]"
-            >
-              <span aria-hidden className="text-base leading-none">
-                ◜
-              </span>
-              <span>{MESSAGES.arcQuarterShort}</span>
-            </Button>
-            <Button
-              variant={arc.size === "half" ? "secondary" : "ghost"}
-              aria-pressed={arc.size === "half"}
-              aria-label={MESSAGES.arcHalf}
-              title={MESSAGES.arcHalf}
-              onClick={() => setArcSize("half")}
-              className="h-auto flex-col gap-0.5 px-1 py-1.5 text-[0.7rem]"
-            >
-              <span aria-hidden className="text-base leading-none">
-                ⌒
-              </span>
-              <span>{MESSAGES.arcHalfShort}</span>
-            </Button>
-            <Button
-              variant={arc.size === "threeQuarter" ? "secondary" : "ghost"}
-              aria-pressed={arc.size === "threeQuarter"}
-              aria-label={MESSAGES.arcThreeQuarter}
-              title={MESSAGES.arcThreeQuarter}
-              onClick={() => setArcSize("threeQuarter")}
-              className="h-auto flex-col gap-0.5 px-1 py-1.5 text-[0.7rem]"
-            >
-              <span aria-hidden className="text-base leading-none">
-                ◠
-              </span>
-              <span>{MESSAGES.arcThreeQuarterShort}</span>
-            </Button>
+            <ShortcutTooltip
+              label={MESSAGES.arcQuarter}
+              trigger={
+                <Button
+                  variant={arc.size === "quarter" ? "secondary" : "ghost"}
+                  aria-pressed={arc.size === "quarter"}
+                  aria-label={MESSAGES.arcQuarter}
+                  onClick={() => setArcSize("quarter")}
+                  className="h-auto flex-col gap-0.5 px-1 py-1.5 text-[0.7rem]"
+                >
+                  <span aria-hidden className="text-base leading-none">
+                    ◜
+                  </span>
+                  <span>{MESSAGES.arcQuarterShort}</span>
+                </Button>
+              }
+            />
+            <ShortcutTooltip
+              label={MESSAGES.arcHalf}
+              trigger={
+                <Button
+                  variant={arc.size === "half" ? "secondary" : "ghost"}
+                  aria-pressed={arc.size === "half"}
+                  aria-label={MESSAGES.arcHalf}
+                  onClick={() => setArcSize("half")}
+                  className="h-auto flex-col gap-0.5 px-1 py-1.5 text-[0.7rem]"
+                >
+                  <span aria-hidden className="text-base leading-none">
+                    ⌒
+                  </span>
+                  <span>{MESSAGES.arcHalfShort}</span>
+                </Button>
+              }
+            />
+            <ShortcutTooltip
+              label={MESSAGES.arcThreeQuarter}
+              trigger={
+                <Button
+                  variant={arc.size === "threeQuarter" ? "secondary" : "ghost"}
+                  aria-pressed={arc.size === "threeQuarter"}
+                  aria-label={MESSAGES.arcThreeQuarter}
+                  onClick={() => setArcSize("threeQuarter")}
+                  className="h-auto flex-col gap-0.5 px-1 py-1.5 text-[0.7rem]"
+                >
+                  <span aria-hidden className="text-base leading-none">
+                    ◠
+                  </span>
+                  <span>{MESSAGES.arcThreeQuarterShort}</span>
+                </Button>
+              }
+            />
           </div>
         </>
       ) : null}

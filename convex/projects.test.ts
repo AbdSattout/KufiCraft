@@ -75,7 +75,7 @@ type Test = ReturnType<typeof newTest>;
 type Accessor = ReturnType<Test["withIdentity"]>;
 
 function config(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
-  return { ...DEFAULT_PROJECT_CONFIG, ...overrides };
+  return { ...DEFAULT_PROJECT_CONFIG, base: 10, ...overrides };
 }
 
 function tile(

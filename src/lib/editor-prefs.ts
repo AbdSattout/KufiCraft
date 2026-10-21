@@ -3,11 +3,11 @@
  *
  * Two keys, both private to the browser and never sent to the server:
  *
- *   • `kuficraft.editor-prefs.v1` — how the editor opens: tool, shape and
+ *   • `kuficraft.editor-prefs.v2` — how the editor opens: tool, shape and
  *     rotation, the arc style (direction + size), zoom, the construction grid,
  *     the last few ink colours and the next stroke's style (rounding, border,
  *     cap + join).
- *   • `kuficraft.last-config.v1` — the last committed project config, used as
+ *   • `kuficraft.last-config.v2` — the last committed project config, used as
  *     the default in the dashboard's «لوحة جديدة» dialog. The ratio, cell size,
  *     grid type, colours and line shape live here, not in the prefs: they are
  *     the artwork, and the project itself is authoritative while one is open.
@@ -51,8 +51,8 @@ import { TOOL_ORDER } from "@/components/editor/tools";
 import type { ArcStyle, Rotation, ToolId } from "@/components/editor/interaction";
 import { sanitizeProjectConfig } from "@/lib/kuficraft-file";
 
-export const EDITOR_PREFS_KEY = "kuficraft.editor-prefs.v1";
-export const LAST_CONFIG_KEY = "kuficraft.last-config.v1";
+export const EDITOR_PREFS_KEY = "kuficraft.editor-prefs.v2";
+export const LAST_CONFIG_KEY = "kuficraft.last-config.v2";
 
 /** How many recent ink colours the editor remembers. */
 export const MAX_INK_SWATCHES = 8;

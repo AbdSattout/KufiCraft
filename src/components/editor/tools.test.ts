@@ -40,7 +40,7 @@ import {
   undoHistory,
 } from "./history";
 
-const CONFIG: ProjectConfig = { ...DEFAULT_PROJECT_CONFIG };
+const CONFIG: ProjectConfig = { ...DEFAULT_PROJECT_CONFIG, base: 10 };
 /** The equal 1:1 cell, where the four fragments are congruent. */
 const EQUAL: ProjectConfig = { ...CONFIG, ratio: RATIO_PRESETS[0].ratio };
 

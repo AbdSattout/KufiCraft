@@ -57,7 +57,7 @@ import { v } from "convex/values";
 export const VIEWBOX_SIZE = 1000;
 
 /** Default cell / radial-band size in viewBox units. */
-export const DEFAULT_BASE = 10;
+export const DEFAULT_BASE = 50;
 
 /** One of the five ratios a square-kufi designer works in, as `space:ink`. */
 export interface RatioPreset {

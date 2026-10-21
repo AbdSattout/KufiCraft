@@ -261,7 +261,7 @@ its index, so the artwork rotates/stretches around the ring; the hint says so.
 إظهار الشبكة is a **view guide, not artwork**: the construction grid's two
 families (cell borders plus the stronger inner ink edges) are what you draw
 *against*, so the switch is the user's preference — one setting, the same in
-every board, remembered in `kuficraft.editor-prefs.v1`. It is never part of an
+every board, remembered in `kuficraft.editor-prefs.v2`. It is never part of an
 export, and the document's own `config.showGrid` is tolerated but no longer
 rendered (docs/FORMAT.md).
 
@@ -300,7 +300,7 @@ after each committed gesture (throttled to ≥ 2 s).
 Settings persistence (localStorage, per browser, no server round-trip) — and the
 line it draws between the **user** and the **board**:
 
-* `kuficraft.editor-prefs.v1` — the user's editor: tool, active shape, rotation,
+* `kuficraft.editor-prefs.v2` — the user's editor: tool, active shape, rotation,
   arc direction and size, zoom, the grid guide (إظهار الشبكة, default on) and
   the colour swatches history (last ≤ 8 ink colours). Loaded synchronously when
   the editor mounts and applied to the toolbar so the app “opens the way you
@@ -309,8 +309,11 @@ line it draws between the **user** and the **board**:
   a selection patches those items alone, so a one-off radius or border does not
   become the next board's default. Zoom runs **0.1×–32×**, so a board far
   larger than the pane is viewable whole and a dense one (a `base` = 4 cell is
-  ~3 px at 1×) is workable up close.
-* `kuficraft.last-config.v1` — the last committed project config, used as the
+  ~3 px at 1×) is workable up close. The v2 key is deliberately fresh: a
+  stored 50 % radius and a 10-unit last config from earlier local sessions are
+  not carried into the new build; the v1 keys are left untouched but never
+  read.
+* `kuficraft.last-config.v2` — the last committed project config, used as the
   default in the dashboard’s «لوحة جديدة» dialog and for new projects. The
   artwork settings — ink ratio, cell size, grid type, circular sector count, ink
   and paper colour, the straight-lines-as-squares flag — are remembered here
@@ -390,16 +393,18 @@ Shortcuts are **never printed in the layout**. The editor is icon-first where it
 is compact and panel-heavy where it is detailed; a permanent key chip or a
 `(1)` suffix on every button turns the UI into documentation and takes space
 from the artwork. The policy is: a control shows its action, and its key
-appears **only in a tooltip on hover or keyboard focus**. The one exception is
-a menu item's trailing `DropdownMenuShortcut` — conventional, and visible only
-while the menu is open.
+appears **only in a tooltip on hover or keyboard focus**. Menu rows are
+key-free; only `aria-keyshortcuts` carries their key.
 
 * `src/components/editor/shortcut-tooltip.tsx` — `ShortcutTooltip` composes the
   vendored Base UI tooltip (`src/components/ui/tooltip.tsx`) with the control
   itself as the trigger (the `render` prop), so the tooltip never wraps a
   button in another interactive element. Its content is the action name plus a
-  `<Kbd data-slot="kbd">` (`src/components/ui/kbd.tsx`). One
-  `TooltipProvider` in `src/app/layout.tsx` groups the delay across the app.
+  `<Kbd data-slot="kbd">` (`src/components/ui/kbd.tsx`). It also carries
+  non-key hints (an optional shortcut and description are both optional); the
+  editor uses no HTML `title` attributes, because those open the browser's
+  native, unthemed tooltip. One `TooltipProvider` in `src/app/layout.tsx` groups
+  the delay across the app.
 * `src/components/editor/shortcut-hints.ts` — the single display/aria source.
   `shortcutLabel` prints e.g. `Cmd+Shift+]`; `shortcutAriaLabel` prints WAI-ARIA
   names (`Control`/`Meta`, `Delete`, `Escape`); `shapeDigit` decides whether a
@@ -416,11 +421,13 @@ while the menu is open.
 Which surfaces carry a key: the tool rail (tool name + key, plus the hand's
 double-click line), the shape palette (name + digit; the tenth glyph names
 itself with no key), rotate, duplicate, delete, undo, redo, zoom −/100 %/+, the
-grid-guide switch, and the arrange menu items. Export has no shortcut and
-therefore no hint. Deletion's key is no longer a visible chip on the button;
-`aria-keyshortcuts` remains. Disabled undo/redo and the zoom buttons at their
-bounds do not open a tooltip — an unavailable action does not advertise a key —
-but they keep their aria attributes.
+grid-guide switch. Export has no shortcut and therefore no hint. Deletion's key
+is no longer a visible chip on the button; `aria-keyshortcuts` remains. Disabled
+undo/redo and the zoom buttons at their bounds do not open a tooltip — an
+unavailable action does not advertise a key — but they keep their aria
+attributes. The arrange menu is deliberately key-free: its items keep
+`aria-keyshortcuts` for assistive tech, but no shortcut is printed inside the
+menu button or its rows.
 
 `src/components/editor/shortcuts.test.ts` is the anti-drift gate. It walks
 every `EditorShortcut` kind back through `shortcutFor` with an event that
@@ -458,9 +465,9 @@ taken here.
    `src/components/editor/shortcut-tooltip.tsx` with
    `shortcut={{ kind: … }}`, pass the action name as `label`, and add
    `aria-keyshortcuts={shortcutAriaLabel(…)}`. Keep the visible text and
-   `aria-label` key-free. Menu items use `DropdownMenuShortcut` instead. If the
-   control can be absent (grid, tool or selection dependent), the hint must be
-   absent with it.
+   `aria-label` key-free. Menu rows keep `aria-keyshortcuts` but print no key.
+   If the control can be absent (grid, tool or selection dependent), the hint
+   must be absent with it.
 5. **Its tests and docs**: add one `{ shortcut, event }` case to `cases` in
    `src/components/editor/shortcuts.test.ts`, add the row to the table above,
    and run the four gates (`bunx tsc --noEmit`, `bunx vitest run`,

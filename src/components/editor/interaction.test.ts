@@ -79,7 +79,7 @@ import type {
   WheelGesture,
 } from "./interaction";
 
-const square: ProjectConfig = { ...DEFAULT_PROJECT_CONFIG };
+const square: ProjectConfig = { ...DEFAULT_PROJECT_CONFIG, base: 10 };
 const circular: ProjectConfig = { ...square, gridType: "circular" };
 /** The equal `1:1` cell: half ink beside half space, the lightest preset. */
 const equal: ProjectConfig = { ...square, ratio: RATIO_PRESETS[0].ratio };

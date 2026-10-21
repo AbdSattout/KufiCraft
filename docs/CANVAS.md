@@ -25,8 +25,8 @@
 
   `base` 75 at `1:3` → 13 cells of `1000 / 12.75 = 78.431` (instead of 13 × 75
   plus a 25-unit sliver). No preset is space-less (`§2`), so every board is
-  cropped this way — even a `base` that divides the extent evenly: `base` 10 at
-  the default `1:3` gives 100 cells of `1000 / 99.75 = 10.025`. A non-finite or
+  cropped this way — even a `base` that divides the extent evenly: the default
+  `base` 50 at `1:3` gives 20 cells of `1000 / 19.75 = 50.633`. A non-finite or
   ≤ 0 `base`/`ratio` (never stored — `sanitizeConfig` clamps them) falls back
   to the defaults.
 * Square grid: cell `(column, row)` covers
