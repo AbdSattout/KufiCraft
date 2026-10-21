@@ -35,7 +35,7 @@ everything about the live deployment that a unit test cannot reach is marked
 | --- | --- |
 | `convex/auth.ts` | `authComponent` (client with local schema), `createAuthOptions` (with the passkey `resolveUser`/`afterVerification` hooks), `createAuth` |
 | `convex/authFlows.ts` | sign-up context token (HMAC mint/verify over `{name, expiresAt, nonce}`) + public `createSignUpContext({ name })` action + `DEFAULT_PASSKEY_NAME` re-export (legacy fallback only) |
-| `convex/lib/account-name.ts` | the shared name contract: `MAX_ACCOUNT_NAME_LENGTH`, `normalizeAccountName`, `isDefaultAccountName`, `DEFAULT_PASSKEY_NAME` (client alias: `src/lib/account-name.ts`) |
+| `convex/lib/accountName.ts` | the shared name contract: `MAX_ACCOUNT_NAME_LENGTH`, `normalizeAccountName`, `isDefaultAccountName`, `DEFAULT_PASSKEY_NAME` (client alias: `src/lib/account-name.ts`) |
 | `convex/auth.config.ts` | Convex auth provider config |
 | `convex/convex.config.ts` | registers the **local** `./betterAuth/convex.config` |
 | `convex/betterAuth/convex.config.ts` | component definition |
@@ -153,7 +153,7 @@ is the account's name. There is no profile name, no email login, no password and
 no recovery address:
 
 * **The name lives on the passkey.** The name typed at creation is normalized
-  once (`normalizeAccountName`, `convex/lib/account-name.ts`, max 60 units) and
+  once (`normalizeAccountName`, `convex/lib/accountName.ts`, max 60 units) and
   written to three places that must stay identical: `user.name`, the WebAuthn
   user the OS sheet shows, and the passkey row. The passkey row is what the
   header and `/account` read; `/account` renames that same passkey

@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import { components } from "../_generated/api";
 import { internalAction, type ActionCtx } from "../_generated/server";
-import { isDefaultAccountName, normalizeAccountName } from "../lib/account-name";
+import { isDefaultAccountName, normalizeAccountName } from "../lib/accountName";
 
 /**
  * Backfill the old typed-name accounts.

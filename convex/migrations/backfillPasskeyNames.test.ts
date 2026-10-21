@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_PASSKEY_NAME } from "../lib/account-name";
+import { DEFAULT_PASSKEY_NAME } from "../lib/accountName";
 import {
   planPasskeyNameBackfill,
   type PasskeyNameRow,

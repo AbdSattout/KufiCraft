@@ -69,25 +69,60 @@ export function AuthPanel() {
    * without this, suggestions die for good after the first attempt.
    */
   const [conditionalArm, setConditionalArm] = useState(0);
+  /**
+   * True between the browser filling the field from the passkey list and the
+   * ceremony settling. The button shows a spinner for it, exactly as it does
+   * for a button press.
+   */
+  const [conditionalBusy, setConditionalBusy] = useState(false);
   const busyRef = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
   /** True once the user has typed; browser passkey autofill never presses a key. */
   const typedRef = useRef(false);
+  /** True while a conditional `get()` is waiting for the autofill UI. */
+  const conditionalPendingRef = useRef(false);
+  /** True between an autofill selection and that conditional settling. */
+  const conditionalVerifyingRef = useRef(false);
   const idPrefix = useId();
 
-  const creating = value.trim() !== "";
+  const busy = state.busy || conditionalBusy;
+  const creating = value.trim() !== "" && !conditionalBusy;
 
   useEffect(() => {
     let cancelled = false;
+    conditionalPendingRef.current = true;
+
+    function finishVerifying(): boolean {
+      const wasVerifying = conditionalVerifyingRef.current;
+      conditionalVerifyingRef.current = false;
+      if (wasVerifying) {
+        busyRef.current = false;
+        setConditionalBusy(false);
+      }
+      return wasVerifying;
+    }
+
     void (async () => {
-      if (!(await conditionalUiSupported()) || cancelled) return;
+      if (!(await conditionalUiSupported())) {
+        if (!cancelled) {
+          conditionalPendingRef.current = false;
+          finishVerifying();
+        }
+        return;
+      }
+      if (cancelled) return;
+
       try {
         const result = await authClient.signIn.passkey({ autoFill: true });
         if (cancelled) return;
+        conditionalPendingRef.current = false;
+        const wasVerifying = finishVerifying();
+
         if (result?.data?.session) {
           hardNavigate("/");
           return;
         }
+
         /**
          * The autofilled value is the passkey's name, not something the visitor
          * typed: leaving it would let the button offer to *create* an account
@@ -95,18 +130,38 @@ export function AuthPanel() {
          * filled, keep what was typed.
          */
         if (!typedRef.current) setValue("");
-        if (result?.error && !isCancellation(result.error)) {
+
+        if (wasVerifying) {
+          dispatch({
+            type: "FAIL",
+            message: passkeyErrorMessage(result?.error),
+          });
+          // The selection consumed the arm; offer the suggestions again.
+          if (!typedRef.current) setConditionalArm((arm) => arm + 1);
+        } else if (result?.error && !isCancellation(result.error)) {
           dispatch({
             type: "FAIL",
             message: passkeyErrorMessage(result.error),
           });
         }
-      } catch {
+      } catch (cause) {
+        if (cancelled) return;
+        conditionalPendingRef.current = false;
+        const wasVerifying = finishVerifying();
         if (!typedRef.current) setValue("");
+        if (wasVerifying) {
+          dispatch({
+            type: "FAIL",
+            message: unexpectedErrorMessage(cause),
+          });
+          if (!typedRef.current) setConditionalArm((arm) => arm + 1);
+        }
       }
     })();
+
     return () => {
       cancelled = true;
+      conditionalPendingRef.current = false;
     };
   }, [conditionalArm]);
 
@@ -172,10 +227,25 @@ export function AuthPanel() {
   function handleChange(next: string) {
     if (next !== value) dispatch({ type: "RESET" });
     setValue(next);
+
     if (next === "") {
       typedRef.current = false;
       // Clearing the field switches back to sign-in: offer saved passkeys.
-      setConditionalArm((arm) => arm + 1);
+      if (!conditionalVerifyingRef.current) {
+        setConditionalArm((arm) => arm + 1);
+      }
+      return;
+    }
+
+    /**
+     * The browser filled the field from the passkey autofill list: the
+     * conditional ceremony we armed is now verifying. Give it the same busy
+     * state as the button path.
+     */
+    if (!typedRef.current && conditionalPendingRef.current) {
+      conditionalVerifyingRef.current = true;
+      busyRef.current = true;
+      setConditionalBusy(true);
     }
   }
 
@@ -197,7 +267,7 @@ export function AuthPanel() {
         onSubmit={(event) => void handleSubmit(event)}
         noValidate
         className="flex flex-col gap-3"
-        aria-busy={state.busy}
+        aria-busy={busy}
       >
         <Field data-invalid={state.error !== null}>
           <FieldLabel htmlFor={`${idPrefix}-account`}>
@@ -226,9 +296,12 @@ export function AuthPanel() {
                 typedRef.current = true;
               }
             }}
+            onPaste={() => {
+              typedRef.current = true;
+            }}
             onFocus={handleFocus}
             maxLength={MAX_ACCOUNT_NAME_LENGTH}
-            disabled={!supported || state.busy}
+            disabled={!supported || busy}
             aria-invalid={state.error !== null}
             aria-describedby={`${idPrefix}-help`}
           />
@@ -241,18 +314,22 @@ export function AuthPanel() {
 
         <Button
           type="submit"
-          disabled={!supported || state.busy}
-          aria-busy={state.busy}
+          disabled={!supported || busy}
+          aria-busy={busy}
           className="w-fit"
         >
-          {state.busy ? (
+          {busy ? (
             <Spinner />
           ) : creating ? (
             <UserPlus aria-hidden />
           ) : (
             <KeyRound aria-hidden />
           )}
-          {creating ? "إنشاء حساب" : "الدخول بمفتاح المرور"}
+          {conditionalBusy
+            ? "جارٍ الدخول…"
+            : creating
+              ? "إنشاء حساب"
+              : "الدخول بمفتاح المرور"}
         </Button>
       </form>
 

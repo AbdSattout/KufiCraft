@@ -11,8 +11,10 @@
 import type * as auth from "../auth.js";
 import type * as authFlows from "../authFlows.js";
 import type * as http from "../http.js";
+import type * as lib_accountName from "../lib/accountName.js";
 import type * as lib_auth from "../lib/auth.js";
 import type * as lib_model from "../lib/model.js";
+import type * as migrations_backfillPasskeyNames from "../migrations/backfillPasskeyNames.js";
 import type * as projects from "../projects.js";
 
 import type {
@@ -25,8 +27,10 @@ declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   authFlows: typeof authFlows;
   http: typeof http;
+  "lib/accountName": typeof lib_accountName;
   "lib/auth": typeof lib_auth;
   "lib/model": typeof lib_model;
+  "migrations/backfillPasskeyNames": typeof migrations_backfillPasskeyNames;
   projects: typeof projects;
 }>;
 

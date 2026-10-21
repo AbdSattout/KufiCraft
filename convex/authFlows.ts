@@ -3,7 +3,7 @@ import { action } from "./_generated/server";
 import {
   DEFAULT_PASSKEY_NAME,
   normalizeAccountName,
-} from "./lib/account-name";
+} from "./lib/accountName";
 
 /**
  * Passkey-first sign-up plumbing (see docs/AUTH.md).
@@ -45,7 +45,7 @@ export const PASSKEY_EMAIL_DOMAIN = "@passkey.local";
  * Re-exported here because this module owned the constant before the shared
  * account-name contract existed.
  */
-export { DEFAULT_PASSKEY_NAME } from "./lib/account-name";
+export { DEFAULT_PASSKEY_NAME } from "./lib/accountName";
 
 /**
  * Internal login-less address for the created account. Better Auth requires a

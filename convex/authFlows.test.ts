@@ -25,7 +25,7 @@ import {
  */
 const modules = import.meta.glob([
   "./authFlows.ts",
-  "./lib/account-name.ts",
+  "./lib/accountName.ts",
   "./_generated/*.js",
 ]);
 
