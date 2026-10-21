@@ -30,7 +30,8 @@ import {
 import { cn } from "@/lib/utils";
 import type { SaveState } from "@/lib/save-state";
 import { MESSAGES } from "./messages";
-import { shortcutAriaLabel, shortcutLabel } from "./shortcut-hints";
+import { shortcutAriaLabel } from "./shortcut-hints";
+import { ShortcutTooltip } from "./shortcut-tooltip";
 import { usePrimaryModifier } from "./use-primary-modifier";
 
 /** Dot, label and tone for each save state — the two warnings are the only loud ones. */
@@ -162,28 +163,40 @@ export function EditorTopBar({
       </span>
 
       <div className="ms-auto flex shrink-0 items-center gap-1">
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label={MESSAGES.undo}
-          aria-keyshortcuts={shortcutAriaLabel({ kind: "undo" }, primary)}
-          title={`${MESSAGES.undo} (${shortcutLabel({ kind: "undo" }, primary)})`}
-          disabled={!canUndo}
-          onClick={undo}
-        >
-          <Undo2 />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label={MESSAGES.redo}
-          aria-keyshortcuts={shortcutAriaLabel({ kind: "redo" }, primary)}
-          title={`${MESSAGES.redo} (${shortcutLabel({ kind: "redo" }, primary)})`}
-          disabled={!canRedo}
-          onClick={redo}
-        >
-          <Redo2 />
-        </Button>
+        <ShortcutTooltip
+          label={MESSAGES.undo}
+          shortcut={{ kind: "undo" }}
+          side="bottom"
+          trigger={
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={MESSAGES.undo}
+              aria-keyshortcuts={shortcutAriaLabel({ kind: "undo" }, primary)}
+              disabled={!canUndo}
+              onClick={undo}
+            >
+              <Undo2 />
+            </Button>
+          }
+        />
+        <ShortcutTooltip
+          label={MESSAGES.redo}
+          shortcut={{ kind: "redo" }}
+          side="bottom"
+          trigger={
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={MESSAGES.redo}
+              aria-keyshortcuts={shortcutAriaLabel({ kind: "redo" }, primary)}
+              disabled={!canRedo}
+              onClick={redo}
+            >
+              <Redo2 />
+            </Button>
+          }
+        />
 
         <DropdownMenu>
           <DropdownMenuTrigger

@@ -36,7 +36,8 @@ import { CanvasOverlay } from "./canvas-overlay";
 import { toolOf } from "./tools";
 import { nextZoom, zoomPercent } from "./interaction";
 import type { ToolId } from "./interaction";
-import { shortcutAriaLabel, shortcutLabel } from "./shortcut-hints";
+import { shortcutAriaLabel } from "./shortcut-hints";
+import { ShortcutTooltip } from "./shortcut-tooltip";
 import { usePrimaryModifier } from "./use-primary-modifier";
 
 export interface CanvasStageProps {
@@ -167,39 +168,54 @@ export function CanvasStage({
           <span className="sr-only" id="editor-zoom-label">
             {MESSAGES.zoom}
           </span>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            aria-label={MESSAGES.zoomOut}
-            aria-keyshortcuts={shortcutAriaLabel({ kind: "zoomOut" }, primary)}
-            title={`${MESSAGES.zoomOut} (${shortcutLabel({ kind: "zoomOut" }, primary)})`}
-            disabled={zoom <= MIN_ZOOM}
-            onClick={() => setZoom(nextZoom(zoom, -1, MIN_ZOOM, MAX_ZOOM))}
-          >
-            <Minus />
-          </Button>
-          <button
-            type="button"
-            aria-describedby="editor-zoom-label"
-            aria-label={MESSAGES.zoomReset}
-            aria-keyshortcuts={shortcutAriaLabel({ kind: "zoomReset" }, primary)}
-            title={`${MESSAGES.zoomReset} (${shortcutLabel({ kind: "zoomReset" }, primary)})`}
-            onClick={() => setZoom(1)}
-            className="min-w-10 rounded text-center tabular-nums text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-          >
-            {zoomPercent(zoom)}%
-          </button>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            aria-label={MESSAGES.zoomIn}
-            aria-keyshortcuts={shortcutAriaLabel({ kind: "zoomIn" }, primary)}
-            title={`${MESSAGES.zoomIn} (${shortcutLabel({ kind: "zoomIn" }, primary)})`}
-            disabled={zoom >= MAX_ZOOM}
-            onClick={() => setZoom(nextZoom(zoom, 1, MIN_ZOOM, MAX_ZOOM))}
-          >
-            <Plus />
-          </Button>
+          <ShortcutTooltip
+            label={MESSAGES.zoomOut}
+            shortcut={{ kind: "zoomOut" }}
+            trigger={
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                aria-label={MESSAGES.zoomOut}
+                aria-keyshortcuts={shortcutAriaLabel({ kind: "zoomOut" }, primary)}
+                disabled={zoom <= MIN_ZOOM}
+                onClick={() => setZoom(nextZoom(zoom, -1, MIN_ZOOM, MAX_ZOOM))}
+              >
+                <Minus />
+              </Button>
+            }
+          />
+          <ShortcutTooltip
+            label={MESSAGES.zoomReset}
+            shortcut={{ kind: "zoomReset" }}
+            trigger={
+              <button
+                type="button"
+                aria-describedby="editor-zoom-label"
+                aria-label={MESSAGES.zoomReset}
+                aria-keyshortcuts={shortcutAriaLabel({ kind: "zoomReset" }, primary)}
+                onClick={() => setZoom(1)}
+                className="min-w-10 rounded text-center tabular-nums text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              >
+                {zoomPercent(zoom)}%
+              </button>
+            }
+          />
+          <ShortcutTooltip
+            label={MESSAGES.zoomIn}
+            shortcut={{ kind: "zoomIn" }}
+            trigger={
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                aria-label={MESSAGES.zoomIn}
+                aria-keyshortcuts={shortcutAriaLabel({ kind: "zoomIn" }, primary)}
+                disabled={zoom >= MAX_ZOOM}
+                onClick={() => setZoom(nextZoom(zoom, 1, MIN_ZOOM, MAX_ZOOM))}
+              >
+                <Plus />
+              </Button>
+            }
+          />
         </div>
       </div>
     </div>

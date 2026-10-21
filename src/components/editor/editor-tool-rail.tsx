@@ -5,10 +5,11 @@
  *
  * Vertical icon rail on desktop (RTL: right edge, labels under the icons),
  * horizontal bar above the status line on mobile. It is generated from the
- * tool registry (`tools.ts`): the order, the labels, the shortcut hints and
- * the glyphs all come from the tool classes, and a grid that does not carry a
- * tool's items does not list it (`toolsFor`, docs/CANVAS.md §3) — so a new
- * tool shows up here without touching this file.
+ * tool registry (`tools.ts`): the order, the labels, the shortcut keys and the
+ * glyphs all come from the tool classes — the key rides in the hover tooltip
+ * (`shortcut-tooltip.tsx`) — and a grid that does not carry a tool's items does
+ * not list it (`toolsFor`, docs/CANVAS.md §3) — so a new tool shows up here
+ * without touching this file.
  *
  * The arc tool reveals its own controls next to it: the sweep direction and
  * the circle size (`docs/CANVAS.md` §5).
@@ -18,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import type { GridType } from "@/lib/canvas/model";
 import { cn } from "@/lib/utils";
 import { MESSAGES } from "./messages";
+import { ShortcutTooltip } from "./shortcut-tooltip";
 import { isToolAvailable, toolOf, toolsFor } from "./tools";
 import type { ToolIconPart } from "./tools";
 import type { ArcStyle, ToolId } from "./interaction";
@@ -93,27 +95,33 @@ export function ToolRail({
     >
       {toolsFor(gridType).map((entry) => {
         const active = entry.id === tool;
-        const hint = entry.pans
-          ? `${entry.label} (${entry.shortcut}) — ${MESSAGES.handDoubleClick}`
-          : `${entry.label} (${entry.shortcut})`;
         return (
-          <Button
+          <ShortcutTooltip
             key={entry.id}
-            variant={active ? "secondary" : "ghost"}
-            aria-pressed={active}
-            aria-label={hint}
-            aria-keyshortcuts={entry.shortcut}
-            title={hint}
-            onClick={() => setTool(entry.id)}
-            onDoubleClick={entry.pans ? onCentreView : undefined}
-            className={cn(
-              "h-auto flex-col gap-0.5 px-1 py-1.5 text-[0.7rem]",
-              vertical ? "w-full" : "min-w-16 shrink-0",
-            )}
-          >
-            <ToolGlyph tool={entry.id} />
-            <span>{entry.label}</span>
-          </Button>
+            label={entry.label}
+            description={entry.pans ? MESSAGES.handDoubleClick : undefined}
+            shortcut={{ kind: "tool", tool: entry.id }}
+            side={vertical ? "left" : "top"}
+            trigger={
+              <Button
+                variant={active ? "secondary" : "ghost"}
+                aria-pressed={active}
+                // The accessible name is the tool, never the key; the key lives
+                // in the tooltip (hover/focus) and in `aria-keyshortcuts`.
+                aria-label={entry.label}
+                aria-keyshortcuts={entry.shortcut}
+                onClick={() => setTool(entry.id)}
+                onDoubleClick={entry.pans ? onCentreView : undefined}
+                className={cn(
+                  "h-auto flex-col gap-0.5 px-1 py-1.5 text-[0.7rem]",
+                  vertical ? "w-full" : "min-w-16 shrink-0",
+                )}
+              >
+                <ToolGlyph tool={entry.id} />
+                <span>{entry.label}</span>
+              </Button>
+            }
+          />
         );
       })}
 

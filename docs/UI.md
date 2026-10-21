@@ -54,8 +54,16 @@ disagree, which is why the flag wins over the cookie. For the same reason the
 guard reads the **session** (`authClient.useSession`), not Convex's auth state:
 a failed `/api/auth/convex/token` makes Convex report an anonymous client while
 the cookie is perfectly valid, and a guard on that report throws a signed-in
-visitor out of their editor. When the session request itself fails there is no
-answer, so the screens show a retry (`SessionUnavailable`) instead of guessing.
+visitor out of their editor. When the session request itself fails, there is no
+answer to act on: the gate treats the failure as **transient**, not as a
+verdict — the screen stays where it is and the gate retries by itself (two
+quick attempts, then a slow 10 s poll). Only once those retries are spent does
+the screen show `SessionUnavailable` — the quiet “جارٍ إعادة الاتصال…” status
+with a manual retry (`src/components/auth/session-unavailable.tsx`). It is not
+an error and never a reason to conclude the visitor is signed out; where the
+screen already holds content — the editor's canvas — that content stays, and
+the notice appears only where there was nothing to keep
+(`src/lib/session-gate.ts`, docs/AUTH.md § Transient failures).
 
 ## Design language
 
@@ -141,6 +149,25 @@ The editor is a viewport-sized app shell (`fixed`, `h-dvh`), so the page
 itself never scrolls; the settings column is the only sidebar scroller, and
 it scrolls only when its panels exceed the viewport.
 
+The top bar's save indicator is the whole story of persistence, and it is one
+quiet state — `SaveState` from `src/lib/save-state.ts`, `saved | saving |
+retrying | offline`, with the labels in `src/components/editor/messages.ts`:
+«محفوظ تلقائيًا»، «جارٍ الحفظ…»، «تعذّر الاتصال — جارٍ إعادة المحاولة…»،
+«غير محفوظ — ستتم إعادة المحاولة». There is no per-failure toast and no boolean
+`saving`. `saved` means every write was acknowledged and the screen matches the
+server; `saving` means writes are in flight and nothing has failed *yet* (a
+write still unanswered after `SAVE_STALL_MS` = 5 s becomes `retrying`);
+`retrying` means a transient rejection is held for the resync, or a write has
+stalled; `offline` means the browser itself reports offline, or a held write is
+older than `SAVE_OUTAGE_MS` = 15 s. The invariant: **a pending change is never
+reported as `saved`.** `isTransientSaveError` decides which rejections are held
+and re-offered (an expired token, an abort/timeout, a fetch failure); anything
+else is the server's verdict and is surfaced as an error rather than disguised
+as a save. The document hook keeps unacknowledged changes in a local overlay
+and, on a transient rejection, holds them in its queue and re-offers the whole
+document as one `replace` once a token is back — the change is not dropped from
+the screen (`src/components/editor/use-editor-document.ts`).
+
 Tools are **one class each in a registry** (`src/components/editor/tools.ts`,
 `REGISTRY`); the rail, the shortcuts and the dispatcher all read the registry —
 see `docs/CANVAS.md` §6 for the contract.
@@ -193,7 +220,13 @@ colour, duplicate, delete) — with nothing selected they are absent, not
 disabled.
 
 The style blocks under the palette are rounding, stroke ends/joins and borders.
-The stroke block is shown only when the target can take caps/joins: with nothing
+Rounding is a slider — a per-item fraction of the shorter side, printed as a
+percentage — plus a physical 2×2 corner map: the four corners toggle
+independently, so a tile, bar or turn can be rounded on one side alone. The map
+is laid out `dir="ltr"` on purpose (in RTL the first grid column is the right
+edge, which would silently mirror which corner a button names); the glyphs are
+the item's own box, so each button names the corner it actually touches. The
+stroke block is shown only when the target can take caps/joins: with nothing
 selected only for the line or arc tool, and with a selection whenever it
 contains a line, polyline or arc (a mixed selection qualifies; tiles ignore the
 controls). It is absent for a tiles-only selection and for the pen, select,
@@ -201,9 +234,11 @@ eraser and hand. When shown, it has two three-button rows — نهاية الخ�
 (`مسطّحة`, `دائرية`, `مربّعة`) and وصلة الخط (`حادّة`, `دائرية`, `مشطوفة`) — for
 the next diagonal line, polyline or arc and for any stroked item in the
 selection. The defaults are `مسطّحة` and `حادّة`; a border on the same item
-inherits both. The border block has only a width slider (`0` = no border) and a
-colour field; the width is the switch: raising it above `0` adds the border, and
-a new border starts black until the user picks another colour.
+inherits both. The border is painted **outside** the shape — a band whose
+visible width is the slider value, so it never eats into the ink — and its
+block has only that width slider (`0` = no border) and a colour field; the
+width is the switch: raising it above `0` adds the border, and a new border
+starts black until the user picks another colour.
 
 Sidebar, top to bottom: الأشكال (palette + selection), the fill row (لون الحبر
 with nothing selected, لون التحديد with a selection), لون الورقة, then the
@@ -288,29 +323,153 @@ line it draws between the **user** and the **board**:
 * Both keys are versioned and validated on read (corrupt/stale values fall back
   to model defaults, never throw).
 
-Keyboard — the labels follow the platform: `Ctrl` on Windows/Linux, `Cmd` on
-macOS, and the map's `hasPrimary` accepts either. `Delete`/`Backspace` remove
-the selection, `Ctrl+Z` / `Ctrl+Shift+Z` (`Ctrl+Y`) undo/redo, `Ctrl+D`
-duplicate, `Ctrl+A` select all, `R` rotate the active shape,
-`Escape`/`Enter` cancel a click sequence, digits `1…9` pick a shape, `V`
-select, `P` pen, `L` line, `E` eraser, `A` arc, `H` hand, `Ctrl+[` / `Ctrl+]`
-arrange the selection (`Shift` for the extremes — the map also takes the `{` /
-`}` that a shifted or AltGr-typed bracket arrives as), `+` / `-` / `0` zoom in
-/ out / back to 100 %, and `G` toggles the grid guide. The tool keys come from
-the tool classes and the shape digits from the shape registry (`SHAPE_ORDER`,
-whose tenth glyph has no digit), so the map cannot drift from the UI; the grid
-decides which of them exist, so `L` and `A` do nothing on a circular board.
+### Keyboard
 
-Every hint sits on the control it belongs to, and none promises a key the map
-would not fire: the tool rail and the shape buttons already print their key,
-undo/redo, rotate, duplicate and delete say theirs on hover (with
-`aria-keyshortcuts` for assistive tech), the arrange menu prints a key per
-item, and the zoom and grid-guide controls name theirs. The export menu has no
-shortcut and therefore no hint. Because the map reads `event.key`, these
-shortcuts follow the **active keyboard layout**: on a non-Latin layout (Arabic
-101, for example) the letter keys type their own letters and do not fire, and
-the brackets are typed with `Shift`/AltGr — a layout-aware rebinding is a
-separate decision, deliberately not taken here.
+The editor has **one global map**: `src/components/editor/shortcuts.ts`
+(`shortcutFor(event, gridType?)`, pure and DOM-free), attached once to `window`
+by the keyboard effect in `src/components/editor/use-editor.ts`. The listener
+ignores keystrokes while the user is **typing** (an `INPUT`, `TEXTAREA`,
+`SELECT`, `OPTION` or `contentEditable` target) and inside a dialog, alert
+dialog or sheet, which keep their own keys. `event.preventDefault()` runs only
+after the map resolves a shortcut, so a key the editor does not own reaches the
+browser untouched.
+
+| action | keys |
+| --- | --- |
+| tools | `V` select · `P` pen · `L` line (square boards only) · `E` eraser · `A` arc (square boards only) · `H` hand |
+| palette | `1`…`9` — the first nine glyphs in `SHAPE_ORDER` order; the tenth has no digit |
+| selection | `Delete` / `Backspace` delete · `Ctrl/Cmd+D` duplicate · `Ctrl/Cmd+A` select all visible items |
+| history | `Ctrl/Cmd+Z` undo · `Ctrl/Cmd+Shift+Z` or `Ctrl/Cmd+Y` redo |
+| order | `Ctrl/Cmd+]` forward · `Ctrl/Cmd+Shift+]` front · `Ctrl/Cmd+[` backward · `Ctrl/Cmd+Shift+[` back |
+| shape | `R` rotate the draw shape (or the selection) one quarter turn |
+| view | `+` or `=` zoom in · `-` zoom out · `0` reset to 100 % · `G` toggle the grid guide |
+| sequence | `Escape` / `Enter` cancel the armed line/arc click sequence |
+
+`Ctrl` (Windows/Linux) and `Cmd` (macOS) are interchangeable: `hasPrimary`
+accepts either, and only the *label* follows the platform. Shift is part of the
+arrange and redo bindings; Alt does not modify a binding. The arrange keys also
+answer to the `{` / `}` spellings, because `Ctrl+Shift+]` arrives as `}` in
+Chromium and layouts that put the brackets on a Shift/AltGr layer produce the
+braces for the same physical keys. `0` is the zoom reset, not a tenth shape.
+`+` and `=` are both accepted because `=` is the unshifted key on many layouts.
+
+The map cannot drift from the UI because it is built from the same registries:
+tool keys come from the tool classes (`TOOL_SHORTCUTS` in
+`src/components/editor/tools.ts`), palette digits from `SHAPE_ORDER` (via
+`shapeDigit`), and the rest from the `EditorShortcut` union with its
+exhaustiveness checks. A tool the grid does not carry has no key there either:
+on a circular board `L` and `A` are inert and their rail buttons are absent
+(`toolsFor` / `toolForShortcut`), so no surface promises them.
+
+**Mouse gestures** complete the same view story and are not part of the key
+map:
+
+* **Ctrl/Cmd + wheel** over the canvas zooms in/out anchored at the pointer,
+  stepped per gesture (`wheelZoomDelta` / `wheelSteps`,
+  `docs/CANVAS.md` §6). The listener is non-passive because it cancels the
+  browser's page zoom inside the pane. A primary-button drag in progress
+  swallows the wheel rather than re-mapping the pointer mid-drag.
+* **Plain wheel** scrolls the canvas pane (the browser's own scroll) and
+  **Shift + wheel** scrolls it horizontally; the editor leaves both alone.
+* The hand tool drags the pane, and a double click — on the canvas or on the
+  hand's rail button — puts the board's middle back in the middle. There are
+  deliberately **no arrow-key pan bindings**.
+* Moves track the pointer 1:1. At the equal `1:1` ink ratio a drag is
+  **zone-aware**: moving between two zones of a cell is a real half-cell
+  translation, not a no-op. At denser presets the zone toggle is zero, so the
+  zones ride along and only the cells move (`docs/CANVAS.md` §3).
+
+Widget-local keys belong to the primitives, not this map: sliders take arrow
+keys, menus take arrows/`Enter`/`Escape`, and the project-name field commits on
+`Enter` and cancels on `Escape`. A dialog or sheet closes on `Escape` through
+its own primitive.
+
+#### Showing shortcuts — hover only
+
+Shortcuts are **never printed in the layout**. The editor is icon-first where it
+is compact and panel-heavy where it is detailed; a permanent key chip or a
+`(1)` suffix on every button turns the UI into documentation and takes space
+from the artwork. The policy is: a control shows its action, and its key
+appears **only in a tooltip on hover or keyboard focus**. The one exception is
+a menu item's trailing `DropdownMenuShortcut` — conventional, and visible only
+while the menu is open.
+
+* `src/components/editor/shortcut-tooltip.tsx` — `ShortcutTooltip` composes the
+  vendored Base UI tooltip (`src/components/ui/tooltip.tsx`) with the control
+  itself as the trigger (the `render` prop), so the tooltip never wraps a
+  button in another interactive element. Its content is the action name plus a
+  `<Kbd data-slot="kbd">` (`src/components/ui/kbd.tsx`). One
+  `TooltipProvider` in `src/app/layout.tsx` groups the delay across the app.
+* `src/components/editor/shortcut-hints.ts` — the single display/aria source.
+  `shortcutLabel` prints e.g. `Cmd+Shift+]`; `shortcutAriaLabel` prints WAI-ARIA
+  names (`Control`/`Meta`, `Delete`, `Escape`); `shapeDigit` decides whether a
+  palette glyph has a digit at all. Tool keys are read from the registry, so
+  nothing writes a key down twice.
+* `src/components/editor/use-primary-modifier.ts` — names the primary modifier
+  for the current platform (`Cmd` on macOS, `Ctrl` elsewhere), hydration-safe
+  through `useSyncExternalStore`.
+* `aria-keyshortcuts` stays on every control that fires a key, but the
+  accessible **name** is the action or tool name (`aria-label` or the visible
+  text), never the key. The key is a description, not a name; the tooltip's
+  `Kbd` is `aria-hidden` so it does not repeat what `aria-keyshortcuts` says.
+
+Which surfaces carry a key: the tool rail (tool name + key, plus the hand's
+double-click line), the shape palette (name + digit; the tenth glyph names
+itself with no key), rotate, duplicate, delete, undo, redo, zoom −/100 %/+, the
+grid-guide switch, and the arrange menu items. Export has no shortcut and
+therefore no hint. Deletion's key is no longer a visible chip on the button;
+`aria-keyshortcuts` remains. Disabled undo/redo and the zoom buttons at their
+bounds do not open a tooltip — an unavailable action does not advertise a key —
+but they keep their aria attributes.
+
+`src/components/editor/shortcuts.test.ts` is the anti-drift gate. It walks
+every `EditorShortcut` kind back through `shortcutFor` with an event that
+produces it, and requires `shortcutLabel` and `shortcutAriaLabel` to cover it on
+both platforms. Tool and shape cases come from the same registries as the UI,
+so a hint that names a key the map would not fire fails the suite.
+
+**Platform/layout caveat.** The map is built on `event.key`, so it follows the
+**active keyboard layout**, not the physical key. On a non-Latin layout (Arabic
+101, for example) the letter keys type their own characters and the tools do
+not fire; brackets may need Shift/AltGr (hence the brace spellings). On macOS,
+some browsers also bind `Cmd+[` / `Cmd+]` to Back/Forward; the map resolves the
+chord and cancels the default, but a browser that intercepts it first wins. A
+layout-aware or `event.code`-based map is a separate, deliberate decision, not
+taken here.
+
+#### Adding a shortcut or a hint
+
+1. **A tool**: declare its class in `src/components/editor/tools.ts` with
+   `readonly shortcut = "X"`. The rail (`toolsFor`) and the map
+   (`toolForShortcut`) both read the registry. If the tool creates items a grid
+   hides, declare `creates` as the existing tools do — the key becomes inert
+   automatically and the rail does not list it.
+2. **A command**: add a kind to `EditorShortcut` in
+   `src/components/editor/shortcuts.ts` and resolve it in `shortcutFor` (keep
+   the typing guard; pass `gridType` when availability depends on the board),
+   then handle it in the keyboard `switch` in
+   `src/components/editor/use-editor.ts` and add the action to that effect's
+   dependency array.
+3. **Its labels**: add both `shortcutLabel` (display) and
+   `shortcutAriaLabel` (WAI-ARIA spelling) cases in
+   `src/components/editor/shortcut-hints.ts`. The `assertNever` tails turn a
+   missing label into a type error.
+4. **Its surface**: wrap the control in
+   `src/components/editor/shortcut-tooltip.tsx` with
+   `shortcut={{ kind: … }}`, pass the action name as `label`, and add
+   `aria-keyshortcuts={shortcutAriaLabel(…)}`. Keep the visible text and
+   `aria-label` key-free. Menu items use `DropdownMenuShortcut` instead. If the
+   control can be absent (grid, tool or selection dependent), the hint must be
+   absent with it.
+5. **Its tests and docs**: add one `{ shortcut, event }` case to `cases` in
+   `src/components/editor/shortcuts.test.ts`, add the row to the table above,
+   and run the four gates (`bunx tsc --noEmit`, `bunx vitest run`,
+   `bunx eslint .`, `bun run build`). The hint test walks the map backwards;
+   there is no second place to update.
+
+The same rule for a **new palette shape**: append it to `SHAPE_ORDER`. Only the
+first nine entries get digits (`shapeDigit`), so a tenth entry has no hint by
+construction; if the order changes, the digits move with it.
 
 ## Landing (`/welcome`, served at `/`)
 

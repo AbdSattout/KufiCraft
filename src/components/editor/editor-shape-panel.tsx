@@ -73,6 +73,7 @@ import { ColourField, PanelSection, SliderField } from "./editor-controls";
 import { SHAPE_LABELS, SHAPE_ORDER } from "./interaction";
 import type { DrawStyle } from "./interaction";
 import { shapeDigit, shortcutAriaLabel, shortcutLabel } from "./shortcut-hints";
+import { ShortcutTooltip } from "./shortcut-tooltip";
 import { usePrimaryModifier } from "./use-primary-modifier";
 
 /**
@@ -264,44 +265,53 @@ export function ShapePanel({
     <PanelSection title={MESSAGES.shapes}>
       <div className="grid grid-cols-5 gap-1">
         {SHAPE_ORDER.map((shape) => {
-          // The tenth glyph has no digit (only `1…9` are mapped), so it gets
-          // no hint at all — the surface never promises a dead key.
+          // The tenth glyph has no digit (only `1…9` are mapped), so its
+          // tooltip names it without a key — the surface never promises a dead
+          // key. Every other button says “name + digit” on hover/focus; the
+          // visible label and the accessible name stay the name alone.
           const digit = shapeDigit(shape);
-          const hint = digit
-            ? `${SHAPE_LABELS[shape]} (${digit})`
-            : SHAPE_LABELS[shape];
           return (
-            <Button
+            <ShortcutTooltip
               key={shape}
-              variant={style.shape === shape ? "secondary" : "outline"}
-              size="icon"
-              aria-pressed={style.shape === shape}
-              aria-label={hint}
-              aria-keyshortcuts={digit ?? undefined}
-              title={hint}
-              onClick={() => selectShape(shape)}
-            >
-              <ShapeGlyph shape={shape} rotation={style.rotation} />
-            </Button>
+              label={SHAPE_LABELS[shape]}
+              shortcut={{ kind: "shape", shape }}
+              trigger={
+                <Button
+                  variant={style.shape === shape ? "secondary" : "outline"}
+                  size="icon"
+                  aria-pressed={style.shape === shape}
+                  aria-label={SHAPE_LABELS[shape]}
+                  aria-keyshortcuts={digit ?? undefined}
+                  onClick={() => selectShape(shape)}
+                >
+                  <ShapeGlyph shape={shape} rotation={style.rotation} />
+                </Button>
+              }
+            />
           );
         })}
       </div>
 
-      <Button
-        variant="outline"
-        size="sm"
-        className="w-full"
-        aria-label={`${MESSAGES.rotate} ${style.rotation * 90}°`}
-        aria-keyshortcuts={shortcutAriaLabel({ kind: "rotate" }, primary)}
-        title={`${MESSAGES.rotate} (${shortcutLabel({ kind: "rotate" }, primary)})`}
-        onClick={rotateShape}
-      >
-        <RotateCw />
-        {MESSAGES.rotate}
-        <span className="tabular-nums text-muted-foreground">
-          {style.rotation * 90}°
-        </span>
-      </Button>
+      <ShortcutTooltip
+        label={MESSAGES.rotate}
+        shortcut={{ kind: "rotate" }}
+        trigger={
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full"
+            aria-label={`${MESSAGES.rotate} ${style.rotation * 90}°`}
+            aria-keyshortcuts={shortcutAriaLabel({ kind: "rotate" }, primary)}
+            onClick={rotateShape}
+          >
+            <RotateCw />
+            {MESSAGES.rotate}
+            <span className="tabular-nums text-muted-foreground">
+              {style.rotation * 90}°
+            </span>
+          </Button>
+        }
+      />
 
       <div className="flex flex-col gap-2 border-t border-border/60 pt-2">
         <p className="text-xs text-muted-foreground">{MESSAGES.rounding}</p>
@@ -443,16 +453,21 @@ export function ShapePanel({
               <PaintBucket />
               {MESSAGES.recolourSelection}
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              aria-keyshortcuts={shortcutAriaLabel({ kind: "duplicate" }, primary)}
-              title={`${MESSAGES.duplicateSelection} (${shortcutLabel({ kind: "duplicate" }, primary)})`}
-              onClick={duplicateSelection}
-            >
-              <Copy />
-              {MESSAGES.duplicateSelection}
-            </Button>
+            <ShortcutTooltip
+              label={MESSAGES.duplicateSelection}
+              shortcut={{ kind: "duplicate" }}
+              trigger={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  aria-keyshortcuts={shortcutAriaLabel({ kind: "duplicate" }, primary)}
+                  onClick={duplicateSelection}
+                >
+                  <Copy />
+                  {MESSAGES.duplicateSelection}
+                </Button>
+              }
+            />
             <DropdownMenu>
               <DropdownMenuTrigger
                 disabled={
@@ -487,26 +502,30 @@ export function ShapePanel({
                   >
                     <Icon />
                     {label}
-                    <DropdownMenuShortcut dir="ltr">
+                    {/* Visual convention only: the accessible name stays the
+                        action, and `aria-keyshortcuts` above carries the key. */}
+                    <DropdownMenuShortcut dir="ltr" aria-hidden="true">
                       {shortcutLabel({ kind: "arrange", action }, primary)}
                     </DropdownMenuShortcut>
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>
-            <Button
-              variant="outline"
-              size="sm"
-              aria-keyshortcuts={shortcutAriaLabel({ kind: "delete" }, primary)}
-              title={`${MESSAGES.deleteSelection} (${shortcutLabel({ kind: "delete" }, primary)})`}
-              onClick={deleteSelection}
-            >
-              <Trash2 />
-              {MESSAGES.deleteSelection}
-              <kbd className="ms-1 rounded border border-border/70 px-1 text-[0.65rem] text-muted-foreground">
-                {shortcutLabel({ kind: "delete" }, primary)}
-              </kbd>
-            </Button>
+            <ShortcutTooltip
+              label={MESSAGES.deleteSelection}
+              shortcut={{ kind: "delete" }}
+              trigger={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  aria-keyshortcuts={shortcutAriaLabel({ kind: "delete" }, primary)}
+                  onClick={deleteSelection}
+                >
+                  <Trash2 />
+                  {MESSAGES.deleteSelection}
+                </Button>
+              }
+            />
           </div>
         </div>
       ) : null}

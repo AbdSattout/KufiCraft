@@ -46,7 +46,9 @@ import type { GridType, ProjectConfig } from "@/lib/canvas/model";
 import { MESSAGES } from "./messages";
 import { INK_SWATCHES, PAPER_SWATCHES, formatCount, mergedSwatches, swatchLabel } from "./editor-palette";
 import { ColourField, PanelSection, SliderField } from "./editor-controls";
-import { shortcutAriaLabel, shortcutLabel } from "./shortcut-hints";
+import { shortcutAriaLabel } from "./shortcut-hints";
+import type { EditorShortcut } from "./shortcuts";
+import { ShortcutTooltip } from "./shortcut-tooltip";
 import { usePrimaryModifier } from "./use-primary-modifier";
 
 const MIN_BASE = 4;
@@ -81,28 +83,38 @@ function ToggleRow({
   label,
   checked,
   onCheckedChange,
-  hint,
+  shortcut,
 }: {
   id: string;
   label: string;
   checked: boolean;
   onCheckedChange: (checked: boolean) => void;
   /** The shortcut this row's switch answers to, when it has one. */
-  hint?: { key: string; aria: string };
+  shortcut?: EditorShortcut;
 }) {
+  const primary = usePrimaryModifier();
+  const control = (
+    <Switch
+      id={id}
+      checked={checked}
+      onCheckedChange={onCheckedChange}
+      aria-label={label}
+      aria-keyshortcuts={
+        shortcut ? (shortcutAriaLabel(shortcut, primary) ?? undefined) : undefined
+      }
+    />
+  );
+
   return (
     <div className="flex items-center justify-between gap-3">
       <Label htmlFor={id} className="text-sm text-muted-foreground">
         {label}
       </Label>
-      <Switch
-        id={id}
-        checked={checked}
-        onCheckedChange={onCheckedChange}
-        aria-label={label}
-        aria-keyshortcuts={hint?.aria}
-        title={hint ? `${label} (${hint.key})` : undefined}
-      />
+      {shortcut ? (
+        <ShortcutTooltip label={label} shortcut={shortcut} trigger={control} />
+      ) : (
+        control
+      )}
     </div>
   );
 }
@@ -119,7 +131,6 @@ export function SettingsPanel({
   previewConfig,
   clearAll,
 }: SettingsPanelProps) {
-  const primary = usePrimaryModifier();
   const [pendingGridType, setPendingGridType] = useState<GridType | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
 
@@ -274,10 +285,7 @@ export function SettingsPanel({
           label={MESSAGES.showGrid}
           checked={config.showGrid}
           onCheckedChange={setShowGrid}
-          hint={{
-            key: shortcutLabel({ kind: "toggleGrid" }, primary),
-            aria: shortcutAriaLabel({ kind: "toggleGrid" }, primary),
-          }}
+          shortcut={{ kind: "toggleGrid" }}
         />
         <ToggleRow
           id="editor-straight-lines"

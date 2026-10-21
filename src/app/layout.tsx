@@ -6,6 +6,7 @@ import { ConvexClientProvider } from "@/components/convex-client-provider";
 import { SignInDialogProvider } from "@/components/auth/sign-in-dialog";
 import { DirectionProvider } from "@/components/ui/direction";
 import { Toaster } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 const kufi = Noto_Kufi_Arabic({
   subsets: ["arabic"],
@@ -54,9 +55,14 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             the opposite way to the order the reader sees. */}
         <DirectionProvider direction="rtl">
           <ConvexClientProvider>
-            {/* Every page can open the passkey dialog: the landing's CTAs, the
-                header, and the guards that send a visitor home. */}
-            <SignInDialogProvider>{children}</SignInDialogProvider>
+            {/* One delay group for every tooltip: the editor's shortcut hints
+                are the current users, and moving along a rail keeps them
+                instant once one is open (src/components/editor/shortcut-tooltip.tsx). */}
+            <TooltipProvider delay={300}>
+              {/* Every page can open the passkey dialog: the landing's CTAs, the
+                  header, and the guards that send a visitor home. */}
+              <SignInDialogProvider>{children}</SignInDialogProvider>
+            </TooltipProvider>
             <Toaster position="top-center" dir="rtl" richColors />
           </ConvexClientProvider>
         </DirectionProvider>
