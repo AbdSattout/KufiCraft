@@ -1,26 +1,35 @@
 import { ConvexError, v } from "convex/values";
 import { action } from "./_generated/server";
+import {
+  DEFAULT_PASSKEY_NAME,
+  normalizeAccountName,
+} from "./lib/account-name";
 
 /**
  * Passkey-first sign-up plumbing (see docs/AUTH.md).
  *
- * The sign-in dialog is public: the client asks `createSignUpContext` for a
- * short-lived signed context token, then hands that token to
+ * The auth card is public: the client asks `createSignUpContext({ name })` for
+ * a short-lived signed context token, then hands that token to
  * `authClient.passkey.addPasskey({ context })`. The passkey plugin's
  * `resolveUser` hook (convex/auth.ts) verifies the token and creates the
- * account — no email, password, display name or prior session is involved.
+ * account — no email, password or prior session is involved. The name the user
+ * typed is signed into that token, so the user row, the WebAuthn user and the
+ * passkey row all carry the same string.
  *
  * An account **is** its passkey: exactly one, never added to or deleted, and
  * the name people see is that passkey's name (docs/AUTH.md § Accounts). The
  * token is an HMAC-SHA256 signature over a JSON payload, keyed with the
  * deployment's `BETTER_AUTH_SECRET`; it proves nothing except "this client
- * asked for an account a moment ago", which is all a first passkey needs.
+ * asked for an account with this name a moment ago", which is all a first
+ * passkey needs.
  */
 
 /** How long a client may take between requesting the token and starting registration. */
 const CONTEXT_TOKEN_TTL_MS = 5 * 60 * 1000;
 
 type SignUpContextPayload = {
+  /** Normalized account/passkey name chosen by the user. */
+  name: string;
   expiresAt: number;
   nonce: string;
 };
@@ -29,13 +38,14 @@ type SignUpContextPayload = {
 export const PASSKEY_EMAIL_DOMAIN = "@passkey.local";
 
 /**
- * Name of the passkey a new account is created with, and therefore the
- * account's name until its owner renames that passkey — they are the same
- * string (docs/AUTH.md § Accounts). It is also what the OS prompt shows while
- * the passkey is being created, because the browser never tells us what it
- * called the credential.
+ * Name of the passkey a legacy account was created with, before the sign-up
+ * card asked for a name. Kept only as a fallback for old tokens and old rows;
+ * new accounts use the normalized name the user typed.
+ *
+ * Re-exported here because this module owned the constant before the shared
+ * account-name contract existed.
  */
-export const DEFAULT_PASSKEY_NAME = "مفتاح المرور";
+export { DEFAULT_PASSKEY_NAME } from "./lib/account-name";
 
 /**
  * Internal login-less address for the created account. Better Auth requires a
@@ -110,8 +120,14 @@ function signaturesMatch(a: string, b: string): boolean {
 export async function createSignUpContextToken(
   secret: string,
   now: number,
+  name: string,
 ): Promise<{ token: string; expiresAt: number }> {
+  const normalizedName = normalizeAccountName(name);
+  if (!normalizedName) {
+    throw new Error("Account name is empty or too long");
+  }
   const payload: SignUpContextPayload = {
+    name: normalizedName,
     expiresAt: now + CONTEXT_TOKEN_TTL_MS,
     nonce: randomHex(16),
   };
@@ -160,23 +176,48 @@ export async function verifySignUpContextToken(
     typeof record.nonce === "string" && record.nonce.length >= 8 ? record.nonce : null;
   if (expiresAt === null || !nonce) return null;
   if (expiresAt < Date.now()) return null;
-  return { expiresAt, nonce };
+
+  /**
+   * Tokens minted before the name field existed are still valid for their
+   * five-minute TTL; they fall back to the legacy label. A token that carries
+   * a name must carry a *valid, normalized* one — a tampered or malformed name
+   * is rejected rather than silently replaced.
+   */
+  let name = DEFAULT_PASSKEY_NAME;
+  if (record.name !== undefined) {
+    if (typeof record.name !== "string") return null;
+    const normalized = normalizeAccountName(record.name);
+    if (!normalized) return null;
+    name = normalized;
+  }
+
+  return { name, expiresAt, nonce };
 }
 
 /**
  * Public entry point for account creation: mints a context token that lets a
  * session-less client start one passkey registration. Anonymous on purpose —
- * the whole flow is session-less.
+ * the whole flow is session-less. The name is normalized here, once, and is
+ * the only copy that reaches the token (and therefore `resolveUser`); the
+ * client does not send it again to `addPasskey`.
  */
 export const createSignUpContext = action({
-  args: {},
+  args: { name: v.string() },
   returns: v.object({ context: v.string(), expiresAt: v.number() }),
-  handler: async () => {
+  handler: async (_ctx, { name }) => {
     const secret = process.env.BETTER_AUTH_SECRET;
     if (!secret) {
       throw new ConvexError("خدمة إنشاء الحساب غير مهيأة حاليًا");
     }
-    const { token, expiresAt } = await createSignUpContextToken(secret, Date.now());
+    const normalized = normalizeAccountName(name);
+    if (!normalized) {
+      throw new ConvexError("اكتب اسمًا للحساب (1–60 حرفًا).");
+    }
+    const { token, expiresAt } = await createSignUpContextToken(
+      secret,
+      Date.now(),
+      normalized,
+    );
     return { context: token, expiresAt };
   },
 });

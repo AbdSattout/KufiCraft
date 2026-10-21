@@ -16,9 +16,8 @@ import {
 /**
  * Shared shell header: the wordmark and the account menu. There is no board
  * link: the boards are the home route (`/`), so the wordmark already goes
- * there. Signed-out visitors get a single `تسجيل الدخول` button, which opens the
- * passkey dialog — signing in and creating an account are that one ceremony
- * (`src/components/auth/sign-in-dialog.tsx`).
+ * there. Signed-out visitors get a single `تسجيل الدخول` button, which opens
+ * the sign-in dialog (`src/components/auth/sign-in-dialog.tsx`).
  *
  * Note: UI primitives are Base UI based — compose with `render={<Link … />}`
  * rather than Radix's `asChild`.
@@ -71,7 +70,9 @@ function AccountMenu() {
         render={
           <Button variant="outline" size="sm" className="gap-2">
             <User className="size-4" />
-            <span className="max-w-32 truncate">{accountName}</span>
+            <span className="max-w-32 truncate" dir="auto">
+              {accountName}
+            </span>
           </Button>
         }
       />

@@ -4,43 +4,24 @@ import {
   createContext,
   useCallback,
   useContext,
-  useEffect,
   useMemo,
-  useRef,
   useState,
   useSyncExternalStore,
   type ReactNode,
 } from "react";
-import { useAction } from "convex/react";
-import { KeyRound, UserPlus } from "lucide-react";
-import { api } from "../../../convex/_generated/api";
-import { authClient } from "@/lib/auth-client";
 import { SIGN_IN_QUERY } from "@/lib/route-guards";
-import { AuthAlert } from "@/components/auth/auth-alert";
-import { hardNavigate } from "@/components/auth/hard-navigate";
-import {
-  passkeyErrorMessage,
-  unexpectedErrorMessage,
-  usePasskeySupport,
-  webAuthnSupported,
-} from "@/components/auth/passkey-errors";
+import { AuthPanel } from "@/components/auth/auth-panel";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Spinner } from "@/components/ui/spinner";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 
 /**
- * The passkey dialog — one button, no fields. Signing in and creating an
- * account are the same ceremony (an account **is** its passkey, see
- * `docs/AUTH.md § Accounts`), so the button starts on sign-in and, only when an
- * attempt comes back without a session, switches to creating the account's
- * single passkey. There is no sign-in route: the landing owns this dialog, and
- * the guards send an anonymous visitor to `/?signin=1` to open it.
+ * The sign-in/sign-up dialog.
+ *
+ * There is no sign-in route and no separate sign-up surface: signing in and
+ * creating an account are the two intents of one field in one dialog
+ * (`src/components/auth/auth-panel.tsx`), and every CTA (`SignInButton`,
+ * `SignInLink`) opens it. The guards send an anonymous visitor who wanted a
+ * session screen to `/?signin=1`, which opens the same dialog.
  */
 type SignInDialogContextValue = {
   openSignIn: () => void;
@@ -114,15 +95,14 @@ export function SignInDialogProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  const dialogOpen = open || (fromUrl && !dismissedFromUrl);
+
   return (
     <SignInDialogContext.Provider value={contextValue}>
       {children}
-      <Dialog
-        open={open || (fromUrl && !dismissedFromUrl)}
-        onOpenChange={handleOpenChange}
-      >
-        <DialogContent>
-          <SignInPanel />
+      <Dialog open={dialogOpen} onOpenChange={handleOpenChange}>
+        <DialogContent className="sm:max-w-md">
+          {dialogOpen ? <AuthPanel /> : null}
         </DialogContent>
       </Dialog>
     </SignInDialogContext.Provider>
@@ -155,147 +135,5 @@ export function SignInLink({
     <button type="button" onClick={openSignIn} className={className}>
       {children}
     </button>
-  );
-}
-
-function SignInPanel() {
-  const createSignUpContext = useAction(api.authFlows.createSignUpContext);
-  const supported = usePasskeySupport();
-
-  /**
-   * Which ceremony the button is offering. It starts on sign-in and only flips
-   * to `create` after an attempt came back without a session — a device with no
-   * passkey for this site is the only reason to create one.
-   */
-  const [mode, setMode] = useState<"sign-in" | "create">("sign-in");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const busyRef = useRef(false);
-  const autoAttempted = useRef(false);
-
-  useEffect(() => {
-    if (autoAttempted.current) return;
-    autoAttempted.current = true;
-    if (!webAuthnSupported()) return;
-    /**
-     * The dialog was opened by a click — the CTA, or the link that reached this
-     * page — which is what lets a browser open the passkey sheet without a fresh
-     * gesture. Without transient activation (`credentials.get` would reject with
-     * `NotAllowedError`, e.g. a reload) the button is the way in, so the attempt
-     * is skipped rather than thrown.
-     */
-    if (navigator.userActivation?.isActive !== true) return;
-    void (async () => {
-      try {
-        const result = await authClient.signIn.passkey();
-        if (result?.data?.session) hardNavigate("/");
-      } catch {
-        // Silent by design: the visitor may simply have no passkey here, and an
-        // error nobody asked for is noise. The button reports failures.
-      }
-    })();
-  }, []);
-
-  async function handleSignIn() {
-    if (busyRef.current) return;
-    busyRef.current = true;
-    setError(null);
-    setBusy(true);
-    try {
-      const result = await authClient.signIn.passkey();
-      if (result?.data?.session) {
-        hardNavigate("/");
-        return;
-      }
-      setError(passkeyErrorMessage(result?.error));
-      setMode("create");
-    } catch (cause) {
-      setError(unexpectedErrorMessage(cause));
-      setMode("create");
-    } finally {
-      busyRef.current = false;
-      setBusy(false);
-    }
-  }
-
-  async function handleCreateAccount() {
-    if (busyRef.current) return;
-    busyRef.current = true;
-    setError(null);
-    setBusy(true);
-    try {
-      const { context } = await createSignUpContext({});
-      const result = await authClient.passkey.addPasskey({ context });
-      if (result.error || !result.data) {
-        setError(passkeyErrorMessage(result.error));
-        return;
-      }
-      // The registration endpoint created the account and opened a session,
-      // so a full navigation lands on the boards already signed in.
-      hardNavigate("/");
-    } catch (cause) {
-      setError(unexpectedErrorMessage(cause));
-    } finally {
-      busyRef.current = false;
-      setBusy(false);
-    }
-  }
-
-  return (
-    <>
-      <DialogHeader>
-        <DialogTitle className="text-xl">الدخول إلى KufiCraft</DialogTitle>
-        <DialogDescription>
-          حسابك هو مفتاح المرور نفسه — مفتاح واحد يكفي، بلا اسم ولا كلمة مرور.
-        </DialogDescription>
-      </DialogHeader>
-
-      <div className="flex flex-col gap-3">
-        <Button
-          type="button"
-          onClick={mode === "sign-in" ? handleSignIn : handleCreateAccount}
-          disabled={busy || !supported}
-          aria-busy={busy}
-          className="w-fit"
-        >
-          {busy ? (
-            <Spinner />
-          ) : mode === "sign-in" ? (
-            <KeyRound aria-hidden />
-          ) : (
-            <UserPlus aria-hidden />
-          )}
-          {mode === "sign-in" ? "الدخول بمفتاح المرور" : "إنشاء حساب"}
-        </Button>
-
-        {error ? <AuthAlert>{error}</AuthAlert> : null}
-
-        {mode === "create" ? (
-          <div className="flex flex-col gap-2">
-            <p className="text-sm text-muted-foreground">
-              لا يوجد مفتاح مرور لهذا الموقع على هذا الجهاز — الزر أعلاه ينشئ
-              حسابًا جديدًا بمفتاح واحد، بعد تأكيد بصمتك أو قفل جهازك.
-            </p>
-            <button
-              type="button"
-              onClick={() => {
-                setMode("sign-in");
-                setError(null);
-              }}
-              className="w-fit text-sm text-muted-foreground underline underline-offset-4"
-            >
-              لديّ مفتاح بالفعل
-            </button>
-          </div>
-        ) : null}
-
-        {!supported ? (
-          <AuthAlert variant="info">
-            متصفحك لا يدعم مفاتيح المرور. جرّب متصفحًا حديثًا على جهاز يدعم
-            WebAuthn.
-          </AuthAlert>
-        ) : null}
-      </div>
-    </>
   );
 }

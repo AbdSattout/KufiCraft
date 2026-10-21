@@ -3,6 +3,12 @@
 import { useState } from "react";
 import { KeyRound, LogOut, Pencil } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
+import {
+  DEFAULT_PASSKEY_NAME,
+  MAX_ACCOUNT_NAME_LENGTH,
+  isDefaultAccountName,
+  normalizeAccountName,
+} from "@/lib/account-name";
 import { AuthAlert } from "@/components/auth/auth-alert";
 import { hardNavigate } from "@/components/auth/hard-navigate";
 import {
@@ -32,10 +38,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 
 /** Name shown while the passkey list loads, or if a passkey somehow has none. */
-const FALLBACK_ACCOUNT_NAME = "مفتاح المرور";
-
-/** Matches the input's `maxLength`; the server accepts what the plugin gets. */
-const MAX_ACCOUNT_NAME_LENGTH = 60;
+const FALLBACK_ACCOUNT_NAME = DEFAULT_PASSKEY_NAME;
 
 /**
  * "الحساب والأمان" at `/account`. An account **is** its passkey
@@ -61,6 +64,8 @@ export function AccountSecurity() {
 
   const passkey = passkeys?.[0] ?? null;
   const accountName = passkey?.name?.trim() || FALLBACK_ACCOUNT_NAME;
+  /** Passkeys created before names were asked for still carry the default. */
+  const needsName = passkey !== null && isDefaultAccountName(passkey.name);
 
   function openRenameDialog() {
     setRenameError(null);
@@ -72,9 +77,9 @@ export function AccountSecurity() {
     event.preventDefault();
     const target = passkey;
     if (!target || renameBusy) return;
-    const nextName = renameValue.trim();
-    if (nextName.length === 0) {
-      setRenameError("اكتب اسمًا للحساب.");
+    const nextName = normalizeAccountName(renameValue);
+    if (nextName === null) {
+      setRenameError("اكتب اسمًا للحساب (1–60 حرفًا).");
       return;
     }
     setRenameBusy(true);
@@ -87,6 +92,17 @@ export function AccountSecurity() {
       if (result.error || !result.data) {
         setRenameError(passkeyErrorMessage(result.error));
         return;
+      }
+      /**
+       * `passkey.name` is the display source of truth (the header and this
+       * screen read it), so the rename is already complete above. `user.name`
+       * is a creation-time mirror; update it best-effort without failing the
+       * visible rename when the session endpoint is unavailable.
+       */
+      try {
+        await authClient.updateUser({ name: nextName });
+      } catch {
+        // Best-effort mirror only.
       }
       setRenameOpen(false);
     } catch (cause) {
@@ -144,7 +160,9 @@ export function AccountSecurity() {
                   aria-hidden
                   className="size-4 shrink-0 text-muted-foreground"
                 />
-                <p className="truncate font-medium">{accountName}</p>
+                <p className="truncate font-medium" dir="auto">
+                  {accountName}
+                </p>
               </div>
               <Button
                 variant="ghost"
@@ -156,6 +174,24 @@ export function AccountSecurity() {
               </Button>
             </div>
           )}
+
+          {needsName ? (
+            <div className="flex flex-col items-start gap-2 rounded-lg border border-border/70 bg-muted/40 p-3">
+              <p className="font-medium">سمِّ حسابك</p>
+              <p className="text-sm text-muted-foreground">
+                هذا الحساب أُنشئ قبل أن نسأل عن الاسم، فما زال{" "}
+                «{DEFAULT_PASSKEY_NAME}». اختر اسمًا يميزه في الترويسة؛ الاسم
+                الظاهر في نافذة النظام لا يمكن تغييره بعد الإنشاء.
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={openRenameDialog}
+              >
+                سمِّ حسابك
+              </Button>
+            </div>
+          ) : null}
         </div>
 
         <Separator />

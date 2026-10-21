@@ -78,6 +78,57 @@ describe("createResilientAuthFetch", () => {
     expect(calls).toBe(2);
   });
 
+  it("never retries the registration-options GET", async () => {
+    const impl = vi.fn<FetchLike>(() =>
+      Promise.reject(new TypeError("fetch failed")),
+    );
+    const fetchWithRetry = createResilientAuthFetch(impl, { sleep });
+
+    await expect(
+      fetchWithRetry(
+        "/api/auth/passkey/generate-register-options?context=signed-token",
+      ),
+    ).rejects.toThrow("fetch failed");
+    expect(impl).toHaveBeenCalledTimes(1);
+  });
+
+  it("still budgets the registration-options GET with one attempt", async () => {
+    let calls = 0;
+    const impl: FetchLike = (_input, init) => {
+      calls += 1;
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () =>
+          reject(new DOMException("aborted", "AbortError")),
+        );
+      });
+    };
+    const fetchWithRetry = createResilientAuthFetch(impl, {
+      sleep,
+      timeoutMs: 5,
+    });
+
+    await expect(
+      fetchWithRetry("/api/auth/passkey/generate-register-options?context=x"),
+    ).rejects.toThrow(/abort/i);
+    expect(calls).toBe(1);
+  });
+
+  it("recognises a Request object for the registration GET", async () => {
+    const impl = vi.fn<FetchLike>(() =>
+      Promise.reject(new TypeError("fetch failed")),
+    );
+    const fetchWithRetry = createResilientAuthFetch(impl, { sleep });
+
+    await expect(
+      fetchWithRetry(
+        new Request(
+          "http://localhost:3000/api/auth/passkey/generate-register-options?context=x",
+        ),
+      ),
+    ).rejects.toThrow("fetch failed");
+    expect(impl).toHaveBeenCalledTimes(1);
+  });
+
   it("stops retrying when the caller aborted its own request", async () => {
     const controller = new AbortController();
     const impl: FetchLike = (_input, init) =>

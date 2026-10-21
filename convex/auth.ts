@@ -146,16 +146,26 @@ export const createAuthOptions = (
         rpID,
         rpName: "KufiCraft",
         origin: siteUrl,
+        /**
+         * Anonymous sign-in sends no `allowCredentials`, so it can only find a
+         * *discoverable* credential. `"preferred"` (the plugin default) lets an
+         * authenticator create a non-discoverable one, which then exists in the
+         * database but is invisible to sign-in. Requiring a resident key closes
+         * that failure; an authenticator that cannot comply fails the
+         * registration clearly instead of silently creating an unusable key.
+         */
+        authenticatorSelection: { residentKey: "required" },
         registration: {
-          // Passkey-first sign-up: the sign-in dialog has no session and no
-          // email.
+          // Passkey-first sign-up: the auth panel's create section has no
+          // session and no email.
           requireSession: false,
           /**
            * Called by `GET /passkey/generate-register-options?context=…`.
            * The context token is minted by `createSignUpContext`
            * (convex/authFlows.ts) and signed with `BETTER_AUTH_SECRET`.
            * Verified here, then the account row is created and returned as
-           * the WebAuthn user for the ceremony.
+           * the WebAuthn user for the ceremony. The name comes from the signed
+           * token, never from the client query string.
            */
           resolveUser: async ({ ctx: endpointCtx, context }) => {
             const payload = await verifySignUpContextToken(
@@ -183,20 +193,19 @@ export const createAuthOptions = (
               });
             }
             /**
-             * The account has no name of its own — it **is** its passkey, and
-             * the passkey's name is the account's name (docs/AUTH.md §
-             * Accounts). These three strings are therefore the same label: the
-             * row, the WebAuthn user the OS prompt shows, and the passkey the
-             * ceremony creates below.
+             * An account **is** its passkey, so the user row, the WebAuthn
+             * user the OS prompt shows and the passkey row must all carry the
+             * same normalized name. This is the token's name; the client never
+             * sends a second copy.
              */
             const user = await endpointCtx.context.internalAdapter.createUser(
-              { name: DEFAULT_PASSKEY_NAME, email },
+              { name: payload.name, email },
               { method: "passkey" },
             );
             return {
               id: user.id,
-              name: DEFAULT_PASSKEY_NAME,
-              displayName: DEFAULT_PASSKEY_NAME,
+              name: payload.name,
+              displayName: payload.name,
             };
           },
           /**
@@ -219,7 +228,7 @@ export const createAuthOptions = (
                 user: fullUser,
               });
             }
-            return { name: DEFAULT_PASSKEY_NAME };
+            return { name: user.name || DEFAULT_PASSKEY_NAME };
           },
         },
       }),

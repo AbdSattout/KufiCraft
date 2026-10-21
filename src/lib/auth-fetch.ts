@@ -14,7 +14,11 @@
  *   so a slow body is never cut in half.
  * * **ask again, once.** GETs are idempotent reads; the passkey and sign-out
  *   ceremonies are POSTs and are passed through completely untouched — a
- *   replayed ceremony would be a second account, not a second read.
+ *   replayed ceremony would be a second account, not a second read. The one
+ *   GET that is *not* a read is `generate-register-options` (it mints a user
+ *   row): it gets the budget but never a replay, because a replay with the
+ *   same context token fails as "already used" even when the first attempt is
+ *   the one that created the row.
  *
  * A caller's own abort (Better Auth cancels a superseded session fetch) is
  * passed through: it is not a failure to retry.
@@ -46,6 +50,23 @@ function methodOf(input: RequestInfo | URL, init?: RequestInit): string {
     return input.method.toUpperCase();
   }
   return "GET";
+}
+
+function urlOf(input: RequestInfo | URL): string {
+  if (typeof input === "string") return input;
+  if ("url" in input) return input.url;
+  return input.href;
+}
+
+/**
+ * `generate-register-options` is a GET, but it is not a read: it mints a user
+ * row before the authenticator answers. Replaying it with the same context
+ * token makes `resolveUser` reject the repeat ("تم استخدام…") even when the
+ * first attempt is the one that created the row. The budget still applies —
+ * one attempt only.
+ */
+function isRegistrationOptionsGet(input: RequestInfo | URL): boolean {
+  return urlOf(input).includes("/passkey/generate-register-options");
 }
 
 function signalOf(input: RequestInfo | URL, init?: RequestInit): AbortSignal | undefined {
@@ -92,6 +113,11 @@ export function createResilientAuthFetch(
   return (input, init) => {
     if (methodOf(input, init) !== "GET") return impl(input, init);
     const caller = signalOf(input, init);
+    if (isRegistrationOptionsGet(input)) {
+      // One bounded attempt: the retry would consume the context token's
+      // single registration. The budget still ends a dead connection fast.
+      return fetchWithinBudget(impl, input, init, timeoutMs);
+    }
     return retryTransient(
       () => fetchWithinBudget(impl, input, init, timeoutMs),
       {

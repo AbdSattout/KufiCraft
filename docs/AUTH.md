@@ -12,7 +12,7 @@ Verified live on `https://adamant-dragon-860.convex.site` (dev deployment):
 | `GET /api/auth/passkey/generate-authenticate-options` | real WebAuthn challenge ✅ → **`@simplewebauthn/server` runs in Convex V8** |
 | `GET /api/auth/passkey/list-user-passkeys` | `401 UNAUTHORIZED` (expected without a session) |
 | `GET http://localhost:3000/api/auth/ok` | proxied through Next.js ✅ |
-| Action `authFlows:createSignUpContext` | mints the sign-up context token (no arguments, no display name — an account is its passkey) |
+| Action `authFlows:createSignUpContext` | takes `{ name }`, normalizes it, and mints the sign-up context token that carries it |
 | `GET /api/auth/passkey/generate-register-options?context=…` | 200 challenge/rp/user for a valid minted context; **400** Arabic messages for missing/invalid/expired/tampered tokens |
 | `POST /api/auth/passkey/verify-registration` | 200 in a real browser (Chromium virtual authenticator E2E): session cookie set, redirect to `/`, passkey listed, rename/sign-out/sign-in all pass |
 
@@ -34,7 +34,8 @@ everything about the live deployment that a unit test cannot reach is marked
 | file | role |
 | --- | --- |
 | `convex/auth.ts` | `authComponent` (client with local schema), `createAuthOptions` (with the passkey `resolveUser`/`afterVerification` hooks), `createAuth` |
-| `convex/authFlows.ts` | sign-up context token (HMAC mint/verify) + public `createSignUpContext` action + `DEFAULT_PASSKEY_NAME` (the account's first name) |
+| `convex/authFlows.ts` | sign-up context token (HMAC mint/verify over `{name, expiresAt, nonce}`) + public `createSignUpContext({ name })` action + `DEFAULT_PASSKEY_NAME` re-export (legacy fallback only) |
+| `convex/lib/account-name.ts` | the shared name contract: `MAX_ACCOUNT_NAME_LENGTH`, `normalizeAccountName`, `isDefaultAccountName`, `DEFAULT_PASSKEY_NAME` (client alias: `src/lib/account-name.ts`) |
 | `convex/auth.config.ts` | Convex auth provider config |
 | `convex/convex.config.ts` | registers the **local** `./betterAuth/convex.config` |
 | `convex/betterAuth/convex.config.ts` | component definition |
@@ -44,9 +45,9 @@ everything about the live deployment that a unit test cannot reach is marked
 | `convex/http.ts` | `authComponent.registerRoutes(http, createAuth)` → mounts `/api/auth/*` |
 | `src/lib/auth-client.ts` | `createAuthClient({ plugins: [convexClient(), passkeyClient()], fetchOptions: { customFetchImpl } })` — the resilient fetch of § Transient failures |
 | `src/lib/{auth-fetch,retry,session-gate,convex-token,save-state}.ts` | the resilience layer: budgeted+retried auth GETs, the session gate decision, the Convex token cache, the save-state mapping (each with a sibling `*.test.ts`) |
-| `src/app/(auth)/{layout,account}` | Arabic RTL shell: `/account` is “الحساب والأمان” (there is no sign-in route — the dialog lives on the landing) |
+| `src/app/(auth)/{layout,account}` | Arabic RTL shell: `/account` is “الحساب والأمان” (there is no sign-in route — the auth panel lives on the landing) |
 | `src/app/page.tsx`, `src/app/[projectId]/page.tsx` | the boards (home) and a board — one segment apart, no `/app` prefix |
-| `src/components/auth/**` | the sign-in dialog (one button, silent auto-attempt) and its CTA triggers, account screen + account & security card (account name = passkey name, sign-out), passkey error mapping, `require-auth` guard (`useSession`, so a failed Convex token cannot sign anyone out) |
+| `src/components/auth/**` | the one-field auth dialog (empty field = sign in, typed name = create), its host (`SignInDialogProvider`), CTA triggers, account screen + account & security card (account name = passkey name, sign-out), passkey error mapping, `require-auth` guard (`useSession`, so a failed Convex token cannot sign anyone out) |
 | `src/proxy.ts` + `src/lib/route-guards.ts` | pre-render routing: `/` is the boards with a session and the landing without one, `/?signin=1` is the landing either way, `/account` and `/<id>` → `/?signin=1` without a session, and `/signin`/`/signup` redirect for the old sign-in addresses |
 | `src/lib/auth-server.ts` | `convexBetterAuthNextJs(...)` helpers (`getToken`, `preloadAuthQuery`, …) |
 | `src/app/api/auth/[...all]/route.ts` | `export const { GET, POST } = handler` (proxies to Convex) |
@@ -151,67 +152,92 @@ An account **is** its passkey — one account, one passkey, and the passkey's na
 is the account's name. There is no profile name, no email login, no password and
 no recovery address:
 
-* **The name lives on the passkey.** `DEFAULT_PASSKEY_NAME` (`convex/authFlows.ts`)
-  names the passkey a new account is created with, so it starts as “مفتاح المرور”
-  and shows in the header. `/account` renames that same passkey
-  (`authClient.passkey.updatePasskey`), and the plugin's `$listPasskeys` listener
-  refreshes both the account screen and the header, so the new name *is* the new
-  account name. The browser never tells us what the OS called the credential, so
-  the first name is ours, not the platform's.
+* **The name lives on the passkey.** The name typed at creation is normalized
+  once (`normalizeAccountName`, `convex/lib/account-name.ts`, max 60 units) and
+  written to three places that must stay identical: `user.name`, the WebAuthn
+  user the OS sheet shows, and the passkey row. The passkey row is what the
+  header and `/account` read; `/account` renames that same passkey
+  (`authClient.passkey.updatePasskey`), the plugin's `$listPasskeys` listener
+  refreshes both the account screen and the header, and the rename also
+  mirrors `user.name` best-effort via `authClient.updateUser`. `DEFAULT_PASSKEY_NAME`
+  (“مفتاح المرور”) survives only as the fallback for accounts created before the
+  card asked for a name, and as the `afterVerification` fallback when a
+  registration somehow carries none. The OS/browser label of an existing
+  credential cannot be changed after creation — a rename only changes what
+  KufiCraft displays.
 * **No add, no delete.** `account-security.tsx` deliberately offers neither: a
   second passkey would be a second account's key, and deleting the only one would
   leave the account with no way back in (the plugin's `add-passkey` and
   `delete-passkey` endpoints still exist server-side; the app simply never calls
   them). Losing the passkey means losing the account — the boards go with it.
-* **No display name in the token or the user row.** `createSignUpContext` takes
-  no arguments, and the token payload is only `{expiresAt, nonce}`. The created
-  `user` row still carries a `name` because Better Auth's schema requires one —
-  it is the same `DEFAULT_PASSKEY_NAME` label and nothing reads it.
-* **Signing in and signing up are the same ceremony.** Someone with a passkey for
-  this site signs in; someone without one needs a *different* WebAuthn call
-  (`create()` rather than `get()`), and the browser gives no signal that
-  distinguishes “no credentials here” from “the user cancelled”. So the dialog
-  has **one button**: it runs the sign-in ceremony, and only after an attempt
-  comes back without a session does that same button switch to creating the
-  account's passkey. Nothing is a form — there is nothing to type.
+* **The name is signed into the token, and the token is the only carrier.**
+  `createSignUpContext` takes `{ name }`, normalizes it server-side (empty,
+  over-60 or characters that normalize away are rejected with the Arabic
+  `اكتب اسمًا للحساب (1–60 حرفًا).`), and signs a token payload of
+  `{name, expiresAt, nonce}`. `resolveUser` verifies the token and passes
+  `payload.name` to `createUser` and to the WebAuthn user; the client does not
+  send the name a second time to `addPasskey`. Tokens minted before the name
+  field existed are still accepted for their 5-minute TTL and fall back to
+  `DEFAULT_PASSKEY_NAME`; a token that *does* carry an invalid name is rejected.
+* **One field, two intents — and a failure is never an intent.** The auth
+  dialog has one `اسم الحساب` field and one button: submitting it *empty* runs
+  the sign-in `get()` (the field is also the WebAuthn username field, so
+  conditional-UI suggestions can sign in without the button), and submitting a
+  *typed name* runs the registration `create()` with that name. Which intent a
+  value means is decided by the pure `planAuthSubmit`
+  (`src/components/auth/auth-state.ts`) — never by a failed ceremony. A
+  cancelled sign-in leaves the field empty with a retry message and never
+  creates an account; a cancelled registration leaves the typed name in place.
+  There is no auto-attempt effect.
 
 ## Passkey-first onboarding (the product requirement)
 
 Sign-in/sign-up must work **without** passwords, email or OAuth:
 “touch the button → create a passkey → you are in”. Implemented shape:
 
-1. **Create** (the dialog's button once a sign-in attempt came back without a
-   session, or immediately for a device with no passkey):
-   * The client calls the Convex action `authFlows:createSignUpContext({})`.
-     The action mints a context token: base64url JSON `{expiresAt, nonce}`
-     signed with HMAC-SHA256 over `BETTER_AUTH_SECRET` (TTL 5 min; verification
-     requires both fields).
+1. **Create** (type a name, then “إنشاء حساب”):
+   * The client calls the Convex action `authFlows:createSignUpContext({ name })`.
+     The action normalizes the name (empty/over-60/characters-that-normalize-away
+     → Arabic `ConvexError` `اكتب اسمًا للحساب (1–60 حرفًا).`) and mints a context
+     token: base64url JSON `{name, expiresAt, nonce}` signed with HMAC-SHA256
+     over `BETTER_AUTH_SECRET` (TTL 5 min; verification requires the expiry and
+     nonce and validates the name when present).
    * The client calls `authClient.passkey.addPasskey({ context })`.
      `@better-auth/passkey@1.6.33` has **no** client-side `createSession`
      option — any doc claiming otherwise is wrong.
    * Server-side, `registration.resolveUser` (`convex/auth.ts`) verifies the
      token and creates the user through the component adapter with a synthetic
-     unique email (`<nonce>@passkey.local`, method `passkey`).
+     unique email (`<nonce>@passkey.local`, method `passkey`), using
+     `payload.name` for the row and the WebAuthn user.
    * `registration.afterVerification` creates the session via
      `internalAdapter.createSession(user.id)`, writes the cookie with
      `setSessionCookie` from `better-auth/cookies` (because
      `verify-registration` returns 200 but does **not** create a session by
-     itself) and returns the passkey's name — `DEFAULT_PASSKEY_NAME`.
+     itself) and returns the passkey's name (`user.name` or the legacy
+     `DEFAULT_PASSKEY_NAME` fallback).
    * The client full-page-navigates to `/` after the ceremony — the passkey
      client never fires `$sessionSignal` on registration. `/` is the boards for
      that fresh cookie, so the visitor lands on “لوحاتي”.
-2. **Sign in** (the dialog's first button): `authClient.signIn.passkey()`. The
-   sheet lists every passkey this site has on the device and one of them signs in;
-   both paths end with a full-page navigation, not client routing (the session
-   atom update can unmount the dialog before the promise continuation runs).
-   * The dialog lives on the landing and is opened by a click — a CTA, or the
-     `?signin=1` flag the guards redirect with — so on mount the same call is
-     attempted once, silently, **only** while `navigator.userActivation.isActive`.
-     That activation is what lets a browser open a WebAuthn prompt without a
-     fresh gesture; on a direct load or refresh there is none, `get()` would
-     reject with `NotAllowedError`, and the button is the way in.
-   * There is **no conditional-UI input**: it would need a visible
-     `autocomplete="username webauthn"` field, and the dialog has no fields.
+2. **Sign in** (leave the field empty, then “الدخول بمفتاح المرور”):
+   `authClient.signIn.passkey()`. The sheet lists every passkey this site has
+   on the device and one of them signs in; both paths end with a full-page
+   navigation, not client routing (the session atom update can unmount the
+   dialog before the promise continuation runs).
+   * The dialog is opened by a click — a CTA, or the `?signin=1` flag the
+     guards redirect with — and its field is `autoFocus`ed.
+   * Where the browser supports conditional mediation, the visible
+     `autoComplete="username webauthn"` field arms a conditional `get()` so
+     saved passkeys appear in the browser's own autofill; choosing one signs in
+     without the button. A manual `get()`/`create()` aborts the pending
+     conditional ceremony, so the field re-arms when an attempt settles (and
+     when it is focused while empty) — without that, suggestions would stop
+     after the first attempt. This is an enhancement only; the
+     “الدخول بمفتاح المرور” button is the reliable path everywhere else.
+   * There is no *modal* auto-attempt on mount: the only automatic `get()` is
+     the conditional-mediation one, which waits for the browser's autofill
+     selection and never opens a passkey sheet by itself. A cancellation or
+     `NotAllowedError` can therefore never be mistaken for “this visitor has no
+     account”.
 3. **Management**: `/account` renders the account & security card for a session —
    the account name with a rename dialog, plus sign-out. The dialog never shows
    it (the landing is what a session-less visitor sees, and a live session sees
@@ -264,10 +290,11 @@ What the client does about it:
   *body* is never cut in half, and a caller's own abort (Better Auth cancels a
   superseded session fetch) is not a failure to retry. POSTs pass through
   untouched: `passkey/verify-registration` and `sign-out` are writes, and a
-  replayed one is a second account, not a second read. The passkey *options*
-  calls are GETs and do get retried — `generate-register-options` mints, and it
-  is safe to replay because the retry carries the same context token, which
-  `resolveUser` reaps (§ Known follow-ups, 1).
+  replayed one is a second account, not a second read. The one GET that is
+  explicitly **not** retried is `generate-register-options`: it mints a `user`
+  row before the authenticator answers, and a replay with the same context token
+  would be rejected as “تم استخدام…” even when the first attempt is the one that
+  created the row. It still gets the budget, as a single bounded attempt.
 * **A token that is kept.** `src/lib/convex-token.ts` reuses the Convex token
   until shortly before its JWT `exp`, gives concurrent callers one request
   (single flight) and never caches a failure. It is wired in
@@ -326,6 +353,41 @@ around.
   account: `updatePasskey` triggers the plugin's `$listPasskeys` listener, which
   is what makes the header (and `/account`) show the new name without a reload.
   Keep both reading the same source — nothing else stores a name.
+* `generate-register-options` is a GET that must **not** be retried
+  (`src/lib/auth-fetch.ts` special-cases it): it mints a `user` row, so a replay
+  with the same context token is a rejected duplicate, not a harmless read.
+* Conditional UI is armed by the dialog's one field
+  (`autoComplete="username webauthn"`) and must be re-armed whenever it is
+  superseded: a manual `get()`/`create()` aborts the pending conditional
+  ceremony, so `AuthPanel` keys its effect by a `conditionalArm` counter that
+  bumps when the field is focused while empty or a sign-in attempt settles.
+  Without the re-arm, browser suggestions stop after the first attempt. Only
+  one conditional `get()` is pending at a time — each arming aborts the
+  previous one, and they share the challenge cookie.
+* Every `id`/`htmlFor` pair in `AuthPanel` is prefixed with `useId()`, so a
+  second mount can never make a label point at another instance's field.
+
+## Migrations
+
+* **Old typed names → passkey rows.** Accounts created before the sign-up card
+  asked for a name stored the typed name on `user.name` but left the passkey row
+  at `DEFAULT_PASSKEY_NAME`; the header and `/account` read the passkey row, so
+  those accounts still show «مفتاح المرور». `convex/migrations/backfillPasskeyNames.ts`
+  contains the pure planner (`planPasskeyNameBackfill`, unit-tested) and an
+  internal action (`backfillPasskeyNames`) that wraps it over the auth
+  component with `dryRun` defaulting to `true`. It has **not** been executed
+  against any deployment. To run it after this change is deployed:
+
+  ```bash
+  bunx convex run migrations/backfillPasskeyNames:backfillPasskeyNames '{"dryRun": true}'
+  # review `updates`, then:
+  bunx convex run migrations/backfillPasskeyNames:backfillPasskeyNames '{"dryRun": false}'
+  ```
+
+  Only passkeys whose own name is missing/default *and* whose owner has a real
+  name are touched; the plan is idempotent, and an owner that never got a name
+  is left alone. The OS/browser label of existing credentials cannot be
+  backfilled — only what KufiCraft displays.
 
 ## Known follow-ups (deliberately not done here)
 

@@ -84,35 +84,40 @@ the notice appears only where there was nothing to keep
   `MenuGroupContext is missing` outside `DropdownMenuGroup`/`DropdownMenuRadioGroup`.
 * Motion: 150–200 ms ease-out, `tw-animate-css` utilities; nothing bouncy.
 
-## Account screens (`/account` and the sign-in dialog)
+## Account screens (`/account` and the auth dialog)
 
 An account **is** its passkey: one account, one passkey, and the passkey's name
 is the account's name (the model is documented in `docs/AUTH.md § Accounts`).
 
-Signing in is a **dialog on the landing**: one button and nothing else — no
-fields, no “حساب جديد” section, no conditional-UI input. `SignInDialogProvider`
-(root layout) renders it once, and the CTAs (`SignInButton`, `SignInLink`)
-open it, so no screen has a sign-in page to link to. The button runs the
-passkey sign-in ceremony; if the browser has no passkey for this site (the only
-reason to create one, and not something a WebAuthn call can report on its own),
-the *same* button switches to creating the account's passkey after that attempt
-comes back without a session. Opening the dialog by a click — which is what
-carries transient activation into the passkey sheet — also runs the sign-in
-ceremony once on its own, silently; a direct load or refresh has no activation,
-so nothing opens and the button is the way in.
+Signing in and creating an account are the two intents of **one dialog with one
+field**: `اسم الحساب` is both the WebAuthn username field and the new-account
+name. Submitting it **empty** runs the sign-in `get()`; submitting a **typed
+name** runs the registration `create()` with that name, and the button label
+says which will happen. No failure changes the intent: a cancelled sign-in
+leaves the field empty with a retry message, a cancelled registration leaves the
+typed name in place. `SignInButton`/`SignInLink` open the dialog; there is no
+inline form on the landing and no sign-in route.
 
-`/?signin=1` opens the dialog straight away: that is where the guards send an
-anonymous visitor who wanted a session screen. The flag is read with
+Conditional UI (`autoComplete="username webauthn"`) is a progressive
+enhancement: saved passkeys appear in the browser's own autofill, and choosing
+one signs in without the button. A manual `get()`/`create()` aborts the pending
+conditional ceremony, so the field re-arms it when focused while empty or when
+an attempt settles. The visible button is the reliable path wherever
+conditional mediation is unsupported.
+
+`/?signin=1` opens the dialog: that is where the guards send an anonymous
+visitor who wanted a session screen. The flag is read with
 `useSyncExternalStore` (server snapshot: closed), so the statically prerendered
-landing never contains an open dialog and hydration stays clean; dismissing a
-dialog the URL asked for strips the flag.
+landing stays hydration-clean; dismissing a dialog the URL asked for strips the
+flag.
 
 `/account` (“الحساب والأمان”) is the only session screen: one row with the
 account name (the passkey's) and a pencil that renames that same passkey, then
-sign out. No add, no delete, no metadata — a second passkey would be a second
-account's key and deleting the only one would lose the account. A visitor with a
-live session never sees the dialog: it lives on the landing, and the boards are
-where a signed-in visitor lands.
+sign out. A passkey still carrying the legacy default shows a subtle
+“سمِّ حسابك” prompt. No add, no delete, no metadata — a second passkey would be
+a second account's key and deleting the only one would lose the account. A
+visitor with a live session never sees the auth panel: it lives on the landing,
+and the boards are where a signed-in visitor lands.
 
 ## Dashboard (`/`)
 
