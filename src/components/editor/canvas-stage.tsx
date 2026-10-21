@@ -21,6 +21,7 @@
  * re-render the overlay.
  */
 
+import { useState } from "react";
 import type { PointerEvent as ReactPointerEvent, RefObject } from "react";
 import { Minus, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -95,6 +96,12 @@ export function CanvasStage({
   // new tool cannot forget them.
   const active = toolOf(tool);
   const primary = usePrimaryModifier();
+  // A pointer click still moves focus to the canvas so keyboard shortcuts keep
+  // working, but it must not paint the keyboard focus ring. `:focus-visible`
+  // cannot tell this case apart after a programmatic focus in Chrome (and it
+  // can stay "visible" for a canvas that has never held a pointer-focused
+  // ancestor), so the pointer itself suppresses the ring until the next blur.
+  const [pointerFocus, setPointerFocus] = useState(false);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -120,13 +127,18 @@ export function CanvasStage({
             className={cn(
               "relative m-auto aspect-square shrink-0 touch-none rounded-sm bg-background",
               "shadow-sm ring-1 ring-border/70 outline-none select-none",
-              "focus-visible:ring-2 focus-visible:ring-ring",
+              !pointerFocus && "focus-visible:ring-2 focus-visible:ring-ring",
               active.cursor,
             )}
-            onPointerDown={onPointerDown}
+            onPointerDown={(event) => {
+              if (event.button !== 0) return;
+              setPointerFocus(true);
+              onPointerDown(event);
+            }}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerCancel}
+            onBlur={() => setPointerFocus(false)}
             onDoubleClick={active.pans ? onCentreView : undefined}
             onContextMenu={(event) => event.preventDefault()}
           >

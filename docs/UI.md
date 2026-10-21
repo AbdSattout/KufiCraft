@@ -203,6 +203,13 @@ side (a `justify-center` canvas would hide its inline-start edge — in RTL, the
 right one — from the scroll range for good). Each tool carries its own one-line
 hint in the status bar, which is where the hand tool says what it does.
 
+The canvas is focusable (`role="application"`, `tabIndex=0`) so keyboard
+shortcuts keep working after clicking it. Pointer focus deliberately suppresses
+the focus ring; Tab focus paints it. The suppression lives in
+`src/components/editor/canvas-stage.tsx`: Chrome can report `:focus-visible` for
+a canvas focused programmatically after a pointer press, so the pointer itself
+sets the local flag until the canvas blurs.
+
 Shape palette (applies to the next drawn tiles and to the current selection):
 square, circle, triangle, quarter circle, semicircle, pentagon, curve, hamza1,
 hamza2, comb — ten glyphs, each drawn by the same `KufiShape` that paints the
