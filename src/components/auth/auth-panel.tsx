@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useCallback,
   useEffect,
   useId,
   useReducer,
@@ -70,9 +71,8 @@ export function AuthPanel() {
    */
   const [conditionalArm, setConditionalArm] = useState(0);
   /**
-   * True between the browser filling the field from the passkey list and the
-   * ceremony settling. The button shows a spinner for it, exactly as it does
-   * for a button press.
+   * True between choosing a saved passkey and the attempt settling. The button
+   * shows a spinner for it, exactly as it does for a button press.
    */
   const [conditionalBusy, setConditionalBusy] = useState(false);
   const busyRef = useRef(false);
@@ -81,21 +81,68 @@ export function AuthPanel() {
   const typedRef = useRef(false);
   /** True while a conditional `get()` is waiting for the autofill UI. */
   const conditionalPendingRef = useRef(false);
-  /** True between an autofill selection and that conditional settling. */
+  /** True between a passkey selection and that conditional settling. */
   const conditionalVerifyingRef = useRef(false);
+  /** Clears a field-fill guess if no passkey ceremony follows it. */
+  const fillTimeoutRef = useRef<number | undefined>(undefined);
   const idPrefix = useId();
 
   const busy = state.busy || conditionalBusy;
   const creating = value.trim() !== "" && !conditionalBusy;
 
+  /**
+   * Enter the same busy state as the button path once a selection is likely:
+   *
+   * - `verify`: the assertion exists and `/passkey/verify-authentication` is
+   *   starting. This is the browser-independent signal that the visitor chose
+   *   a passkey, and it covers the server round trip that follows.
+   * - `fill`: only the username field changed without typing. Chrome's passkey
+   *   autofill can set the value without firing an `input` event, so React's
+   *   onChange may never see it. A password manager can also fill this field
+   *   without starting a ceremony, so this guess expires on its own.
+   */
+  const markConditionalVerifying = useCallback(
+    (source: "fill" | "verify", autofilledName?: string) => {
+      window.clearTimeout(fillTimeoutRef.current);
+      fillTimeoutRef.current = undefined;
+
+      if (!conditionalVerifyingRef.current) {
+        conditionalVerifyingRef.current = true;
+        busyRef.current = true;
+        setConditionalBusy(true);
+        dispatch({ type: "RESET" });
+      }
+
+      if (autofilledName !== undefined) setValue(autofilledName);
+
+      if (source === "fill") {
+        fillTimeoutRef.current = window.setTimeout(() => {
+          if (!conditionalPendingRef.current) return;
+          conditionalVerifyingRef.current = false;
+          busyRef.current = false;
+          setConditionalBusy(false);
+        }, 15_000);
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    return () => window.clearTimeout(fillTimeoutRef.current);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
+    let poll: number | undefined;
     conditionalPendingRef.current = true;
 
-    function finishVerifying(): boolean {
+    function finishVerifying(keepBusy: boolean): boolean {
       const wasVerifying = conditionalVerifyingRef.current;
       conditionalVerifyingRef.current = false;
-      if (wasVerifying) {
+      conditionalPendingRef.current = false;
+      window.clearTimeout(fillTimeoutRef.current);
+      fillTimeoutRef.current = undefined;
+      if (wasVerifying && !keepBusy) {
         busyRef.current = false;
         setConditionalBusy(false);
       }
@@ -104,21 +151,48 @@ export function AuthPanel() {
 
     void (async () => {
       if (!(await conditionalUiSupported())) {
-        if (!cancelled) {
-          conditionalPendingRef.current = false;
-          finishVerifying();
-        }
+        if (!cancelled) finishVerifying(false);
         return;
       }
       if (cancelled) return;
 
-      try {
-        const result = await authClient.signIn.passkey({ autoFill: true });
-        if (cancelled) return;
-        conditionalPendingRef.current = false;
-        const wasVerifying = finishVerifying();
+      /**
+       * Chrome can fill the username field straight from the passkey list
+       * without dispatching an `input` event, so React's onChange never sees
+       * it. Poll the DOM while the conditional request is pending; typing is
+       * tracked separately so a typed name is never mistaken for a selection.
+       */
+      poll = window.setInterval(() => {
+        if (
+          !conditionalPendingRef.current ||
+          conditionalVerifyingRef.current ||
+          typedRef.current
+        ) {
+          return;
+        }
+        const field = inputRef.current;
+        if (field && field.value !== "") {
+          markConditionalVerifying("fill", field.value);
+        }
+      }, 150);
 
-        if (result?.data?.session) {
+      try {
+        const result = await authClient.signIn.passkey({
+          autoFill: true,
+          fetchOptions: {
+            // Runs immediately before the assertion is sent to the server:
+            // the reliable "the visitor picked a passkey" moment.
+            onRequest: () => markConditionalVerifying("verify"),
+          },
+        });
+        if (cancelled) return;
+
+        const succeeded = Boolean(result?.data?.session);
+        // On success keep the spinner through the full-page navigation, so the
+        // dialog never sits idle between verification and the board loading.
+        const wasVerifying = finishVerifying(succeeded);
+
+        if (succeeded) {
           hardNavigate("/");
           return;
         }
@@ -146,8 +220,7 @@ export function AuthPanel() {
         }
       } catch (cause) {
         if (cancelled) return;
-        conditionalPendingRef.current = false;
-        const wasVerifying = finishVerifying();
+        const wasVerifying = finishVerifying(false);
         if (!typedRef.current) setValue("");
         if (wasVerifying) {
           dispatch({
@@ -162,8 +235,9 @@ export function AuthPanel() {
     return () => {
       cancelled = true;
       conditionalPendingRef.current = false;
+      if (poll !== undefined) window.clearInterval(poll);
     };
-  }, [conditionalArm]);
+  }, [conditionalArm, markConditionalVerifying]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -237,15 +311,8 @@ export function AuthPanel() {
       return;
     }
 
-    /**
-     * The browser filled the field from the passkey autofill list: the
-     * conditional ceremony we armed is now verifying. Give it the same busy
-     * state as the button path.
-     */
     if (!typedRef.current && conditionalPendingRef.current) {
-      conditionalVerifyingRef.current = true;
-      busyRef.current = true;
-      setConditionalBusy(true);
+      markConditionalVerifying("fill", next);
     }
   }
 
@@ -295,6 +362,9 @@ export function AuthPanel() {
               ) {
                 typedRef.current = true;
               }
+            }}
+            onCompositionStart={() => {
+              typedRef.current = true;
             }}
             onPaste={() => {
               typedRef.current = true;
