@@ -66,6 +66,7 @@ import {
   recolourItems,
   reshapeItems,
   selectionFillColor,
+  strokeStyleApplies,
   styleForSelection,
   wheelSteps,
   wheelZoomDelta,
@@ -138,6 +139,11 @@ export interface EditorController {
    * rounding, border, cap and join while a selection is active.
    */
   panelStyle: DrawStyle;
+  /**
+   * Whether the cap/join block applies: a selected line/polyline/arc, or the
+   * line/arc tool with nothing selected.
+   */
+  showStrokeStyle: boolean;
   arc: ArcStyle;
   setArcDirection: (direction: ArcDirection) => void;
   setArcSize: (size: ArcSize) => void;
@@ -379,6 +385,16 @@ export function useEditor(
   const fillColor = useMemo(
     () => selectionFillColor(items, selection, config.ink),
     [config.ink, items, selection],
+  );
+
+  /**
+   * The cap/join controls are absent when they cannot affect anything: a
+   * selection wins over the tool, and with no selection only the line and arc
+   * tools can produce a stroked target.
+   */
+  const showStrokeStyle = useMemo(
+    () => strokeStyleApplies(tool, items, selection),
+    [items, selection, tool],
   );
 
   /**
@@ -1082,6 +1098,7 @@ export function useEditor(
     setTool: setToolStateAndReset,
     style,
     panelStyle,
+    showStrokeStyle,
     arc,
     setArcDirection,
     setArcSize,

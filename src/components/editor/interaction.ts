@@ -155,6 +155,34 @@ export function applyDrawStyle(
 }
 
 /**
+ * Whether the stroke cap/join block can affect the current target. With a
+ * selection, only the selected items matter: any line, polyline or arc makes
+ * the block applicable (tiles in a mixed selection simply ignore cap/join),
+ * while a tiles-only or stale selection hides it. With nothing selected the
+ * block belongs to the line and arc tools; the pen paints tiles, and select,
+ * eraser and hand have no stroked target of their own. This is deliberately
+ * type-level: a straight `line` item is a stroked target even when it renders
+ * as a filled bar.
+ */
+export function strokeStyleApplies(
+  tool: ToolId,
+  items: readonly CanvasItem[],
+  selection: readonly string[],
+): boolean {
+  if (selection.length > 0) {
+    const selected = new Set(selection);
+    return items.some(
+      (item) =>
+        selected.has(item.key) &&
+        (item.type === "line" ||
+          item.type === "stroke" ||
+          item.type === "arc"),
+    );
+  }
+  return tool === "line" || tool === "arc";
+}
+
+/**
  * The style the shape panel displays. With nothing selected it is the draw
  * style; with a selection it is the first selected item's own rounding,
  * border, cap and join — the panel reflects what is on the board, while the

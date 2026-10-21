@@ -193,13 +193,17 @@ colour, duplicate, delete) — with nothing selected they are absent, not
 disabled.
 
 The style blocks under the palette are rounding, stroke ends/joins and borders.
-The stroke block has two three-button rows — نهاية الخط (`مسطّحة`, `دائرية`,
-`مربّعة`) and وصلة الخط (`حادّة`, `دائرية`, `مشطوفة`) — for the next diagonal
-line, polyline or arc and for any stroked item in the selection. The defaults
-are `مسطّحة` and `حادّة`; a border on the same item inherits both. The border
-block has only a width slider (`0` = no border) and a colour field; the width is
-the switch: raising it above `0` adds the border, and a new border starts black
-until the user picks another colour.
+The stroke block is shown only when the target can take caps/joins: with nothing
+selected only for the line or arc tool, and with a selection whenever it
+contains a line, polyline or arc (a mixed selection qualifies; tiles ignore the
+controls). It is absent for a tiles-only selection and for the pen, select,
+eraser and hand. When shown, it has two three-button rows — نهاية الخط
+(`مسطّحة`, `دائرية`, `مربّعة`) and وصلة الخط (`حادّة`, `دائرية`, `مشطوفة`) — for
+the next diagonal line, polyline or arc and for any stroked item in the
+selection. The defaults are `مسطّحة` and `حادّة`; a border on the same item
+inherits both. The border block has only a width slider (`0` = no border) and a
+colour field; the width is the switch: raising it above `0` adds the border, and
+a new border starts black until the user picks another colour.
 
 Sidebar, top to bottom: الأشكال (palette + selection), the fill row (لون الحبر
 with nothing selected, لون التحديد with a selection), لون الورقة, then the

@@ -64,6 +64,7 @@ import {
   reshapeItems,
   selectionFillColor,
   shiftSelection,
+  strokeStyleApplies,
   styleForSelection,
   wheelSteps,
   wheelZoomDelta,
@@ -889,6 +890,55 @@ describe("arcBetween + linePreview", () => {
       cap: "round",
       join: "bevel",
     });
+  });
+});
+
+describe("strokeStyleApplies", () => {
+  const line = makeLine({ column: 0, row: 1 }, { column: 4, row: 1 });
+  const stroke = makeStroke(
+    [
+      { column: 0, row: 0 },
+      { column: 2, row: 2 },
+    ],
+    false,
+  );
+  const arc = makeArc({
+    from: { column: 0, row: 0 },
+    to: { column: 2, row: 0 },
+    direction: "clockwise",
+    size: "half",
+  });
+  const plain = tile(0, 0);
+
+  it("shows for the line and arc tools with nothing selected", () => {
+    expect(strokeStyleApplies("line", [], [])).toBe(true);
+    expect(strokeStyleApplies("arc", [], [])).toBe(true);
+  });
+
+  it("hides for the pen, select, eraser and hand with nothing selected", () => {
+    for (const tool of ["pen", "select", "eraser", "hand"] as const) {
+      expect(strokeStyleApplies(tool, [], [])).toBe(false);
+    }
+  });
+
+  it("shows when the selection contains a line, stroke or arc", () => {
+    for (const item of [line, stroke, arc]) {
+      expect(strokeStyleApplies("select", [item], [item.key])).toBe(true);
+    }
+  });
+
+  it("hides for a tiles-only selection even under the line tool", () => {
+    expect(strokeStyleApplies("line", [plain], [plain.key])).toBe(false);
+  });
+
+  it("shows for a mixed selection when any selected item is stroked", () => {
+    expect(
+      strokeStyleApplies("select", [plain, stroke], [plain.key, stroke.key]),
+    ).toBe(true);
+  });
+
+  it("hides a stale selection even under the line tool", () => {
+    expect(strokeStyleApplies("line", [line], ["missing-item"])).toBe(false);
   });
 });
 

@@ -9,7 +9,10 @@
  * tiles, line bars and polyline turns, the stroke block sets the cap and join
  * of stroked items, and the border block sets the band width and colour around
  * the whole shape; picking a shape is the way back to the plain square, so the
- * panel carries no separate reset button.
+ * panel carries no separate reset button. The stroke block is absent when no
+ * target can take caps/joins: with a selection, unless it contains a line,
+ * polyline or arc; without one, unless the line or arc tool is active (so not
+ * for tiles, the pen, select, eraser or hand).
  *
  * Rounding, stroke ends/joins and the border work like the shape buttons: they
  * set the **draw style** (what the pen paints next) and, when a selection is
@@ -164,6 +167,8 @@ const JOIN_LABELS: Record<StrokeJoin, string> = {
 
 export interface ShapePanelProps {
   style: DrawStyle;
+  /** Whether the cap/join block can affect the current tool or selection. */
+  showStrokeStyle: boolean;
   /** The ink colour, used by “تلوين التحديد”. */
   inkColor: string;
   /** Recent ink colours, offered by the border colour field. */
@@ -222,6 +227,7 @@ const ARRANGE_ITEMS = [
 
 export function ShapePanel({
   style,
+  showStrokeStyle,
   inkColor,
   inkSwatches,
   selectionCount,
@@ -336,55 +342,59 @@ export function ShapePanel({
         <p className="text-xs text-muted-foreground/80">{MESSAGES.roundingHint}</p>
       </div>
 
-      <div className="flex flex-col gap-2 border-t border-border/60 pt-2">
-        <p className="text-xs text-muted-foreground">{MESSAGES.strokeStyle}</p>
-        <div className="flex flex-col gap-1">
-          <span className="text-xs text-muted-foreground/80">
-            {MESSAGES.strokeCap}
-          </span>
-          <div
-            role="group"
-            aria-label={MESSAGES.strokeCap}
-            className="grid grid-cols-3 gap-1"
-          >
-            {STROKE_CAPS.map((cap) => (
-              <Button
-                key={cap}
-                variant={style.cap === cap ? "secondary" : "outline"}
-                size="sm"
-                aria-pressed={style.cap === cap}
-                title={CAP_LABELS[cap]}
-                onClick={() => setStrokeCap(cap)}
-              >
-                {CAP_LABELS[cap]}
-              </Button>
-            ))}
+      {showStrokeStyle && (
+        <div className="flex flex-col gap-2 border-t border-border/60 pt-2">
+          <p className="text-xs text-muted-foreground">
+            {MESSAGES.strokeStyle}
+          </p>
+          <div className="flex flex-col gap-1">
+            <span className="text-xs text-muted-foreground/80">
+              {MESSAGES.strokeCap}
+            </span>
+            <div
+              role="group"
+              aria-label={MESSAGES.strokeCap}
+              className="grid grid-cols-3 gap-1"
+            >
+              {STROKE_CAPS.map((cap) => (
+                <Button
+                  key={cap}
+                  variant={style.cap === cap ? "secondary" : "outline"}
+                  size="sm"
+                  aria-pressed={style.cap === cap}
+                  title={CAP_LABELS[cap]}
+                  onClick={() => setStrokeCap(cap)}
+                >
+                  {CAP_LABELS[cap]}
+                </Button>
+              ))}
+            </div>
+          </div>
+          <div className="flex flex-col gap-1">
+            <span className="text-xs text-muted-foreground/80">
+              {MESSAGES.strokeJoin}
+            </span>
+            <div
+              role="group"
+              aria-label={MESSAGES.strokeJoin}
+              className="grid grid-cols-3 gap-1"
+            >
+              {STROKE_JOINS.map((join) => (
+                <Button
+                  key={join}
+                  variant={style.join === join ? "secondary" : "outline"}
+                  size="sm"
+                  aria-pressed={style.join === join}
+                  title={JOIN_LABELS[join]}
+                  onClick={() => setStrokeJoin(join)}
+                >
+                  {JOIN_LABELS[join]}
+                </Button>
+              ))}
+            </div>
           </div>
         </div>
-        <div className="flex flex-col gap-1">
-          <span className="text-xs text-muted-foreground/80">
-            {MESSAGES.strokeJoin}
-          </span>
-          <div
-            role="group"
-            aria-label={MESSAGES.strokeJoin}
-            className="grid grid-cols-3 gap-1"
-          >
-            {STROKE_JOINS.map((join) => (
-              <Button
-                key={join}
-                variant={style.join === join ? "secondary" : "outline"}
-                size="sm"
-                aria-pressed={style.join === join}
-                title={JOIN_LABELS[join]}
-                onClick={() => setStrokeJoin(join)}
-              >
-                {JOIN_LABELS[join]}
-              </Button>
-            ))}
-          </div>
-        </div>
-      </div>
+      )}
 
       <div className="flex flex-col gap-2 border-t border-border/60 pt-2">
         <p className="text-xs text-muted-foreground">{MESSAGES.borders}</p>
