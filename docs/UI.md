@@ -421,13 +421,13 @@ key-free; only `aria-keyshortcuts` carries their key.
 Which surfaces carry a key: the tool rail (tool name + key, plus the hand's
 double-click line), the shape palette (name + digit; the tenth glyph names
 itself with no key), rotate, duplicate, delete, undo, redo, zoom −/100 %/+, the
-grid-guide switch. Export has no shortcut and therefore no hint. Deletion's key
-is no longer a visible chip on the button; `aria-keyshortcuts` remains. Disabled
-undo/redo and the zoom buttons at their bounds do not open a tooltip — an
-unavailable action does not advertise a key — but they keep their aria
-attributes. The arrange menu is deliberately key-free: its items keep
-`aria-keyshortcuts` for assistive tech, but no shortcut is printed inside the
-menu button or its rows.
+grid-guide switch, and each arrange menu row. Export has no shortcut and
+therefore no hint. Deletion's key is no longer a visible chip on the button;
+`aria-keyshortcuts` remains. Disabled undo/redo, the zoom buttons at their
+bounds, and disabled arrange rows do not open a tooltip — an unavailable action
+does not advertise a key — but they keep their aria attributes. The arrange
+rows stay key-free in the layout: hovering or focusing a row reveals its key in
+the same tooltip, and no shortcut is printed inside the menu button or its rows.
 
 `src/components/editor/shortcuts.test.ts` is the anti-drift gate. It walks
 every `EditorShortcut` kind back through `shortcutFor` with an event that
@@ -465,7 +465,8 @@ taken here.
    `src/components/editor/shortcut-tooltip.tsx` with
    `shortcut={{ kind: … }}`, pass the action name as `label`, and add
    `aria-keyshortcuts={shortcutAriaLabel(…)}`. Keep the visible text and
-   `aria-label` key-free. Menu rows keep `aria-keyshortcuts` but print no key.
+   `aria-label` key-free. Menu rows use the same wrapper around the row
+   (`DropdownMenuItem` as the trigger) and print no key inside the row.
    If the control can be absent (grid, tool or selection dependent), the hint
    must be absent with it.
 5. **Its tests and docs**: add one `{ shortcut, event }` case to `cases` in

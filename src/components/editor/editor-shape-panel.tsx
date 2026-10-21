@@ -501,19 +501,31 @@ export function ShapePanel({
                 align="start"
                 className="w-auto max-w-(--available-width)"
               >
+                {/*
+                  The row itself is the tooltip trigger: hovering or focusing
+                  an enabled row reveals its key, while the row text stays
+                  key-free. A disabled row does not advertise an action that
+                  cannot run.
+                */}
                 {ARRANGE_ITEMS.map(({ action, label, Icon }) => (
-                  <DropdownMenuItem
+                  <ShortcutTooltip
                     key={action}
-                    disabled={!canArrange(action)}
-                    aria-keyshortcuts={shortcutAriaLabel(
-                      { kind: "arrange", action },
-                      primary,
-                    )}
-                    onClick={() => arrange(action)}
-                  >
-                    <Icon />
-                    {label}
-                  </DropdownMenuItem>
+                    label={label}
+                    shortcut={{ kind: "arrange", action }}
+                    trigger={
+                      <DropdownMenuItem
+                        disabled={!canArrange(action)}
+                        aria-keyshortcuts={shortcutAriaLabel(
+                          { kind: "arrange", action },
+                          primary,
+                        )}
+                        onClick={() => arrange(action)}
+                      >
+                        <Icon />
+                        {label}
+                      </DropdownMenuItem>
+                    }
+                  />
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>
