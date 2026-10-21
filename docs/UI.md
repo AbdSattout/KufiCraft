@@ -100,7 +100,9 @@ inline form on the landing and no sign-in route.
 
 Conditional UI (`autoComplete="username webauthn"`) is a progressive
 enhancement: saved passkeys appear in the browser's own autofill, and choosing
-one signs in without the button. A manual `get()`/`create()` aborts the pending
+one signs in without the button. While that selection is verified the button
+shows the same spinner and `جارٍ الدخول…` as a button press, and keeps it
+through the redirect. A manual `get()`/`create()` aborts the pending
 conditional ceremony, so the field re-arms it when focused while empty or when
 an attempt settles. The visible button is the reliable path wherever
 conditional mediation is unsupported.
