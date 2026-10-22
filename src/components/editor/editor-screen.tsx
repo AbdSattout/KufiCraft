@@ -15,7 +15,6 @@
  */
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { ArrowRight, FileQuestion } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -109,7 +108,7 @@ function Panels({ editor }: { editor: EditorController }) {
   );
 }
 
-/** Skeleton shell: also the route's Suspense fallback (`useParams` suspends). */
+/** Skeleton shell: also the route's Suspense fallback (the params await suspends). */
 export function EditorLoading() {
   return (
     <div
@@ -192,14 +191,9 @@ function StateScreen({
   );
 }
 
-export function EditorScreen() {
-  const params = useParams<{ projectId?: string | string[] }>();
+export function EditorScreen({ projectId }: { projectId: string }) {
   const gate = useRequireAuth();
   const [settingsOpen, setSettingsOpen] = useState(false);
-
-  const routeParam = params.projectId;
-  const projectId =
-    typeof routeParam === "string" ? routeParam : (routeParam?.[0] ?? null);
 
   // The document is a Convex query, so it waits for a token too — `gate.ready`
   // rather than merely a session.
