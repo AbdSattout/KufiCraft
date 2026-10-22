@@ -37,9 +37,11 @@ import {
   anchorKey,
   anchorAt,
   anchorsAlongLine,
+  anchorsAlongStroke,
   arcBetween,
   arcPointAt,
   clampMoveOffset,
+  clampToCanvas,
   hitTest,
   linePointAt,
   linePreview,
@@ -77,7 +79,7 @@ export interface ToolInput {
  */
 export type ToolState =
   | { kind: "none" }
-  | { kind: "pen"; anchors: Anchor[]; cursor: Anchor }
+  | { kind: "pen"; anchors: Anchor[]; cursor: Anchor; cursorPoint: Point }
   | { kind: "erase"; keys: string[]; from: Anchor }
   | { kind: "arc"; from: LinePoint | null; to: LinePoint }
   | { kind: "line"; points: LinePoint[]; hover: LinePoint | null }
@@ -394,13 +396,15 @@ function moveFor(
  * pointer touches the canvas: the in-flight fragments are the real items.
  *
  * The pointer reports one position per event, so a fast drag flies over whole
- * cells. The segment between the pointer's live cell and the new one is filled
- * with `anchorsAlongLine`, so a stroke stays continuous instead of coming out
- * scattered. The fill's source is the pointer (`cursor`), never the last
- * stored fragment: a pointer that retraces the stroke stores nothing — dedup
- * decides what is painted, not where the fill starts — so retracing to the
- * junction of a T and turning up paints the turn, not a chord across the bar.
- * And the pen still never merges a run into a bar.
+ * cells and over several fragments inside each. The segment between the
+ * pointer's last reported position and the new one is filled with
+ * `anchorsAlongStroke`, which keeps the real path and paints every fragment it
+ * swept — the ink square *and* the paper strip of each cell, exactly as a slow
+ * drag over the same path would. The fill's source is the pointer
+ * (`cursorPoint`), never the last stored fragment: a pointer that retraces the
+ * stroke stores nothing — dedup decides what is painted, not where the fill
+ * starts — so retracing to the junction of a T and turning up paints the turn,
+ * not a chord across the bar. And the pen still never merges a run into a bar.
  */
 class PenTool extends KufiTool {
   readonly id = "pen" as const;
@@ -415,26 +419,34 @@ class PenTool extends KufiTool {
 
   begin(ctx: ToolContext, state: ToolState, input: ToolInput): ToolOutcome {
     void state;
-    const anchor = anchorAt(ctx.config, input.point);
-    return { state: { kind: "pen", anchors: [anchor], cursor: anchor } };
+    const point = clampToCanvas(input.point);
+    const anchor = anchorAt(ctx.config, point);
+    return {
+      state: {
+        kind: "pen",
+        anchors: [anchor],
+        cursor: anchor,
+        cursorPoint: point,
+      },
+    };
   }
 
   move(ctx: ToolContext, state: ToolState, input: ToolInput): ToolOutcome {
     if (state.kind !== "pen") return unchanged(state);
-    const anchor = anchorAt(ctx.config, input.point);
-    // The fill runs from the pointer's live cell, never from the stroke's last
-    // stored fragment: a pointer that retraces already-painted cells stores
-    // nothing, and fuelling the next fill from the tail would paint the chord
-    // the pointer never walked (the T's bar-to-stem jump).
+    const point = clampToCanvas(input.point);
+    const anchor = anchorAt(ctx.config, point);
+    // The fill runs from the pointer's live position, never from the stroke's
+    // last stored fragment: a pointer that retraces already-painted cells
+    // stores nothing, and fuelling the next fill from the tail would paint the
+    // chord the pointer never walked (the T's bar-to-stem jump).
     const cursor = state.cursor;
     const sameCell =
       cursor.column === anchor.column && cursor.row === anchor.row;
-    // Inside one cell only the fragment under the pointer can change, so the
-    // one-anchor step stays exactly what it was; a step to another cell brings
-    // the cells the pointer flew over along with it.
-    const candidates = sameCell
-      ? [anchor]
-      : anchorsAlongLine(ctx.config, cursor, anchor);
+    // The walk keeps the pointer's real segment and every fragment it swept,
+    // so a fast drag is as filled as a slow one. Inside one cell only the
+    // fragment(s) under the pointer can change; the cross-cell walk brings the
+    // cells and fragments the pointer flew over along with it.
+    const candidates = anchorsAlongStroke(ctx.config, state.cursorPoint, point);
     // An anchor's key is its identity, so a fragment is never listed twice and
     // the already-painted part of the line is dropped, not re-added. De-dup
     // decides what is stored — never where the fill starts.
@@ -446,13 +458,14 @@ class PenTool extends KufiTool {
       // Nothing to store, but the pointer still moved: keep the fill's source
       // live, or a retrace would freeze the pen at the stroke's tail.
       if (sameCell) return unchanged(state);
-      return { state: { ...state, cursor: anchor } };
+      return { state: { ...state, cursor: anchor, cursorPoint: point } };
     }
     return {
       state: {
         ...state,
         anchors: [...state.anchors, ...fresh],
         cursor: anchor,
+        cursorPoint: point,
       },
     };
   }

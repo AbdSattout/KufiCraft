@@ -24,7 +24,9 @@ export interface PanelSectionProps {
 export function PanelSection({ title, children, className }: PanelSectionProps) {
   return (
     <section className={cn("flex flex-col gap-2", className)}>
-      <h2 className="font-heading text-xs text-muted-foreground">{title}</h2>
+      <h2 className="font-heading text-xs font-normal text-foreground">
+        {title}
+      </h2>
       {children}
     </section>
   );
@@ -60,7 +62,7 @@ export function SliderField({
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between text-sm">
+      <div className="flex items-center justify-between text-xs">
         <span className="text-muted-foreground">{label}</span>
         <span className="font-medium tabular-nums">
           {shown}
@@ -164,7 +166,9 @@ export function ColourField({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2">
-        <span className={cn("text-sm text-muted-foreground", hideLabel && "sr-only")}>
+        <span
+          className={cn("text-xs text-muted-foreground", hideLabel && "sr-only")}
+        >
           {label}
         </span>
         <Input

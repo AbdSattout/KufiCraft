@@ -54,9 +54,9 @@ export const MESSAGES = {
     "يُطبَّق على التحديد فقط؛ لا يغيّر لون الحبر للرسم الجديد.",
   paperColor: "لون الورقة",
   showGrid: "إظهار الشبكة",
-  straightLinesAsSquares: "الخط المستقيم مربّعات",
+  straightLinesAsSquares: "تقطيع الخطوط",
   straightLinesAsSquaresHint:
-    "المقاطع المستقيمة تُرسم مربعًا في كل خلية، بدل شريط واحد متصل.",
+    "المقاطع المستقيمة تُقطَّع إلى مربع في كل خلية، بدل شريط واحد متصل.",
   boardOptions: "خيارات اللوحة",
   gridType: "نوع الشبكة",
   gridSquare: "مربعة",

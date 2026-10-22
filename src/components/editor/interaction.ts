@@ -7,9 +7,9 @@
  *   • viewport → viewBox mapping (`clientToViewBox`) including CSS scaling
  *     and RTL — the SVG is fitted with `preserveAspectRatio="xMidYMid meet"`,
  *     so the mapping is a uniform scale plus a centred letterbox offset;
- *   • anchoring (`anchorAt`, `linePointAt`, `arcPointAt`, `anchorsAlongLine`)
- *     and hit testing (`hitTest`) — the item classes answer for their own
- *     geometry;
+ *   • anchoring (`anchorAt`, `linePointAt`, `arcPointAt`, `anchorsAlongLine`,
+ *     `anchorsAlongStroke`) and hit testing (`hitTest`) — the item classes
+ *     answer for their own geometry;
  *   • the line tool's run resolver (`lineRun`): preview and commit resolve a
  *     gesture through it, so they can never disagree on an endpoint;
  *   • selection operations (move, recolour, reshape, duplicate, delete);
@@ -59,7 +59,7 @@ import {
   pointToArcPoint,
   pointToLinePoint,
 } from "@/lib/canvas/grid";
-import { shortestSectorDelta } from "@/lib/canvas/geometry";
+import { shortestSectorDelta, zoneRect } from "@/lib/canvas/geometry";
 import { lineItems, removeItems } from "@/lib/canvas/ops";
 import {
   Arc,
@@ -180,6 +180,28 @@ export function strokeStyleApplies(
     );
   }
   return tool === "line" || tool === "arc";
+}
+
+/**
+ * Whether the 2×2 corner map is offered for the current target. The radius
+ * slider is always shown; only the four corner toggles depend on the target.
+ * With a selection the map appears when the selection contains a tile (a
+ * mixed selection keeps it; a lines/arcs-only selection does not), and with
+ * nothing selected it is hidden for the line and arc tools. The border is
+ * never conditional: every item type can take one.
+ */
+export function roundingCornersApplies(
+  tool: ToolId,
+  items: readonly CanvasItem[],
+  selection: readonly string[],
+): boolean {
+  if (selection.length > 0) {
+    const selected = new Set(selection);
+    return items.some(
+      (item) => selected.has(item.key) && item.type === "tile",
+    );
+  }
+  return tool !== "line" && tool !== "arc";
 }
 
 /**
@@ -1005,6 +1027,184 @@ export function anchorsAlongLine(
     if (seen.has(id)) continue;
     seen.add(id);
     anchors.push(anchor);
+  }
+  return anchors;
+}
+
+/** Whether the closed segment `a → b` meets `rect` (Liang–Barsky). */
+function segmentIntersectsRect(a: Point, b: Point, rect: Rect): boolean {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  let enter = 0;
+  let exit = 1;
+  const edges: readonly [number, number][] = [
+    [-dx, a.x - rect.x],
+    [dx, rect.x + rect.w - a.x],
+    [-dy, a.y - rect.y],
+    [dy, rect.y + rect.h - a.y],
+  ];
+  for (const [p, q] of edges) {
+    if (p === 0) {
+      if (q < 0) return false;
+      continue;
+    }
+    const t = q / p;
+    if (p < 0) {
+      if (t > exit) return false;
+      if (t > enter) enter = t;
+    } else {
+      if (t < enter) return false;
+      if (t < exit) exit = t;
+    }
+  }
+  return true;
+}
+
+/**
+ * Every cell the real pointer segment crosses, in path order, including the
+ * start cell. This is the Amanatides–Woo voxel walk on the **actual** segment
+ * (not the line between cell centres): `anchorsAlongStroke` then clips that
+ * same segment against each cell's zone rects, so the two must agree.
+ *
+ * An exact corner crossing reports both edge-neighbour cells before the
+ * diagonal one, matching `anchorsAlongLine`'s choice to keep a diagonal stroke
+ * edge-connected instead of letting it touch only at corners.
+ */
+function cellsAlongSegment(
+  config: ProjectConfig,
+  from: Point,
+  to: Point,
+): Cell[] {
+  const base = cellSize(config);
+  const side = maxGridIndex(config.base) + 1;
+  const cap = side * side;
+  let column = Math.floor(from.x / base);
+  let row = Math.floor(from.y / base);
+  const endColumn = Math.floor(to.x / base);
+  const endRow = Math.floor(to.y / base);
+  const cells: Cell[] = [{ column, row }];
+  if (column === endColumn && row === endRow) return cells;
+
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const stepColumn = Math.sign(dx);
+  const stepRow = Math.sign(dy);
+  const deltaColumn = dx === 0 ? Infinity : Math.abs(base / dx);
+  const deltaRow = dy === 0 ? Infinity : Math.abs(base / dy);
+  let nextColumn =
+    dx === 0
+      ? Infinity
+      : ((column + (stepColumn > 0 ? 1 : 0)) * base - from.x) / dx;
+  let nextRow =
+    dy === 0
+      ? Infinity
+      : ((row + (stepRow > 0 ? 1 : 0)) * base - from.y) / dy;
+  // A point exactly on a gridline crosses it at t = 0, not before it.
+  if (nextColumn < 0) nextColumn = 0;
+  if (nextRow < 0) nextRow = 0;
+
+  while ((column !== endColumn || row !== endRow) && cells.length < cap) {
+    if (nextColumn < nextRow - 1e-12) {
+      column += stepColumn;
+      nextColumn += deltaColumn;
+      cells.push({ column, row });
+    } else if (nextRow < nextColumn - 1e-12) {
+      row += stepRow;
+      nextRow += deltaRow;
+      cells.push({ column, row });
+    } else {
+      // Exactly through the corner: the two edge-neighbours, then the
+      // diagonal cell. One step cannot be zero here — both axes move.
+      cells.push({ column: column + stepColumn, row });
+      cells.push({ column, row: row + stepRow });
+      column += stepColumn;
+      row += stepRow;
+      nextColumn += deltaColumn;
+      nextRow += deltaRow;
+      cells.push({ column, row });
+    }
+  }
+  return cells;
+}
+
+/**
+ * Every fragment the pointer swept over between two reported positions
+ * (docs/CANVAS.md §6, «Pen rules»).
+ *
+ * `anchorsAlongLine` answers *which cells* a move crossed and gives every one
+ * the target's zone. That is right for the line tool, whose in-between cells
+ * inherit the endpoint's fragment, but it makes the pen's fast strokes thinner
+ * than the same gesture drawn slowly: a vertical drag along the ink column
+ * paints only the ink squares and leaves the paper strips between them empty,
+ * while a slow drag over that path paints both fragments of each cell.
+ *
+ * This walk keeps the pointer's real segment. On the square grid it visits
+ * every cell the segment crosses and adds each of that cell's four fragments
+ * the segment actually passes through; on the circular grid it samples the
+ * segment and keeps the distinct anchors. The start cell is included, because
+ * a move can change zone without leaving its cell. On the square grid, a fast
+ * stroke therefore paints exactly the fragments a slow stroke over the same
+ * path would; the circular grid samples the path at quarter-cell resolution.
+ */
+export function anchorsAlongStroke(
+  config: ProjectConfig,
+  from: Point,
+  to: Point,
+): Anchor[] {
+  const start = clampToCanvas(from);
+  const end = clampToCanvas(to);
+  if (
+    !Number.isFinite(start.x) ||
+    !Number.isFinite(start.y) ||
+    !Number.isFinite(end.x) ||
+    !Number.isFinite(end.y)
+  ) {
+    return [];
+  }
+  const anchors: Anchor[] = [];
+  const seen = new Set<string>();
+  const add = (anchor: Anchor) => {
+    const key = anchorKey(anchor);
+    if (seen.has(key)) return;
+    seen.add(key);
+    anchors.push(anchor);
+  };
+
+  if (config.gridType === "circular") {
+    // A circular fragment is an annular sector, not a rect, so clipping would
+    // need the polar geometry: sample the path and let `pointToAnchor` resolve
+    // each step. A quarter cell keeps every meaningful fragment.
+    const base = cellSize(config);
+    const distance = Math.hypot(end.x - start.x, end.y - start.y);
+    const side = maxGridIndex(config.base) + 1;
+    const steps = Math.min(
+      side * side,
+      Math.max(1, Math.ceil(distance / (base * 0.25))),
+    );
+    for (let index = 0; index <= steps; index++) {
+      const t = index / steps;
+      add(
+        pointToAnchor(config, {
+          x: start.x + (end.x - start.x) * t,
+          y: start.y + (end.y - start.y) * t,
+        }),
+      );
+    }
+    return anchors;
+  }
+
+  for (const cell of cellsAlongSegment(config, start, end)) {
+    for (const zone of [0, 1, 2, 3] as const) {
+      if (
+        segmentIntersectsRect(
+          start,
+          end,
+          zoneRect(config, cell.column, cell.row, zone),
+        )
+      ) {
+        add({ column: cell.column, row: cell.row, zone });
+      }
+    }
   }
   return anchors;
 }

@@ -1,18 +1,15 @@
 "use client";
 
 /**
- * KufiCraft — shape palette (and the selection it acts on).
+ * KufiCraft — the drawing half of the sidebar, in three sections.
  *
- * One panel, five jobs: the palette feeds the next drawn tiles *and* reshapes
- * the current selection (docs/UI.md §Editor) — rotation cycles `r` in quarter
- * turns (`R` on the keyboard too), the rounding block sets the corners of
- * tiles, line bars and polyline turns, the stroke block sets the cap and join
- * of stroked items, and the border block sets the band width and colour around
- * the whole shape; picking a shape is the way back to the plain square, so the
- * panel carries no separate reset button. The stroke block is absent when no
- * target can take caps/joins: with a selection, unless it contains a line,
- * polyline or arc; without one, unless the line or arc tool is active (so not
- * for tiles, the pen, select, eraser or hand).
+ * `ShapePalette` feeds the next drawn tiles *and* reshapes the current
+ * selection (docs/UI.md §Editor) — rotation cycles `r` in quarter turns (`R`
+ * on the keyboard too). `SelectionActions` is the contextual block: it exists
+ * only while a selection is live, between the fill control and the style
+ * blocks. `ShapeStylePanel` owns the rest: the rounding block sets the corners
+ * of tiles, the stroke block sets the cap and join of stroked items, and the
+ * border block sets the band width and colour around the whole shape.
  *
  * Rounding, stroke ends/joins and the border work like the shape buttons: they
  * set the **draw style** (what the pen paints next) and, when a selection is
@@ -22,8 +19,13 @@
  * border, butt/miter). The rounding slider is a per-item fraction of the
  * shorter side, so the panel shows it as a percentage of the model's `0…0.5`.
  *
- * The selection actions are revealed by the selection itself: with nothing
- * selected there is no “التحديد” block and no disabled buttons.
+ * The corner map is hidden for the line and arc targets: a selection made only
+ * of lines/arcs, or the line/arc tool with nothing selected. The radius slider
+ * stays; only the corner map is conditional. The stroke block is absent unless
+ * a line, polyline or arc is selected (or the line/arc tool is active). The
+ * border applies to every item and is always shown. The selection actions are
+ * revealed by the selection itself: with nothing selected there is no
+ * “التحديد” block and no disabled buttons.
  */
 
 import {
@@ -171,38 +173,6 @@ const JOIN_LABELS: Record<StrokeJoin, string> = {
   bevel: MESSAGES.strokeJoinBevel,
 };
 
-export interface ShapePanelProps {
-  style: DrawStyle;
-  /** Whether the cap/join block can affect the current tool or selection. */
-  showStrokeStyle: boolean;
-  /** The ink colour, used by “تلوين التحديد”. */
-  inkColor: string;
-  /** Recent ink colours, offered by the border colour field. */
-  inkSwatches: readonly string[];
-  selectionCount: number;
-  selectShape: (shape: ShapeId) => void;
-  rotateShape: () => void;
-  /** Corner rounding of the next items (and of the selection, when there is one). */
-  setRounding: (rounding: ItemRounding) => void;
-  /** Live radius while the slider is dragged (style only, no write). */
-  previewRounding: (radius: number) => void;
-  /** Border of the next items (and of the selection). */
-  setBorder: (border: ItemBorder) => void;
-  /** Live width while the slider is dragged (style only, no write). */
-  previewBorderWidth: (width: number) => void;
-  /** End shape of the next stroked item (and of the selection). */
-  setStrokeCap: (cap: StrokeCap) => void;
-  /** Turn shape of the next stroked item (and of the selection). */
-  setStrokeJoin: (join: StrokeJoin) => void;
-  recolourSelection: (color: string) => void;
-  duplicateSelection: () => void;
-  deleteSelection: () => void;
-  /** Moves the selection in the render order. */
-  arrange: (action: ArrangeAction) => void;
-  /** Per-action no-op detection (disabled menu items). */
-  canArrange: (action: ArrangeAction) => boolean;
-}
-
 /** The arrange commands in Illustrator/Figma order; the keys come from the hint layer. */
 const ARRANGE_ITEMS = [
   {
@@ -227,46 +197,27 @@ const ARRANGE_ITEMS = [
   },
 ] as const;
 
-export function ShapePanel({
+export interface ShapePaletteProps {
+  style: DrawStyle;
+  selectShape: (shape: ShapeId) => void;
+  rotateShape: () => void;
+}
+
+/**
+ * The ten glyphs wrap like the colour swatches — side by side, never a rigid
+ * five-column grid — and the single rotation button stays under them.
+ */
+export function ShapePalette({
   style,
-  showStrokeStyle,
-  inkColor,
-  inkSwatches,
-  selectionCount,
   selectShape,
   rotateShape,
-  setRounding,
-  previewRounding,
-  setBorder,
-  previewBorderWidth,
-  setStrokeCap,
-  setStrokeJoin,
-  recolourSelection,
-  duplicateSelection,
-  deleteSelection,
-  arrange,
-  canArrange,
-}: ShapePanelProps) {
-  const { radius, corners } = style.rounding;
-  const { width, color } = style.border;
-  const swatches = useMemo(
-    () => mergedSwatches(inkSwatches, INK_SWATCHES),
-    [inkSwatches],
-  );
-
-  /** Percent of the shorter side — the slider's unit, and what it prints. */
-  const percent = Math.round(radius * 100);
-
-  const toggleCorner = (corner: number) => {
-    setRounding({ ...style.rounding, corners: corners ^ corner });
-  };
-
-  // The platform only names the primary modifier; the map accepts both.
+}: ShapePaletteProps) {
+  // The platform only names the primary modifier; the palette accepts both.
   const primary = usePrimaryModifier();
 
   return (
     <PanelSection title={MESSAGES.shapes}>
-      <div className="grid grid-cols-5 gap-1">
+      <div className="flex flex-wrap gap-1">
         {SHAPE_ORDER.map((shape) => {
           // The tenth glyph has no digit (only `1…9` are mapped), so its
           // tooltip names it without a key — the surface never promises a dead
@@ -315,9 +266,198 @@ export function ShapePanel({
           </Button>
         }
       />
+    </PanelSection>
+  );
+}
 
-      <div className="flex flex-col gap-2 border-t border-border/60 pt-2">
-        <p className="text-xs text-muted-foreground">{MESSAGES.rounding}</p>
+export interface SelectionActionsProps {
+  /** The ink colour, used by “تلوين بلون الحبر”. */
+  inkColor: string;
+  selectionCount: number;
+  recolourSelection: (color: string) => void;
+  duplicateSelection: () => void;
+  deleteSelection: () => void;
+  /** Moves the selection in the render order. */
+  arrange: (action: ArrangeAction) => void;
+  /** Per-action no-op detection (disabled menu items). */
+  canArrange: (action: ArrangeAction) => boolean;
+}
+
+/**
+ * The contextual block: it exists only while something is selected, and it
+ * sits between the fill control and the style blocks so the eye reaches the
+ * actions that belong to the selection before the next-shape style.
+ */
+export function SelectionActions({
+  inkColor,
+  selectionCount,
+  recolourSelection,
+  duplicateSelection,
+  deleteSelection,
+  arrange,
+  canArrange,
+}: SelectionActionsProps) {
+  const primary = usePrimaryModifier();
+
+  if (selectionCount === 0) return null;
+
+  return (
+    <PanelSection
+      title={`${MESSAGES.selection} · ${MESSAGES.selectedCount} ${formatCount(selectionCount)}`}
+    >
+      <div className="flex flex-wrap gap-1.5">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => recolourSelection(inkColor)}
+        >
+          <PaintBucket />
+          {MESSAGES.recolourSelection}
+        </Button>
+        <ShortcutTooltip
+          label={MESSAGES.duplicateSelection}
+          shortcut={{ kind: "duplicate" }}
+          trigger={
+            <Button
+              variant="outline"
+              size="sm"
+              aria-keyshortcuts={shortcutAriaLabel({ kind: "duplicate" }, primary)}
+              onClick={duplicateSelection}
+            >
+              <Copy />
+              {MESSAGES.duplicateSelection}
+            </Button>
+          }
+        />
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            disabled={
+              selectionCount === 0 ||
+              ARRANGE_ITEMS.every(({ action }) => !canArrange(action))
+            }
+            render={
+              <Button variant="outline" size="sm">
+                <Layers />
+                {MESSAGES.arrange}
+              </Button>
+            }
+          />
+          {/*
+            The vendored content defaults to `w-(--anchor-width)` — the
+            trigger is small, so the labels would wrap. Fit the rows instead,
+            bounded by the viewport (Base UI's `--available-width`).
+          */}
+          <DropdownMenuContent
+            align="start"
+            className="w-auto max-w-(--available-width)"
+          >
+            {/*
+              The row itself is the tooltip trigger: hovering or focusing an
+              enabled row reveals its key, while the row text stays key-free.
+              A disabled row does not advertise an action that cannot run.
+            */}
+            {ARRANGE_ITEMS.map(({ action, label, Icon }) => (
+              <ShortcutTooltip
+                key={action}
+                label={label}
+                shortcut={{ kind: "arrange", action }}
+                trigger={
+                  <DropdownMenuItem
+                    disabled={!canArrange(action)}
+                    aria-keyshortcuts={shortcutAriaLabel(
+                      { kind: "arrange", action },
+                      primary,
+                    )}
+                    onClick={() => arrange(action)}
+                  >
+                    <Icon />
+                    {label}
+                  </DropdownMenuItem>
+                }
+              />
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <ShortcutTooltip
+          label={MESSAGES.deleteSelection}
+          shortcut={{ kind: "delete" }}
+          trigger={
+            <Button
+              variant="outline"
+              size="sm"
+              aria-keyshortcuts={shortcutAriaLabel({ kind: "delete" }, primary)}
+              onClick={deleteSelection}
+            >
+              <Trash2 />
+              {MESSAGES.deleteSelection}
+            </Button>
+          }
+        />
+      </div>
+    </PanelSection>
+  );
+}
+
+export interface ShapeStylePanelProps {
+  style: DrawStyle;
+  /** Whether the 2×2 corner map can affect the current tool or selection. */
+  showRoundingCorners: boolean;
+  /** Whether the cap/join block can affect the current tool or selection. */
+  showStrokeStyle: boolean;
+  /** Recent ink colours, offered by the border colour field. */
+  inkSwatches: readonly string[];
+  /** Corner rounding of the next items (and of the selection, when there is one). */
+  setRounding: (rounding: ItemRounding) => void;
+  /** Live radius while the slider is dragged (style only, no write). */
+  previewRounding: (radius: number) => void;
+  /** Border of the next items (and of the selection). */
+  setBorder: (border: ItemBorder) => void;
+  /** Live width while the slider is dragged (style only, no write). */
+  previewBorderWidth: (width: number) => void;
+  /** End shape of the next stroked item (and of the selection). */
+  setStrokeCap: (cap: StrokeCap) => void;
+  /** Turn shape of the next stroked item (and of the selection). */
+  setStrokeJoin: (join: StrokeJoin) => void;
+}
+
+/**
+ * The style half of the drawing controls: rounding (the radius slider for
+ * every target, the corner map only where corners exist), stroke ends and
+ * joins (lines and arcs only), and the border (every item). The corner map
+ * and the stroke block drop out when the current target cannot take them, so
+ * a line or arc tool never offers a dead corner map and a tiles-only selection
+ * never offers caps. The radius slider stays; only the four corner toggles are
+ * conditional.
+ */
+export function ShapeStylePanel({
+  style,
+  showRoundingCorners,
+  showStrokeStyle,
+  inkSwatches,
+  setRounding,
+  previewRounding,
+  setBorder,
+  previewBorderWidth,
+  setStrokeCap,
+  setStrokeJoin,
+}: ShapeStylePanelProps) {
+  const { radius, corners } = style.rounding;
+  const { width, color } = style.border;
+  const swatches = useMemo(
+    () => mergedSwatches(inkSwatches, INK_SWATCHES),
+    [inkSwatches],
+  );
+
+  /** Percent of the shorter side — the slider's unit, and what it prints. */
+  const percent = Math.round(radius * 100);
+
+  const toggleCorner = (corner: number) => {
+    setRounding({ ...style.rounding, corners: corners ^ corner });
+  };
+
+  return (
+    <>
+      <PanelSection title={MESSAGES.rounding}>
         <SliderField
           label={MESSAGES.roundingRadius}
           value={percent}
@@ -326,54 +466,64 @@ export function ShapePanel({
           step={5}
           suffix="٪"
           onPreview={(value) => previewRounding(value / 100)}
-          onCommit={(value) => setRounding({ ...style.rounding, radius: value / 100 })}
+          onCommit={(value) =>
+            setRounding({ ...style.rounding, radius: value / 100 })
+          }
         />
-        {/* `dir="ltr"` keeps the 2×2 map physical: in RTL, grid line 1 is the
-            right edge, which would silently mirror the four corners. */}
-        <div className="grid w-fit grid-cols-2 gap-1" dir="ltr" role="group" aria-label={MESSAGES.roundingCorners}>
-          <GlyphToggle
-            pressed={(corners & CORNER_TOP_LEFT) !== 0}
-            label={MESSAGES.cornerTopLeft}
-            position="col-start-1 row-start-1"
-            onClick={() => toggleCorner(CORNER_TOP_LEFT)}
-          >
-            <CornerGlyph corner={CORNER_TOP_LEFT} />
-          </GlyphToggle>
-          <GlyphToggle
-            pressed={(corners & CORNER_TOP_RIGHT) !== 0}
-            label={MESSAGES.cornerTopRight}
-            position="col-start-2 row-start-1"
-            onClick={() => toggleCorner(CORNER_TOP_RIGHT)}
-          >
-            <CornerGlyph corner={CORNER_TOP_RIGHT} />
-          </GlyphToggle>
-          <GlyphToggle
-            pressed={(corners & CORNER_BOTTOM_LEFT) !== 0}
-            label={MESSAGES.cornerBottomLeft}
-            position="col-start-1 row-start-2"
-            onClick={() => toggleCorner(CORNER_BOTTOM_LEFT)}
-          >
-            <CornerGlyph corner={CORNER_BOTTOM_LEFT} />
-          </GlyphToggle>
-          <GlyphToggle
-            pressed={(corners & CORNER_BOTTOM_RIGHT) !== 0}
-            label={MESSAGES.cornerBottomRight}
-            position="col-start-2 row-start-2"
-            onClick={() => toggleCorner(CORNER_BOTTOM_RIGHT)}
-          >
-            <CornerGlyph corner={CORNER_BOTTOM_RIGHT} />
-          </GlyphToggle>
-        </div>
-        <p className="text-xs text-muted-foreground/80">{MESSAGES.roundingHint}</p>
-      </div>
+        {showRoundingCorners && (
+          <>
+            {/* `dir="ltr"` keeps the 2×2 map physical: in RTL, grid line 1 is
+                the right edge, which would silently mirror the four corners. */}
+            <div
+              className="mx-auto grid w-fit grid-cols-2 gap-1"
+              dir="ltr"
+              role="group"
+              aria-label={MESSAGES.roundingCorners}
+            >
+              <GlyphToggle
+                pressed={(corners & CORNER_TOP_LEFT) !== 0}
+                label={MESSAGES.cornerTopLeft}
+                position="col-start-1 row-start-1"
+                onClick={() => toggleCorner(CORNER_TOP_LEFT)}
+              >
+                <CornerGlyph corner={CORNER_TOP_LEFT} />
+              </GlyphToggle>
+              <GlyphToggle
+                pressed={(corners & CORNER_TOP_RIGHT) !== 0}
+                label={MESSAGES.cornerTopRight}
+                position="col-start-2 row-start-1"
+                onClick={() => toggleCorner(CORNER_TOP_RIGHT)}
+              >
+                <CornerGlyph corner={CORNER_TOP_RIGHT} />
+              </GlyphToggle>
+              <GlyphToggle
+                pressed={(corners & CORNER_BOTTOM_LEFT) !== 0}
+                label={MESSAGES.cornerBottomLeft}
+                position="col-start-1 row-start-2"
+                onClick={() => toggleCorner(CORNER_BOTTOM_LEFT)}
+              >
+                <CornerGlyph corner={CORNER_BOTTOM_LEFT} />
+              </GlyphToggle>
+              <GlyphToggle
+                pressed={(corners & CORNER_BOTTOM_RIGHT) !== 0}
+                label={MESSAGES.cornerBottomRight}
+                position="col-start-2 row-start-2"
+                onClick={() => toggleCorner(CORNER_BOTTOM_RIGHT)}
+              >
+                <CornerGlyph corner={CORNER_BOTTOM_RIGHT} />
+              </GlyphToggle>
+            </div>
+          </>
+        )}
+        <p className="text-xs text-muted-foreground/80">
+          {MESSAGES.roundingHint}
+        </p>
+      </PanelSection>
 
       {showStrokeStyle && (
-        <div className="flex flex-col gap-2 border-t border-border/60 pt-2">
-          <p className="text-xs text-muted-foreground">
-            {MESSAGES.strokeStyle}
-          </p>
+        <PanelSection title={MESSAGES.strokeStyle}>
           <div className="flex flex-col gap-1">
-            <span className="text-xs text-muted-foreground/80">
+            <span className="text-xs font-medium text-muted-foreground">
               {MESSAGES.strokeCap}
             </span>
             <div
@@ -400,7 +550,7 @@ export function ShapePanel({
             </div>
           </div>
           <div className="flex flex-col gap-1">
-            <span className="text-xs text-muted-foreground/80">
+            <span className="text-xs font-medium text-muted-foreground">
               {MESSAGES.strokeJoin}
             </span>
             <div
@@ -426,11 +576,10 @@ export function ShapePanel({
               ))}
             </div>
           </div>
-        </div>
+        </PanelSection>
       )}
 
-      <div className="flex flex-col gap-2 border-t border-border/60 pt-2">
-        <p className="text-xs text-muted-foreground">{MESSAGES.borders}</p>
+      <PanelSection title={MESSAGES.borders}>
         <SliderField
           label={MESSAGES.borderWidth}
           value={width}
@@ -448,105 +597,7 @@ export function ShapePanel({
           labelFor={(next) => swatchLabel(MESSAGES.borderColor, next)}
           hideLabel
         />
-      </div>
-
-      {selectionCount > 0 ? (
-        <div className="flex flex-col gap-2 border-t border-border/60 pt-2">
-          <p className="text-xs text-muted-foreground">
-            {`${MESSAGES.selection} · ${MESSAGES.selectedCount} ${formatCount(selectionCount)}`}
-          </p>
-          <div className="flex flex-wrap gap-1.5">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => recolourSelection(inkColor)}
-            >
-              <PaintBucket />
-              {MESSAGES.recolourSelection}
-            </Button>
-            <ShortcutTooltip
-              label={MESSAGES.duplicateSelection}
-              shortcut={{ kind: "duplicate" }}
-              trigger={
-                <Button
-                  variant="outline"
-                  size="sm"
-                  aria-keyshortcuts={shortcutAriaLabel({ kind: "duplicate" }, primary)}
-                  onClick={duplicateSelection}
-                >
-                  <Copy />
-                  {MESSAGES.duplicateSelection}
-                </Button>
-              }
-            />
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                disabled={
-                  selectionCount === 0 ||
-                  ARRANGE_ITEMS.every(({ action }) => !canArrange(action))
-                }
-                render={
-                  <Button variant="outline" size="sm">
-                    <Layers />
-                    {MESSAGES.arrange}
-                  </Button>
-                }
-              />
-              {/*
-                The vendored content defaults to `w-(--anchor-width)` — the
-                trigger is small, so the labels would wrap. Fit the rows
-                instead, bounded by the viewport (Base UI's `--available-width`).
-              */}
-              <DropdownMenuContent
-                align="start"
-                className="w-auto max-w-(--available-width)"
-              >
-                {/*
-                  The row itself is the tooltip trigger: hovering or focusing
-                  an enabled row reveals its key, while the row text stays
-                  key-free. A disabled row does not advertise an action that
-                  cannot run.
-                */}
-                {ARRANGE_ITEMS.map(({ action, label, Icon }) => (
-                  <ShortcutTooltip
-                    key={action}
-                    label={label}
-                    shortcut={{ kind: "arrange", action }}
-                    trigger={
-                      <DropdownMenuItem
-                        disabled={!canArrange(action)}
-                        aria-keyshortcuts={shortcutAriaLabel(
-                          { kind: "arrange", action },
-                          primary,
-                        )}
-                        onClick={() => arrange(action)}
-                      >
-                        <Icon />
-                        {label}
-                      </DropdownMenuItem>
-                    }
-                  />
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <ShortcutTooltip
-              label={MESSAGES.deleteSelection}
-              shortcut={{ kind: "delete" }}
-              trigger={
-                <Button
-                  variant="outline"
-                  size="sm"
-                  aria-keyshortcuts={shortcutAriaLabel({ kind: "delete" }, primary)}
-                  onClick={deleteSelection}
-                >
-                  <Trash2 />
-                  {MESSAGES.deleteSelection}
-                </Button>
-              }
-            />
-          </div>
-        </div>
-      ) : null}
-    </PanelSection>
+      </PanelSection>
+    </>
   );
 }

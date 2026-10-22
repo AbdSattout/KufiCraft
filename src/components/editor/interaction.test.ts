@@ -31,6 +31,7 @@ import {
   WHEEL_IDLE,
   anchorAt,
   anchorsAlongLine,
+  anchorsAlongStroke,
   arcBetween,
   cellLimits,
   centreScroll,
@@ -62,6 +63,7 @@ import {
   rectFromPoints,
   rectsIntersect,
   reshapeItems,
+  roundingCornersApplies,
   selectionFillColor,
   shiftSelection,
   strokeStyleApplies,
@@ -942,6 +944,55 @@ describe("strokeStyleApplies", () => {
   });
 });
 
+describe("roundingCornersApplies", () => {
+  const line = makeLine({ column: 0, row: 1 }, { column: 4, row: 1 });
+  const stroke = makeStroke(
+    [
+      { column: 0, row: 0 },
+      { column: 2, row: 2 },
+    ],
+    false,
+  );
+  const arc = makeArc({
+    from: { column: 0, row: 0 },
+    to: { column: 2, row: 0 },
+    direction: "clockwise",
+    size: "half",
+  });
+  const plain = tile(0, 0);
+
+  it("shows for the tile tools with nothing selected", () => {
+    for (const tool of ["pen", "select", "eraser", "hand"] as const) {
+      expect(roundingCornersApplies(tool, [], [])).toBe(true);
+    }
+  });
+
+  it("hides for the line and arc tools with nothing selected", () => {
+    expect(roundingCornersApplies("line", [], [])).toBe(false);
+    expect(roundingCornersApplies("arc", [], [])).toBe(false);
+  });
+
+  it("shows when the selection contains a tile", () => {
+    expect(roundingCornersApplies("select", [plain], [plain.key])).toBe(true);
+  });
+
+  it("hides for a lines-only selection even under the pen", () => {
+    for (const item of [line, stroke, arc]) {
+      expect(roundingCornersApplies("pen", [item], [item.key])).toBe(false);
+    }
+  });
+
+  it("shows for a mixed selection when any selected item is a tile", () => {
+    expect(
+      roundingCornersApplies("line", [plain, line], [plain.key, line.key]),
+    ).toBe(true);
+  });
+
+  it("hides a stale selection even under the pen", () => {
+    expect(roundingCornersApplies("pen", [plain], ["missing-item"])).toBe(false);
+  });
+});
+
 describe("selectionFillColor", () => {
   it("falls back to the project ink with nothing selected", () => {
     const red = tile(0, 0, 0, { color: "#ff0000" });
@@ -1261,6 +1312,94 @@ describe("anchorsAlongLine", () => {
     expect(runaway.length).toBeLessThanOrEqual(cap);
     expect(
       runaway.every((anchor) => Number.isFinite(anchor.column + anchor.row)),
+    ).toBe(true);
+  });
+});
+
+describe("anchorsAlongStroke", () => {
+  const cell = cellSize(square);
+  const ink = inkUnit(square);
+  const inkCentre = (column: number, row: number) => ({
+    x: column * cell + ink / 2,
+    y: row * cell + ink / 2,
+  });
+  const keys = (anchors: readonly Anchor[]) =>
+    anchors.map((anchor) => `${anchor.column}:${anchor.row}:${anchor.zone}`);
+
+  it("paints both fragments of a vertical fast drag, not only the ink", () => {
+    // A slow drag down the ink column crosses the ink square, then the y-space
+    // strip, of every cell. The fast drag must produce the same fragments:
+    // the last cell only reaches its ink half, so it has no y-space anchor.
+    expect(
+      keys(anchorsAlongStroke(square, inkCentre(1, 1), inkCentre(1, 5))),
+    ).toEqual([
+      "1:1:0",
+      "1:1:2",
+      "1:2:0",
+      "1:2:2",
+      "1:3:0",
+      "1:3:2",
+      "1:4:0",
+      "1:4:2",
+      "1:5:0",
+    ]);
+  });
+
+  it("paints both fragments of a horizontal fast drag", () => {
+    expect(
+      keys(anchorsAlongStroke(square, inkCentre(1, 2), inkCentre(4, 2))),
+    ).toEqual([
+      "1:2:0",
+      "1:2:1",
+      "2:2:0",
+      "2:2:1",
+      "3:2:0",
+      "3:2:1",
+      "4:2:0",
+    ]);
+  });
+
+  it("matches the union of a slow drag over the same path", () => {
+    // Off the fragment borders, so the sampling is unambiguous: forty tiny
+    // moves must paint exactly the fragments one reported jump paints.
+    const from = { x: 1.25 * cell, y: 1.25 * cell };
+    const to = { x: 1.25 * cell, y: 5.75 * cell };
+    const fast = new Set(keys(anchorsAlongStroke(square, from, to)));
+
+    const slow = new Set<string>();
+    let previous = from;
+    for (let index = 1; index <= 40; index++) {
+      const point = {
+        x: from.x,
+        y: from.y + ((to.y - from.y) * index) / 40,
+      };
+      for (const key of keys(anchorsAlongStroke(square, previous, point))) {
+        slow.add(key);
+      }
+      previous = point;
+    }
+
+    expect(fast).toEqual(slow);
+  });
+
+  it("includes the fragments of the start cell without leaving it", () => {
+    // A move from the ink square into the y-space strip of one cell changes
+    // the fragment but not the cell; the start cell is part of the walk.
+    expect(keys(anchorsAlongStroke(square, inkCentre(2, 2), {
+      x: 2 * cell + ink / 2,
+      y: 2 * cell + ink + (cell - ink) / 2,
+    }))).toEqual(["2:2:0", "2:2:2"]);
+  });
+
+  it("samples the circular grid and folds sectors", () => {
+    const anchors = anchorsAlongStroke(
+      circular12,
+      { x: 500, y: 500 },
+      { x: 540, y: 500 },
+    );
+    expect(anchors.length).toBeGreaterThan(1);
+    expect(
+      anchors.every((anchor) => Number.isFinite(anchor.column + anchor.row)),
     ).toBe(true);
   });
 });

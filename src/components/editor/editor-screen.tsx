@@ -45,8 +45,12 @@ import type { EditorController } from "./use-editor";
 import { CanvasStage } from "./canvas-stage";
 import { EditorTopBar } from "./editor-top-bar";
 import { ToolRail } from "./editor-tool-rail";
-import { ShapePanel } from "./editor-shape-panel";
-import { SettingsPanel } from "./editor-settings-panel";
+import {
+  ShapePalette,
+  SelectionActions,
+  ShapeStylePanel,
+} from "./editor-shape-panel";
+import { FillColourSection, SettingsPanel } from "./editor-settings-panel";
 
 const EMPTY_ITEMS: readonly CanvasItem[] = [];
 const RAIL_PLACEHOLDERS = [0, 1, 2, 3, 4, 5];
@@ -70,35 +74,44 @@ function resolveItems(
 function Panels({ editor }: { editor: EditorController }) {
   return (
     <>
-      {/* What you draw with, then the board it is drawn on. */}
-      <ShapePanel
+      {/* What you draw with, in reading order: shape → fill → the selection's
+          own actions → rounding/border style, then the board itself. */}
+      <ShapePalette
         style={editor.panelStyle}
-        showStrokeStyle={editor.showStrokeStyle}
-        inkColor={editor.config.ink}
-        inkSwatches={editor.inkSwatches}
-        selectionCount={editor.selection.length}
         selectShape={editor.selectShape}
         rotateShape={editor.rotateShape}
-        setRounding={editor.setRounding}
-        previewRounding={editor.previewRounding}
-        setBorder={editor.setBorder}
-        previewBorderWidth={editor.previewBorderWidth}
-        setStrokeCap={editor.setStrokeCap}
-        setStrokeJoin={editor.setStrokeJoin}
+      />
+      <FillColourSection
+        inkSwatches={editor.inkSwatches}
+        fillColor={editor.fillColor}
+        selectionCount={editor.selection.length}
+        setFillColor={editor.setFillColor}
+      />
+      <SelectionActions
+        inkColor={editor.config.ink}
+        selectionCount={editor.selection.length}
         recolourSelection={editor.recolourSelection}
         duplicateSelection={editor.duplicateSelection}
         deleteSelection={editor.deleteSelection}
         arrange={editor.arrange}
         canArrange={editor.canArrange}
       />
+      <ShapeStylePanel
+        style={editor.panelStyle}
+        showRoundingCorners={editor.showRoundingCorners}
+        showStrokeStyle={editor.showStrokeStyle}
+        inkSwatches={editor.inkSwatches}
+        setRounding={editor.setRounding}
+        previewRounding={editor.previewRounding}
+        setBorder={editor.setBorder}
+        previewBorderWidth={editor.previewBorderWidth}
+        setStrokeCap={editor.setStrokeCap}
+        setStrokeJoin={editor.setStrokeJoin}
+      />
       <Separator />
       <SettingsPanel
         config={editor.config}
-        inkSwatches={editor.inkSwatches}
         itemsCount={editor.items.length}
-        fillColor={editor.fillColor}
-        selectionCount={editor.selection.length}
-        setFillColor={editor.setFillColor}
         setShowGrid={editor.setShowGrid}
         patchConfig={editor.patchConfig}
         previewConfig={editor.previewConfig}

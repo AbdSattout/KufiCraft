@@ -3,13 +3,16 @@
 /**
  * KufiCraft — project settings panel.
  *
- * Ordered the way the sidebar reads: the two colours first (لون الحبر is the
- * pen's colour, so it sits right under the shape palette; لون الورقة is the
- * board's background), then the ink ratio as the five presets `1:1`…`1:5`
- * (live re-render), the cell size, the circular sector count (circular boards
- * only — it is the board's angular division), the grid-type switch (warned,
- * because existing items are re-interpreted), the board options, and finally
- * “مسح الكل” behind a confirm dialog.
+ * This is the **board** half of the sidebar, after the drawing controls: لون
+ * الورقة, then the ink ratio as the five presets `1:1`…`1:5` (live re-render),
+ * the cell size, the circular sector count (circular boards only — it is the
+ * board's angular division), the grid-type switch (warned, because existing
+ * items are re-interpreted), the board options, and finally “مسح الكل” behind
+ * a confirm dialog.
+ *
+ * The fill row (لون الحبر / لون التحديد) lives in `FillColourSection` because
+ * it belongs with the drawing controls, above the selection actions — not
+ * with the board settings.
  *
  * إظهار الشبكة is the one view guide in here: the construction grid follows
  * the *user* (it is a preference, drawn the same on every board), while every
@@ -59,17 +62,57 @@ function sectorAngleDegrees(sectors: number): number {
   return Math.round((360 / sectors) * 10) / 10;
 }
 
-export interface SettingsPanelProps {
-  config: ProjectConfig;
+export interface FillColourSectionProps {
   /** Recent ink colours, most-recent-first (shown ahead of the defaults). */
   inkSwatches: readonly string[];
-  itemsCount: number;
-  /** The reset/fallback fill: the first selected item's colour or the ink. */
+  /** The shown fill: the first selected item's colour, or the project ink. */
   fillColor: string;
-  /** Whether the panel's fill control is editing a selection. */
+  /** Whether the fill control is editing a selection. */
   selectionCount: number;
   /** Edits the selection's fill, or the project ink when nothing is selected. */
   setFillColor: (color: string) => void;
+}
+
+/**
+ * The one fill control: لون الحبر with nothing selected (the project ink *and*
+ * the pen's colour), لون التحديد with a selection (that selection only).
+ */
+export function FillColourSection({
+  inkSwatches,
+  fillColor,
+  selectionCount,
+  setFillColor,
+}: FillColourSectionProps) {
+  const swatches = useMemo(
+    () => mergedSwatches(inkSwatches, INK_SWATCHES),
+    [inkSwatches],
+  );
+  const editingSelection = selectionCount > 0;
+  const title = editingSelection
+    ? MESSAGES.selectionFillColor
+    : MESSAGES.inkColor;
+  const hint = editingSelection
+    ? MESSAGES.selectionFillColorHint
+    : MESSAGES.inkColorHint;
+
+  return (
+    <PanelSection title={title}>
+      <p className="text-xs text-muted-foreground/80">{hint}</p>
+      <ColourField
+        label={title}
+        value={fillColor}
+        colors={swatches}
+        onPick={setFillColor}
+        labelFor={(color) => swatchLabel(title, color)}
+        hideLabel
+      />
+    </PanelSection>
+  );
+}
+
+export interface SettingsPanelProps {
+  config: ProjectConfig;
+  itemsCount: number;
   /** Writes the grid guide to the user's preference (it is not document config). */
   setShowGrid: (show: boolean) => void;
   patchConfig: (patch: Partial<ProjectConfig>) => void;
@@ -107,7 +150,7 @@ function ToggleRow({
 
   return (
     <div className="flex items-center justify-between gap-3">
-      <Label htmlFor={id} className="text-sm text-muted-foreground">
+      <Label htmlFor={id} className="text-xs text-muted-foreground">
         {label}
       </Label>
       {shortcut ? (
@@ -121,11 +164,7 @@ function ToggleRow({
 
 export function SettingsPanel({
   config,
-  inkSwatches,
   itemsCount,
-  fillColor,
-  selectionCount,
-  setFillColor,
   setShowGrid,
   patchConfig,
   previewConfig,
@@ -133,18 +172,6 @@ export function SettingsPanel({
 }: SettingsPanelProps) {
   const [pendingGridType, setPendingGridType] = useState<GridType | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
-
-  const swatches = useMemo(
-    () => mergedSwatches(inkSwatches, INK_SWATCHES),
-    [inkSwatches],
-  );
-  const editingSelection = selectionCount > 0;
-  const fillTitle = editingSelection
-    ? MESSAGES.selectionFillColor
-    : MESSAGES.inkColor;
-  const fillHint = editingSelection
-    ? MESSAGES.selectionFillColorHint
-    : MESSAGES.inkColorHint;
 
   const requestGridType = (next: GridType) => {
     if (next === config.gridType) return;
@@ -159,18 +186,6 @@ export function SettingsPanel({
 
   return (
     <>
-      <PanelSection title={fillTitle}>
-        <p className="text-xs text-muted-foreground/80">{fillHint}</p>
-        <ColourField
-          label={fillTitle}
-          value={fillColor}
-          colors={swatches}
-          onPick={setFillColor}
-          labelFor={(color) => swatchLabel(fillTitle, color)}
-          hideLabel
-        />
-      </PanelSection>
-
       <PanelSection title={MESSAGES.paperColor}>
         <ColourField
           label={MESSAGES.paperColor}

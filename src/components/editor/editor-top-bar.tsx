@@ -87,6 +87,7 @@ function ProjectNameInput({ name, rename }: ProjectNameInputProps) {
           value={shown}
           aria-label={MESSAGES.renameLabel}
           spellCheck={false}
+          size={Math.min(Math.max(shown.length + 1, 6), 32)}
           onChange={(event) => setDraft(event.target.value)}
           onBlur={commit}
           onKeyDown={(event) => {
@@ -98,8 +99,8 @@ function ProjectNameInput({ name, rename }: ProjectNameInputProps) {
             }
           }}
           className={cn(
-            "h-8 min-w-0 flex-1 border-transparent bg-transparent px-2 font-heading text-sm shadow-none",
-            "hover:border-input/60 focus-visible:border-input md:max-w-72 md:text-base",
+            "h-8 w-auto! min-w-20 max-w-72 field-sizing-content border-transparent bg-transparent px-2 font-heading text-sm shadow-none",
+            "hover:border-input/60 focus-visible:border-input md:text-base",
           )}
         />
       }

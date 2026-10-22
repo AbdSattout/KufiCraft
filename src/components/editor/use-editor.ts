@@ -66,6 +66,7 @@ import {
   pruneSelection,
   recolourItems,
   reshapeItems,
+  roundingCornersApplies,
   selectionFillColor,
   strokeStyleApplies,
   styleForSelection,
@@ -145,6 +146,12 @@ export interface EditorController {
    * line/arc tool with nothing selected.
    */
   showStrokeStyle: boolean;
+  /**
+   * Whether the 2×2 rounding corner map is offered: with a selection, only
+   * when it contains a tile; with nothing selected, for every tool except
+   * line and arc. The radius slider is always shown.
+   */
+  showRoundingCorners: boolean;
   arc: ArcStyle;
   setArcDirection: (direction: ArcDirection) => void;
   setArcSize: (size: ArcSize) => void;
@@ -395,6 +402,17 @@ export function useEditor(
    */
   const showStrokeStyle = useMemo(
     () => strokeStyleApplies(tool, items, selection),
+    [items, selection, tool],
+  );
+
+  /**
+   * The corner map is a tile-corner control: a selection decides (any selected
+   * tile keeps it visible, lines/arcs alone hide it) and, with nothing
+   * selected, only the line and arc tools hide it. The radius slider stays
+   * visible for every target.
+   */
+  const showRoundingCorners = useMemo(
+    () => roundingCornersApplies(tool, items, selection),
     [items, selection, tool],
   );
 
@@ -1135,6 +1153,7 @@ export function useEditor(
     style,
     panelStyle,
     showStrokeStyle,
+    showRoundingCorners,
     arc,
     setArcDirection,
     setArcSize,

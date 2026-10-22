@@ -333,11 +333,11 @@ Every function is deterministic and side-effect free.
 ### Gesture → items
 
 * **`penItems(config, anchors, style)`** — the pen paints **the anchors of the
-  stroke**: the tool calls it with the in-flight anchor list, which grows by the
-  cells each pointer event crossed — a fast drag fills the cells between two
-  reported positions (`anchorsAlongLine`, see §6). Consecutive identical anchors
-  collapse, and a fragment is always a `tile` — the pen never merges a straight
-  run into a bar.
+  stroke**: the tool calls it with the in-flight anchor list, which grows by
+  every fragment the pointer swept — a fast drag fills the cells and fragments
+  between two reported positions (`anchorsAlongStroke`, see §6). Consecutive
+  identical anchors collapse, and a fragment is always a `tile` — the pen never
+  merges a straight run into a bar.
 * **`lineItems(config, points, closed, color, style?)`** — fragments are first
   class. A run whose points are all **fragment centres** follows the reference
   rules unchanged, per fragment: a run with **no diagonal segment** that spans
@@ -494,7 +494,7 @@ name. Adding a tool = one class + one registry line.
 | id | label | key | gesture |
 | --- | --- | --- | --- |
 | `select` | تحديد | `V` | click selects (shift toggles), drag on an item moves the selection (clamped to the grid; at 1:1 the pointer's zone toggles the moved fragments' zones), drag on empty space marquee-selects |
-| `pen` | قلم | `P` | press/drag colours the cells the pointer is moved over — one fragment per cell, and a fast drag fills the cells it flew over (`anchorsAlongLine`) |
+| `pen` | قلم | `P` | press/drag colours the fragments the pointer is moved over — every fragment it swept, and a fast drag fills all the fragments it flew over (`anchorsAlongStroke`), so speed never changes the stroke |
 | `line` | خط | `L` | **square grid only** (`creates: ["line"]`). Click sequence: click A, click B… commits an open run; click the last point again ends it, click the first one closes it. A drag also works (pointer-up ends the *drag*, not the run). Every click snaps to one of the nine anchors of the **fragment** under the cursor (ink or space), and the overlay's dot shows the point the next click would store; a run with no diagonal segment is squares (`straightLinesAsSquares`, default) or one bar |
 | `eraser` | ممحاة | `E` | click/drag removes whatever the pointer touches; a fast drag sweeps the cells it flew over (hidden items are never touched) |
 | `arc` | قوس | `A` | **square grid only** (`creates: ["arc"]`). Press-drag-release A→B, **or** click A then click B (clicking the start cell again cancels). Each endpoint snaps to one of the nine anchors of the **fragment** under the cursor (`arcPointAt`) and stores it whole — the centre included, since an absent anchor means the legacy spring point (§5); the armed start is the same dot as the hover, and the ghost always shows the arc the click commits |
@@ -519,21 +519,25 @@ name. Adding a tool = one class + one registry line.
 
 1. Every pointer position paints **the cell under the pointer** (its ink or
    space fragment, `anchorAt`) — the reference app's pen.
-2. **A fast drag is filled in.** The pointer reports one position per event and
-   can fly over whole cells, so the tool connects the cell under the pointer's
-   **live** anchor (`cursor`) to the new one with `anchorsAlongLine` — a
-   supercover walk of the segment between the two cell centres that advances
-   one cell per gridline crossed and reports **both** cells at an exact corner
-   crossing, so a diagonal stroke is edge-connected and never reads as dotted
-   at `ratio < 1`. There is no teleport rule and no maximum gap: a stroke is
-   the line between the positions the browser reported.
+2. **A fast drag is filled in, fragment for fragment.** The pointer reports one
+   position per event and can fly over whole cells, so the tool walks the
+   **real pointer segment** (`anchorsAlongStroke`): every cell the segment
+   crosses, and every fragment inside that cell the segment actually passes
+   through (square grid — clipping the segment against the four zone rects;
+   the circular grid samples the path and resolves each step). The start cell
+   is included, because a move can change fragment without leaving its cell.
+   A vertical drag down the ink column therefore paints the ink square *and*
+   the y-space strip of each cell, exactly as a slow drag over the same path
+   would, instead of carrying one endpoint zone across every skipped cell.
+   There is no teleport rule and no maximum gap: a stroke is the path between
+   the positions the browser reported.
 3. Anchors are deduplicated by identity (`anchorKey` = column/row/zone), so a
-   fragment is never listed twice in one stroke: the fill drops the cells the
-   stroke already carries instead of listing them again. De-dup decides what is
-   **stored**, never where the fill starts — a pointer that retraces its own
-   stroke stores nothing, yet the next segment still runs from where the
-   pointer is (retracing to a T's junction and turning up paints the turn, not
-   a chord from the bar's far end).
+   fragment is never listed twice in one stroke: the fill drops the fragments
+   the stroke already carries instead of listing them again. De-dup decides
+   what is **stored**, never where the fill starts — a pointer that retraces
+   its own stroke stores nothing, yet the next segment still runs from where
+   the pointer is (retracing to a T's junction and turning up paints the turn,
+   not a chord from the bar's far end).
 4. Nothing is previewed before the pointer touches the canvas (no hover ghost):
    the pen has no pending state, and the in-flight fragments are the real items.
 5. Nothing merges: a straight run stays a row of `tile` fragments, never a bar.
@@ -726,13 +730,16 @@ lives in `interaction.ts` and is covered by `interaction.test.ts`:
   most common tile (zone 0) into a solid cell and rewrites how every existing
   board looks; merging neighbouring fragments at render time makes drawing
   depend on neighbours and fills the gaps the kufi pattern is made of.
-* The pen's gap fill is **back** (`anchorsAlongLine`, reversing the round that
-  had removed it — a fast drag leaving scattered points was the live-testing
-  complaint). It is a supercover walk, not a Bresenham line: both cells are
-  reported at a corner crossing, there is no teleport rule and no maximum gap,
-  the in-between cells carry the target anchor's zone, and the walk is capped at
-  the grid's own cell count. The pen still never merges, and the eraser sweeps
-  with the same fill.
+* The pen's gap fill is **back and zone-aware** (`anchorsAlongStroke`, refining
+  the `anchorsAlongLine` walk after live testing showed a fast vertical drag
+  painting only the ink squares). It keeps the pointer's real segment and
+  clips it against each cell's fragment rects, so a fast drag paints every
+  fragment a slow drag over the same path would — ink square *and* paper strip
+  — instead of carrying one endpoint zone across the skipped cells. The
+  circular grid samples the segment the same way. There is still no teleport
+  rule and no maximum gap, and the walk is capped at the grid's own cell
+  count. The pen still never merges, and the eraser sweeps with its own
+  `anchorsAlongLine` fill.
 
 ## 8. Quick start for consumers
 

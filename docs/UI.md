@@ -221,50 +221,61 @@ Shape palette (applies to the next drawn tiles and to the current selection):
 square, circle, triangle, quarter circle, semicircle, pentagon, curve, hamza1,
 hamza2, comb — ten glyphs, each drawn by the same `KufiShape` that paints the
 canvas fragment, so the palette icon **respects the current rotation**
-(`tileIconPath`), with a single rotation button that cycles quarter turns
+(`tileIconPath`). The glyphs flow side by side and wrap to the next row like
+the colour swatches instead of locking into a fixed grid, with a single
+rotation button that cycles quarter turns
 (0° → 90° → 180° → 270° → 0°, `R` from the keyboard too). There is deliberately
 **no “إعادة الشكل” button**: the cycle comes back around, and the palette
 re-selects a shape, so a reset only ever saved a click. The style itself is the
 user's, not the board's — see *Settings persistence*. With a selection, a style
 edit is a one-off item patch: the draw style (and the prefs written from it)
 changes only when nothing is selected, so a selected tile's radius, border,
-cap or join never becomes the next shape's default. With something selected the
-same section reveals the selection actions («التحديد»: recolour with the ink
-colour, duplicate, delete) — with nothing selected they are absent, not
-disabled.
+cap or join never becomes the next shape's default. With something selected a
+separate **التحديد** block appears between the fill row and the style blocks
+(recolour with the ink colour, duplicate, delete) — with nothing selected it is
+absent, not disabled.
 
-The style blocks under the palette are rounding, stroke ends/joins and borders.
-Rounding is a slider — a per-item fraction of the shorter side, printed as a
-percentage — plus a physical 2×2 corner map: the four corners toggle
-independently, so a tile, bar or turn can be rounded on one side alone. The map
-is laid out `dir="ltr"` on purpose (in RTL the first grid column is the right
-edge, which would silently mirror which corner a button names); the glyphs are
-the item's own box, so each button names the corner it actually touches. The
-stroke block is shown only when the target can take caps/joins: with nothing
-selected only for the line or arc tool, and with a selection whenever it
-contains a line, polyline or arc (a mixed selection qualifies; tiles ignore the
-controls). It is absent for a tiles-only selection and for the pen, select,
-eraser and hand. When shown, it has two three-button rows — نهاية الخط
-(`مسطّحة`, `دائرية`, `مربّعة`) and وصلة الخط (`حادّة`, `دائرية`, `مشطوفة`) — for
-the next diagonal line, polyline or arc and for any stroked item in the
-selection. The defaults are `مسطّحة` and `حادّة`; a border on the same item
-inherits both. The border is painted **outside** the shape — a band whose
-visible width is the slider value, so it never eats into the ink — and its
-block has only that width slider (`0` = no border) and a colour field; the
-width is the switch: raising it above `0` adds the border, and a new border
-starts black until the user picks another colour.
+The style blocks under the selection are rounding, stroke ends/joins and
+borders. Rounding is a slider — a per-item fraction of the shorter side,
+printed as a percentage — plus a physical 2×2 corner map, centred under the
+slider: the four corners toggle independently, so a tile, bar or turn can be
+rounded on one side alone. The map is laid out `dir="ltr"` on purpose (in RTL
+the first grid column is the right edge, which would silently mirror which
+corner a button names); the glyphs are the item's own box, so each button names
+the corner it actually touches. The radius slider is always shown; only the
+2×2 corner map depends on the target: it is hidden for the line and arc tools
+with nothing selected, and for a selection that contains no tile at all (a
+mixed selection keeps it). It is present for the pen, select, eraser and hand
+with nothing selected. The stroke block is shown only when the target can take
+caps/joins: with nothing selected only for the line or arc tool, and with a
+selection whenever it contains a line, polyline or arc (a mixed selection
+qualifies; tiles ignore the controls). It is absent for a tiles-only selection
+and for the pen, select, eraser and hand. When shown, it has two three-button
+rows — نهاية الخط (`مسطّحة`, `دائرية`, `مربّعة`) and وصلة الخط (`حادّة`,
+`دائرية`, `مشطوفة`) — for the next diagonal line, polyline or arc and for any
+stroked item in the selection. The defaults are `مسطّحة` and `حادّة`; a border
+on the same item inherits both. The border applies to every item type and is
+always shown. It is painted **outside** the shape — a band whose visible width
+is the slider value, so it never eats into the ink — and its block has only
+that width slider (`0` = no border) and a colour field; the width is the
+switch: raising it above `0` adds the border, and a new border starts black
+until the user picks another colour.
 
-Sidebar, top to bottom: الأشكال (palette + selection), the fill row (لون الحبر
-with nothing selected, لون التحديد with a selection), لون الورقة, then the
-board — نسبة الحبر as the five presets `1:1`…`1:5` (live re-render; the
-`1:1` hint explains that ink and space are equal there, and every preset shows
-the inner edges of its ink squares), حجم الخلية (`base`), قطاعات الدائرة
-(circular boards only: the angular division, its caption reading out the
-resulting sector angle — ٣٦ قطاعًا is ١٠°), نوع الشبكة (square/circular —
-switching warns that existing items may look different, and that lines and arcs
-are hidden on a circular board while staying in the drawing; the hint explains
-what each type is), خيارات اللوحة (إظهار الشبكة and الخط المستقيم مربّعات) — and
-مسح الكل at the end (confirm).
+Sidebar, top to bottom: الأشكال (palette + rotation), the fill row (لون الحبر
+with nothing selected, لون التحديد with a selection), التحديد (only while
+something is selected), الاستدارة, أطراف الخط (only for a line/polyline/arc
+target), الحدود, then the board — لون الورقة, نسبة الحبر as the five presets
+`1:1`…`1:5` (live re-render; the `1:1` hint explains that ink and space are
+equal there, and every preset shows the inner edges of its ink squares), حجم
+الخلية (`base`), قطاعات الدائرة (circular boards only: the angular division, its
+caption reading out the resulting sector angle — ٣٦ قطاعًا is ١٠°), نوع الشبكة
+(square/circular — switching warns that existing items may look different, and
+that lines and arcs are hidden on a circular board while staying in the
+drawing; the hint explains what each type is), خيارات اللوحة (إظهار الشبكة and
+تقطيع الخطوط) — and مسح الكل at the end (confirm). Section titles are 12 px
+normal weight in the heading face and foreground colour; control labels use
+the sans face and muted colour below them, so rounding reads as a section and
+نصف قطر الزاوية as its control, never the other way round.
 
 قطاعات الدائرة is the document's own setting, not a preference: it is the
 circular board's angular division (default 36 sectors of 10°, the historical
@@ -279,13 +290,14 @@ every board, remembered in `kuficraft.editor-prefs.v2`. It is never part of an
 export, and the document's own `config.showGrid` is tolerated but no longer
 rendered (docs/FORMAT.md).
 
-In that same خيارات اللوحة section, **الخط المستقيم مربّعات** is the line
-tool's shape: on (the default) it draws a run with no diagonal segment as one
-square per cell — the reference app's straight line; off, that run is a single
-solid `line` bar. It never affects what is already drawn.
+In that same خيارات اللوحة section, **تقطيع الخطوط** is the line tool's shape:
+on (the default) it draws a run with no diagonal segment as one square per cell
+— the reference app's cut-up straight line; off, that run is a single solid
+`line` bar. It never affects what is already drawn.
 
-There is exactly **one** fill control above لون الورقة. With nothing selected
-it is **لون الحبر**: the project's ink *and* the pen's colour. With a selection
+There is exactly **one** fill control, in the drawing half of the sidebar above
+the style and board sections. With nothing selected it is **لون الحبر**: the
+project's ink *and* the pen's colour. With a selection
 it becomes **لون التحديد**: it shows the first selected item's own colour (or
 the project ink when that item has no override) and picking a colour recolours
 only the selection — one undo step, while the project ink and the draw prefs
@@ -330,9 +342,9 @@ line it draws between the **user** and the **board**:
 * `kuficraft.last-config.v2` — the last committed project config, used as the
   default in the dashboard’s «لوحة جديدة» dialog and for new projects. The
   artwork settings — ink ratio, cell size, grid type, circular sector count, ink
-  and paper colour, the straight-lines-as-squares flag — are remembered here
-  rather than in the prefs, because they belong to the project and stay the open
-  project's while it is open (`config` is authoritative for rendering).
+  and paper colour, the تقطيع الخطوط flag — are remembered here rather than in
+  the prefs, because they belong to the project and stay the open project's
+  while it is open (`config` is authoritative for rendering).
 * The grid guide is the one **view** setting in the prefs: the editor draws the
   canvas from the preference even when a document carries its own
   `config.showGrid`. That document field is still written, exported and

@@ -134,6 +134,15 @@ function expectErase(state: ToolState): Extract<ToolState, { kind: "erase" }> {
   return state;
 }
 
+/** The unique cells of a pen run, in paint order — zones filtered out. */
+function paintedCells(
+  anchors: ReadonlyArray<{ column: number; row: number }>,
+): string[] {
+  return [
+    ...new Set(anchors.map((anchor) => `${anchor.column}:${anchor.row}`)),
+  ];
+}
+
 /* ------------------------------------------------------------------ */
 /* Pen                                                                 */
 /* ------------------------------------------------------------------ */
@@ -144,12 +153,18 @@ describe("PenTool", () => {
     const start = beginTool("pen", ctx, NO_STATE, input(pointOf(1, 1)));
     const moved = moveTool("pen", ctx, start.state, input(pointOf(5, 1)));
     // One pointer event jumped four cells; the stroke is the whole run
-    // (docs/CANVAS.md §Pen), not just the two reported positions.
+    // (docs/CANVAS.md §Pen), not just the two reported positions. The pointer
+    // also swept the x-space strip of each crossed cell, so both fragments are
+    // painted — the same fragments a slow drag would have painted.
     expect(expectPen(moved.state).anchors).toEqual([
       { column: 1, row: 1, zone: 0 },
+      { column: 1, row: 1, zone: 1 },
       { column: 2, row: 1, zone: 0 },
+      { column: 2, row: 1, zone: 1 },
       { column: 3, row: 1, zone: 0 },
+      { column: 3, row: 1, zone: 1 },
       { column: 4, row: 1, zone: 0 },
+      { column: 4, row: 1, zone: 1 },
       { column: 5, row: 1, zone: 0 },
     ]);
   });
@@ -160,9 +175,7 @@ describe("PenTool", () => {
     state = moveTool("pen", ctx, state, input(pointOf(5, 1))).state;
     state = moveTool("pen", ctx, state, input(pointOf(5, 5))).state;
 
-    expect(
-      expectPen(state).anchors.map((anchor) => `${anchor.column}:${anchor.row}`),
-    ).toEqual([
+    expect(paintedCells(expectPen(state).anchors)).toEqual([
       "1:1",
       "2:1",
       "3:1",
@@ -198,11 +211,16 @@ describe("PenTool", () => {
     state = moveTool("pen", ctx, state, input(pointOf(3, 3))).state;
     state = moveTool("pen", ctx, state, input(pointOf(3, 1))).state;
 
-    expect(
-      expectPen(state).anchors.map(
-        (anchor) => `${anchor.column}:${anchor.row}`,
-      ),
-    ).toEqual(["1:4", "2:4", "3:4", "4:4", "5:4", "3:3", "3:2", "3:1"]);
+    expect(paintedCells(expectPen(state).anchors)).toEqual([
+      "1:4",
+      "2:4",
+      "3:4",
+      "4:4",
+      "5:4",
+      "3:3",
+      "3:2",
+      "3:1",
+    ]);
   });
 
   it("stores nothing when the pointer retraces the stroke", () => {
@@ -217,11 +235,14 @@ describe("PenTool", () => {
     expect(expectPen(state).anchors).toEqual(painted);
     // … and the next fresh cell is still painted from where the pointer is.
     state = moveTool("pen", ctx, state, input(pointOf(1, 4))).state;
-    expect(
-      expectPen(state).anchors.map(
-        (anchor) => `${anchor.column}:${anchor.row}`,
-      ),
-    ).toEqual(["1:5", "2:5", "3:5", "4:5", "5:5", "1:4"]);
+    expect(paintedCells(expectPen(state).anchors)).toEqual([
+      "1:5",
+      "2:5",
+      "3:5",
+      "4:5",
+      "5:5",
+      "1:4",
+    ]);
   });
 
   it("connects the clamped cell when the pointer leaves the board, not the tail", () => {
@@ -238,11 +259,7 @@ describe("PenTool", () => {
     state = moveTool("pen", ctx, state, input({ x: -50, y: -50 })).state;
     state = moveTool("pen", ctx, state, input(pointOf(2, 0))).state;
 
-    expect(
-      expectPen(state).anchors.map(
-        (anchor) => `${anchor.column}:${anchor.row}`,
-      ),
-    ).toEqual([
+    expect(paintedCells(expectPen(state).anchors)).toEqual([
       "2:4",
       "3:4",
       "4:4",
@@ -275,9 +292,13 @@ describe("PenTool", () => {
 
     expect(out.state).toBe(NO_STATE);
     expect(out.commit?.label).toBe("رسم");
-    // Three fragments — the run the pointer swept, never merged into a bar.
-    expect(out.commit?.items).toHaveLength(3);
+    // Three swept cells become five fragments: the ink square and the x-space
+    // strip of the first two, then the ink square of the last — never merged
+    // into a bar.
+    expect(out.commit?.items).toHaveLength(5);
     expect(out.commit?.items.map((item) => item.type)).toEqual([
+      "tile",
+      "tile",
       "tile",
       "tile",
       "tile",
@@ -292,10 +313,15 @@ describe("PenTool", () => {
 
     expect(out.commit?.items.map((item) => item.key)).toEqual([
       tileKey(2, 2, 0),
+      tileKey(2, 2, 1),
       tileKey(3, 2, 0),
+      tileKey(3, 2, 1),
       tileKey(4, 2, 0),
+      tileKey(4, 2, 1),
       tileKey(5, 2, 0),
+      tileKey(5, 2, 1),
       tileKey(6, 2, 0),
+      tileKey(6, 2, 1),
       tileKey(7, 2, 0),
     ]);
   });
