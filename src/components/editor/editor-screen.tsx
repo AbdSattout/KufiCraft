@@ -75,12 +75,16 @@ function Panels({ editor }: { editor: EditorController }) {
   return (
     <>
       {/* What you draw with, in reading order: shape → fill → the selection's
-          own actions → rounding/border style, then the board itself. */}
-      <ShapePalette
-        style={editor.panelStyle}
-        selectShape={editor.selectShape}
-        rotateShape={editor.rotateShape}
-      />
+          own actions → rounding/border style, then the board itself. The shape
+          palette is tile-only, so the line/arc targets hide the whole
+          section (shape buttons and rotation together). */}
+      {editor.showShapePalette ? (
+        <ShapePalette
+          style={editor.panelStyle}
+          selectShape={editor.selectShape}
+          rotateShape={editor.rotateShape}
+        />
+      ) : null}
       <FillColourSection
         inkSwatches={editor.inkSwatches}
         fillColor={editor.fillColor}
@@ -99,6 +103,7 @@ function Panels({ editor }: { editor: EditorController }) {
       <ShapeStylePanel
         style={editor.panelStyle}
         showRoundingCorners={editor.showRoundingCorners}
+        showBorderSides={editor.showBorderSides}
         showStrokeStyle={editor.showStrokeStyle}
         inkSwatches={editor.inkSwatches}
         setRounding={editor.setRounding}

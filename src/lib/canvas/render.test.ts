@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  BORDER_RIGHT,
+  BORDER_TOP,
   CORNER_ALL,
   DEFAULT_PROJECT_CONFIG,
   MAX_THUMBNAIL_LENGTH,
@@ -16,7 +18,7 @@ import type {
   Zone,
 } from "@/lib/canvas/model";
 import { renderSvg, renderThumbnail } from "@/lib/canvas/render";
-import { inkUnit } from "@/lib/canvas/geometry";
+import { inkUnit, zoneRect } from "@/lib/canvas/geometry";
 
 /* ------------------------------------------------------------------ */
 /* a tiny strict XML reader (node has no DOMParser)                    */
@@ -298,6 +300,18 @@ describe("style in the SVG renderer", () => {
     zone: 0,
     border: { width: 3, color: "#ff0000" },
   };
+  const CLIPPED: CanvasItem = {
+    type: "tile",
+    key: tileKey(1, 2, 0),
+    column: 1,
+    row: 2,
+    zone: 0,
+    border: {
+      width: 3,
+      color: "#ff0000",
+      sides: BORDER_TOP | BORDER_RIGHT,
+    },
+  };
 
   it("renders a tile with and without rounding", () => {
     const config = makeConfig();
@@ -332,6 +346,114 @@ describe("style in the SVG renderer", () => {
     expect(ink.attrs.fill).toBe("#123456");
     expect(ink.attrs.transform).toBeUndefined();
     expect(ink.attrs.stroke).toBeUndefined();
+  });
+
+  it("clips a partial tile border to its side bands", () => {
+    const config = makeConfig({ ink: "#123456" });
+    const root = rootOf(renderSvg(config, [CLIPPED]));
+
+    const clipPaths = find(root, "clipPath");
+    expect(clipPaths).toHaveLength(1);
+    expect(clipPaths[0].attrs.id).toMatch(/^kc-border-0-[0-9a-z]+$/);
+    expect(clipPaths[0].attrs.clipPathUnits).toBe("userSpaceOnUse");
+
+    // The band is the border width (3): each rect starts one band outside the
+    // box and stops on its edge, so the inner half of the 2 × 3 stroke is cut.
+    const bounds = zoneRect(config, 1, 2, 0);
+    // The renderer rounds every emitted number to three decimals.
+    const round3 = (value: number) => Math.round(value * 1000) / 1000;
+    const rects = find(clipPaths[0], "rect").map((rect) => ({
+      x: Number(rect.attrs.x),
+      y: Number(rect.attrs.y),
+      w: Number(rect.attrs.width),
+      h: Number(rect.attrs.height),
+    }));
+    expect(rects).toEqual([
+      {
+        x: round3(bounds.x - 3),
+        y: round3(bounds.y - 3),
+        w: round3(bounds.w + 6),
+        h: 3,
+      },
+      {
+        x: round3(bounds.x + bounds.w),
+        y: round3(bounds.y - 3),
+        w: 3,
+        h: round3(bounds.h + 6),
+      },
+    ]);
+
+    // Only the border path is clipped; the ink keeps the whole tile.
+    const paths = find(root, "path");
+    expect(paths[0].attrs["clip-path"]).toBe(
+      `url(#${clipPaths[0].attrs.id})`,
+    );
+    expect(paths[0].attrs["stroke-width"]).toBe("6");
+    expect(paths[1].attrs["clip-path"]).toBeUndefined();
+    expect(paths[1].attrs.fill).toBe("#123456");
+  });
+
+  it("gives every clipped item its own deterministic clip id", () => {
+    const first: CanvasItem = {
+      ...CLIPPED,
+      key: tileKey(1, 2, 0),
+    };
+    const second: CanvasItem = {
+      ...CLIPPED,
+      key: tileKey(4, 5, 0),
+      column: 4,
+      row: 5,
+      border: { width: 2, color: "#00ff00", sides: BORDER_TOP },
+    };
+    const source = renderSvg(makeConfig(), [TILE, first, second]);
+    const root = rootOf(source);
+    const ids = find(root, "clipPath").map((clip) => clip.attrs.id);
+    expect(ids[0]).toMatch(/^kc-border-1-[0-9a-z]+$/);
+    expect(ids[1]).toMatch(/^kc-border-2-[0-9a-z]+$/);
+    expect(ids[0]).not.toBe(ids[1]);
+    const clipped = find(root, "path").filter(
+      (path) => path.attrs["clip-path"] !== undefined,
+    );
+    expect(clipped.map((path) => path.attrs["clip-path"])).toEqual([
+      `url(#${ids[0]})`,
+      `url(#${ids[1]})`,
+    ]);
+    // The id is content-addressed: the same document renders the same ids,
+    // and a different band or side mask changes them (two inlined thumbnails
+    // therefore collide only when their clip geometry is identical).
+    expect(renderSvg(makeConfig(), [TILE, first, second])).toBe(source);
+    const changed = rootOf(
+      renderSvg(makeConfig(), [
+        TILE,
+        { ...first, border: { width: 2, color: "#ff0000", sides: BORDER_TOP } },
+        second,
+      ]),
+    );
+    expect(find(changed, "clipPath")[0].attrs.id).not.toBe(ids[0]);
+  });
+
+  it("emits no defs and no clip for an all-sides border", () => {
+    const source = renderSvg(makeConfig(), [BORDERED]);
+    expect(source).not.toContain("clipPath");
+    expect(source).not.toContain("clip-path");
+    const paths = find(rootOf(source), "path");
+    // Byte-for-byte the pre-sides rendering: the border stroke and the ink.
+    expect(paths).toHaveLength(2);
+    expect(paths[0].attrs.stroke).toBe("#ff0000");
+    expect(paths[0].attrs["stroke-width"]).toBe("6");
+  });
+
+  it("keeps the clip in thumbnails, under the length limit", () => {
+    const config = makeConfig();
+    const source = renderThumbnail(config, [CLIPPED]);
+    expect(source.length).toBeLessThanOrEqual(MAX_THUMBNAIL_LENGTH);
+    const root = rootOf(source);
+    const [clipPath] = find(root, "clipPath");
+    expect(clipPath.attrs.id).toMatch(/^kc-border-0-[0-9a-z]+$/);
+    expect(clipPath.attrs.clipPathUnits).toBe("userSpaceOnUse");
+    expect(find(clipPath, "rect")).toHaveLength(2);
+    const [outline] = find(root, "path");
+    expect(outline.attrs["clip-path"]).toBe(`url(#${clipPath.attrs.id})`);
   });
 
   it("widens a stroked item's border by the band on each side", () => {

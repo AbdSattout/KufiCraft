@@ -247,8 +247,21 @@ export const CORNER_ALL =
 export const MAX_ROUNDING_RADIUS = 0.5;
 
 /**
+ * Side bits of a border mask — the sides of the item's box as seen on screen.
+ * Absent means all four sides, so a pre-sides border paints exactly as it did
+ * before the mask existed. `BORDER_ALL` is the canonical "whole border" mask
+ * and is never stored.
+ */
+export const BORDER_TOP = 1;
+export const BORDER_RIGHT = 2;
+export const BORDER_BOTTOM = 4;
+export const BORDER_LEFT = 8;
+export const BORDER_ALL =
+  BORDER_TOP | BORDER_RIGHT | BORDER_BOTTOM | BORDER_LEFT;
+
+/**
  * Border band width in viewBox units. The width is the switch: `0` means no
- * border, anything above it outlines the whole shape on every side.
+ * border, anything above it paints the selected sides (all four by default).
  */
 export const MIN_BORDER_WIDTH = 0;
 export const MAX_BORDER_WIDTH = 12;
@@ -287,6 +300,12 @@ export function clampCornerMask(value: number): number {
   return Math.trunc(value) & CORNER_ALL;
 }
 
+/** A side mask with only the four real sides set (unknown bits dropped). */
+export function clampBorderSides(value: number): number {
+  if (!Number.isFinite(value)) return BORDER_ALL;
+  return Math.trunc(value) & BORDER_ALL;
+}
+
 /** NaN-safe clamp of a border width: `[0, MAX_BORDER_WIDTH]`. */
 export function clampBorderWidth(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_BORDER_WIDTH;
@@ -307,18 +326,37 @@ export function sanitizeRounding(
 }
 
 /**
- * Normalises a stored border: the width is clamped and an empty colour falls
- * back to black. Returns `undefined` when the width is zero (or broken) — the
+ * Normalises a stored border: the width is clamped, the side mask is masked to
+ * the four real sides and an empty colour falls back to black. Returns
+ * `undefined` when the width is zero (or broken) or no side is on — the
  * **absent** state, which renders exactly like an item without a border.
+ * All four sides are the default and are omitted, so width/colour-only borders
+ * from before the mask existed round-trip byte-stably; only a subset is stored.
  */
 export function sanitizeBorder(border: ItemBorder): ItemBorder | undefined {
   const width = clampBorderWidth(border.width);
-  if (width <= 0) return undefined;
+  const sides =
+    border.sides === undefined ? BORDER_ALL : clampBorderSides(border.sides);
+  if (width <= 0 || sides === 0) return undefined;
   const color =
     typeof border.color === "string" && border.color.length > 0
       ? border.color.slice(0, MAX_COLOR_LENGTH)
       : DEFAULT_BORDER_COLOR;
-  return { width, color };
+  const next: ItemBorder = { width, color };
+  if (sides !== BORDER_ALL) next.sides = sides;
+  return next;
+}
+
+/**
+ * The whole-border form of a stored border. Sides are meaningful for tiles
+ * only (the editor hides the side map for line/arc targets), so every other
+ * item type drops the mask before storing its border. An absent mask is
+ * already whole and keeps the object identity.
+ */
+export function wholeBorder(border: ItemBorder): ItemBorder {
+  return border.sides === undefined
+    ? border
+    : { width: border.width, color: border.color };
 }
 
 /** A stored stroke cap, falling back to the flush default when unrecognised. */
@@ -453,15 +491,17 @@ export interface ItemRounding {
 }
 
 /**
- * A border drawn around the item's whole shape, as one stroke of the item's
- * own path: `width` is the visible band in viewBox units on each side (`0`
- * means no border), and `color` is the border colour. The same field works for
- * every item type without filters: a stroke is widened, a fill is outlined
- * before it is painted.
+ * A border drawn around the item's shape: `width` is the visible band in
+ * viewBox units on each painted side (`0` means no border), `color` is the
+ * border colour, and the optional `sides` mask selects which sides of the box
+ * paint (`BORDER_*` bits). Absent `sides` means all four — exactly the border
+ * of a document written before the mask existed. The mask belongs to tiles;
+ * line, polyline and arc borders are always whole.
  */
 export interface ItemBorder {
   width: number;
   color: string;
+  sides?: number;
 }
 
 /** The draw style's border before the user raises its width: off, black. */
@@ -992,7 +1032,11 @@ function roundingField(rounding: ItemRounding | undefined): string {
 /** Border as one signature field (`""` when there is none). */
 function borderField(border: ItemBorder | undefined): string {
   if (border === undefined) return "";
-  return `b${border.width}:${border.color}`;
+  const sides =
+    border.sides === undefined ? BORDER_ALL : clampBorderSides(border.sides);
+  // A whole border keeps the pre-sides signature; only a subset adds a field.
+  const mask = sides === BORDER_ALL ? "" : `:${sides}`;
+  return `b${border.width}:${border.color}${mask}`;
 }
 
 /** Stroke ends and joins as one signature field (`""` at their defaults). */
@@ -1085,6 +1129,8 @@ export const roundingValidator = v.object({
 export const borderValidator = v.object({
   width: v.number(),
   color: v.string(),
+  /** Optional side mask; absent means all four sides (a whole border). */
+  sides: v.optional(v.number()),
 });
 
 /**

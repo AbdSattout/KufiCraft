@@ -10,6 +10,10 @@ import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
 import {
+  BORDER_ALL,
+  BORDER_LEFT,
+  BORDER_RIGHT,
+  BORDER_TOP,
   CIRCULAR_SECTORS,
   CORNER_ALL,
   DEFAULT_PROJECT_CONFIG,
@@ -1731,6 +1735,80 @@ describe("item sanitisation", () => {
       rounding: { radius: 0.2, corners: CORNER_ALL },
       border: { width: 3, color: "#00ff00" },
     });
+  });
+
+  it("keeps a tile's border sides and strips them from other types", async () => {
+    const t = newTest();
+    const asA = t.withIdentity(USER_A);
+    const projectId = await createProject(t, USER_A, "الجوانب", { base: 10 });
+
+    await asA.mutation(api.projects.applyOps, {
+      projectId,
+      ops: [
+        {
+          type: "add",
+          items: [
+            tile(0, 0, 0, {
+              border: {
+                width: 2,
+                color: "#000000",
+                sides: BORDER_TOP | BORDER_RIGHT,
+              },
+            }),
+            // All four sides is the absent mask, exactly like a pre-sides file.
+            tile(1, 0, 0, {
+              border: { width: 2, color: "#000000", sides: BORDER_ALL },
+            }),
+            {
+              type: "line",
+              key: lineKey({ column: 0, row: 1 }, { column: 4, row: 1 }),
+              from: { column: 0, row: 1 },
+              to: { column: 4, row: 1 },
+              border: { width: 2, color: "#000000", sides: BORDER_TOP },
+            },
+            {
+              type: "arc",
+              key: arcKey(
+                { column: 0, row: 4 },
+                { column: 4, row: 4 },
+                "clockwise",
+                "half",
+              ),
+              from: { column: 0, row: 4 },
+              to: { column: 4, row: 4 },
+              direction: "clockwise",
+              size: "half",
+              border: { width: 3, color: "#00ff00", sides: BORDER_LEFT },
+            },
+          ],
+        },
+      ],
+    });
+
+    const doc = required(
+      await asA.query(api.projects.get, { projectId }),
+      "project should exist",
+    );
+    expect(doc.items[0]).toMatchObject({
+      border: {
+        width: 2,
+        color: "#000000",
+        sides: BORDER_TOP | BORDER_RIGHT,
+      },
+    });
+    expect(doc.items[1]).toMatchObject({
+      border: { width: 2, color: "#000000" },
+    });
+    expect(doc.items[1]).not.toHaveProperty("border.sides");
+    // Line, stroke and arc borders are always whole on the server.
+    expect(doc.items[2]).toMatchObject({
+      border: { width: 2, color: "#000000" },
+    });
+    expect(doc.items[2]).not.toHaveProperty("border.sides");
+    expect(doc.items[3]).toMatchObject({
+      border: { width: 3, color: "#00ff00" },
+    });
+    expect(doc.items[3]).not.toHaveProperty("border.sides");
   });
 
   it("keeps cap and join on stroked items, dropping the defaults", async () => {

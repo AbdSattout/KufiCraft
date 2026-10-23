@@ -20,7 +20,7 @@
  * re-renders only the overlay layer.
  */
 
-import { memo, useMemo } from "react";
+import { memo, useId, useMemo } from "react";
 import { VIEWBOX_SIZE } from "@/lib/canvas/model";
 import type { CanvasItem, ProjectConfig } from "@/lib/canvas/model";
 import { gridPaths } from "@/lib/canvas/grid";
@@ -52,8 +52,28 @@ export const CanvasItemShape = memo(function CanvasItemShape({
     [config, item],
   );
   const color = useMemo(() => itemOf(item).resolvedColor(config), [config, item]);
+  // A partial tile border is clipped to its selected outside bands. `useId`
+  // is collision-free across the canvas, the overlay and any second SVG on the
+  // page; stripping punctuation keeps the fragment URL portable.
+  const reactId = useId();
+  const clipId = `kc-border-${reactId.replace(/[^a-zA-Z0-9_-]/g, "")}`;
   return (
     <>
+      {border?.clip !== undefined ? (
+        <defs>
+          <clipPath id={clipId} clipPathUnits="userSpaceOnUse">
+            {border.clip.map((rect, index) => (
+              <rect
+                key={index}
+                x={rect.x}
+                y={rect.y}
+                width={rect.w}
+                height={rect.h}
+              />
+            ))}
+          </clipPath>
+        </defs>
+      ) : null}
       {border !== undefined ? (
         <path
           data-key={`${item.key}:border`}
@@ -63,6 +83,7 @@ export const CanvasItemShape = memo(function CanvasItemShape({
           strokeWidth={border.width}
           strokeLinecap={cap}
           strokeLinejoin={join}
+          clipPath={border.clip !== undefined ? `url(#${clipId})` : undefined}
           className={className}
           opacity={opacity}
         />

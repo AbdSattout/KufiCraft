@@ -323,7 +323,7 @@ and export.
 | `grid.ts` | `pointToCell`, `pointToAnchor` → `Anchor`, `pointToLinePoint` → `LinePoint`, `pointToArcPoint` → `LinePoint` (the centre kept), `linePointPosition`, `anchorToCell`, `cellCentre`, `isSameAxis`, `runOf(cells)` → `Run`, `cellsBetween`, `gridPaths` → `{ cellBorders, inkLines }` |
 | `shapes.ts` | `KufiShape` + the ten shapes (`shapeById`, `shapeLabel`, `shapePath`, `shapeOrderIndex`, `SHAPE_ORDER`); the **same** renderer draws the canvas fragment and the toolbar icon (`tileIconPath`) |
 | `rounding.ts` | `roundingRadius`, `rotateCornerMask`, `hasRounding`, `roundCorners` (per-corner rounding generated from a shape's own commands) |
-| `border.ts` | `borderPaint` (one wider stroke of the item's own path, colour + stroke width) |
+| `border.ts` | `borderPaint` (one wider stroke of the item's own path, colour + stroke width), `borderSides`, `borderBand`, `borderClipRects` (outside-band rects for a partial tile side mask) |
 | `items.ts` | the item classes and factories above, `itemRender`, `itemColor`, `itemBounds`, `itemContains`, `itemCellRange`, `tileIconPath`, `itemsBounds`, `itemIntersectsRect`, the per-grid rules (`isItemTypeAllowed`, `isItemAllowed`, `visibleItems`) |
 | `ops.ts` | `addItems`, `removeItems`, `paintItems`, `replaceItems`, `toOps(prev, next)` → backend batch, `penItems`, `lineItems` |
 | `render.ts` | `renderSvg(config, items, opts?)` → standalone SVG **string**, `renderThumbnail(config, items)` → compact string |
@@ -387,7 +387,8 @@ Every function is deterministic and side-effect free.
 * **Style is part of the item, not the renderer**: a tile, a line bar and a
   polyline may carry `rounding` (radius as a fraction of the shorter side plus a
   physical corner mask), every item may carry a `border` (band width in viewBox
-  units, colour; width `0` means none), and a stroked item may carry `cap` and
+  units, colour; width `0` means none; tiles may also carry a `sides` mask),
+  and a stroked item may carry `cap` and
   `join`. `item.draw(config)` computes **one** border paint and paints it
   **before** `item.render(config)`, so the item always wins:
   * a **stroked** item (polyline, arc, diagonal line fallback) is stroked again
@@ -399,12 +400,28 @@ Every function is deterministic and side-effect free.
     half, so the band is exactly `border width` outside every edge and corner
     (rounded corners, circles, pills and concave shapes included).
 
-  There is no duplicate geometry, no translation, no clip, no scale and no
-  filter. Width is the switch: `0` paints none, a positive width paints the
+  There is no duplicate geometry, no translation, no scale and no filter. Width
+  is the switch: `0` paints none, a positive width paints the
   whole outline, and the colour is the border's own (black when a new border is
   created). Absent fields render exactly like a pre-style document. Rounding
   geometry is generated in `rounding.ts` (tiles, line bars and polyline
   turns).
+* **A tile's `border.sides` mask** selects which sides of the box paint. The
+  mask is a subset of the four physical sides (`1` top, `2` right, `4` bottom,
+  `8` left as seen on screen); absent means all four and is the canonical form,
+  never stored. A whole mask paints the whole outline with **no clip at all**,
+  so pre-sides output is byte-identical. A proper subset keeps the same native
+  stroke (no duplicate geometry) and clips it to the **outside band** of the
+  selected sides — `borderClipRects(bounds, sides, band)` returns one rect per
+  side, starting one band outside the box and stopping on its edge, so the
+  inner half of the `2 × width` stroke is cut away. The SVG renderers emit the
+  rects as a `clipPath clipPathUnits="userSpaceOnUse"` in `defs` and reference
+  it from the border path only; rounded corners still follow the shape's own
+  path. The mask belongs to tiles alone: line, polyline and arc constructors
+  and style patches normalise their borders to the whole form, so a stray mask
+  in a hostile file can never clip a non-tile. The line tool's straight-run
+  squares are tiles, but a line gesture has no side selector; `lineItems`
+  normalises that border to the whole form too.
 * **Caps and joins are per item.** The defaults are butt caps and mitre joins —
   a rib ends flush with the ink edge, exactly like the reference app — and the
   cap/join controls store `round` or `square` ends and `round` or `bevel` turns
@@ -778,7 +795,7 @@ replace, `toOps`, pen/line items, hidden items surviving the diff),
 `model.test.ts` (presets, snapping, keys, signatures, style clamping),
 `render.test.ts` (markup, thumbnail budget),
 `rounding.test.ts` / `border.test.ts` (the style geometry: one wider stroke of
-the same path, legacy masks on/off), `kuficraft-file.test.ts`
+the same path, legacy masks on/off, the four outside-band clip rects), `kuficraft-file.test.ts`
 (v2 round-trip — fragment zones included — + v1 upgrade), plus the backend `convex/**/*.test.ts` suites and
 the editor's `tools.test.ts` /
 `interaction.test.ts` / `shortcuts.test.ts`.

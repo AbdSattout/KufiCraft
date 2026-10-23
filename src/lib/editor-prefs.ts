@@ -35,6 +35,7 @@ import type {
 import {
   ARC_DIRECTIONS,
   ARC_SIZES,
+  BORDER_ALL,
   CORNER_ALL,
   DEFAULT_BORDER,
   DEFAULT_BORDER_COLOR,
@@ -43,6 +44,7 @@ import {
   MAX_BORDER_WIDTH,
   MAX_COLOR_LENGTH,
   MAX_ROUNDING_RADIUS,
+  clampBorderSides,
   normalizeStrokeCap,
   normalizeStrokeJoin,
 } from "@/lib/canvas/model";
@@ -201,17 +203,15 @@ function roundingPref(value: unknown): ItemRounding {
 }
 
 /**
- * Border from prefs: width is the switch, colour defaults to black.
- *
- * Prefs written before the width switch carried a `sides` mask and remembered
- * an always-on width (the old default was 2). That width must not turn the new
- * default of 0 into an unexpected outline, so a stored mask resets the whole
- * border once; the next save writes the new shape and the guard stops
- * matching. The current build never writes `sides`.
+ * Border from prefs: the width is the switch, colour defaults to black, and
+ * the optional side mask is clamped to the four real sides. Absent means all
+ * four; the old pre-width-switch shape (`sides: 15`, width 2, colour) is a
+ * valid border again, so it is preserved rather than reset. All-four is
+ * omitted on read and write, keeping the pre-sides JSON shape; a subset
+ * round-trips.
  */
 function borderPref(value: unknown): ItemBorder {
   const record = isRecord(value) ? value : {};
-  if (record.sides !== undefined) return { ...DEFAULT_EDITOR_PREFS.border };
   const width =
     typeof record.width === "number" && Number.isFinite(record.width)
       ? Math.min(MAX_BORDER_WIDTH, Math.max(0, record.width))
@@ -220,7 +220,13 @@ function borderPref(value: unknown): ItemBorder {
     typeof record.color === "string" && record.color.length > 0
       ? record.color.slice(0, MAX_COLOR_LENGTH)
       : DEFAULT_BORDER_COLOR;
-  return { width, color };
+  const sides =
+    typeof record.sides === "number" && Number.isFinite(record.sides)
+      ? clampBorderSides(record.sides)
+      : BORDER_ALL;
+  const border: ItemBorder = { width, color };
+  if (sides !== BORDER_ALL) border.sides = sides;
+  return border;
 }
 
 function normalizeSwatches(value: unknown): string[] {
@@ -269,12 +275,15 @@ export function loadEditorPrefs(
   };
 }
 
-/** Best-effort write — a storage throw is swallowed. */
+/** Best-effort write — a storage throw is swallowed. All-four sides are omitted. */
 export function saveEditorPrefs(
   prefs: EditorPrefs,
   storage: StorageLike | null = defaultStorage(),
 ): void {
-  writeRaw(storage, EDITOR_PREFS_KEY, prefs);
+  writeRaw(storage, EDITOR_PREFS_KEY, {
+    ...prefs,
+    border: borderPref(prefs.border),
+  });
 }
 
 /** The last committed config, or `null` when absent / corrupt. */

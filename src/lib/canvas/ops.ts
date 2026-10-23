@@ -19,6 +19,7 @@ import {
   hasAnchor,
   itemSignature,
   linePoint,
+  wholeBorder,
   zoneOf,
 } from "./model";
 import type {
@@ -370,6 +371,11 @@ export function lineItems(
   const lineColor = resolvedColor(config, color);
   const rounding = activeRounding(style.rounding);
   const border = activeBorder(style.border);
+  // The line tool has no side selector, so even its straight-run squares keep
+  // the whole border; a mask left in the draw style must not paint a hidden
+  // partial outline. Line and stroke constructors normalise it themselves.
+  const squareBorder =
+    border === undefined ? undefined : wholeBorder(border);
   const cap = style.cap;
   const join = style.join;
   if (!points.some(hasAnchor)) {
@@ -397,7 +403,7 @@ export function lineItems(
         unique,
         closed,
         lineColor,
-        border,
+        squareBorder,
       );
       if (squared !== null) return squared;
     }

@@ -20,10 +20,11 @@
  * shorter side, so the panel shows it as a percentage of the model's `0…0.5`.
  *
  * The corner map is hidden for the line and arc targets: a selection made only
- * of lines/arcs, or the line/arc tool with nothing selected. The radius slider
- * stays; only the corner map is conditional. The stroke block is absent unless
- * a line, polyline or arc is selected (or the line/arc tool is active). The
- * border applies to every item and is always shown. The selection actions are
+ * of lines/arcs, or the line/arc tool with nothing selected. The border side
+ * map follows the same rule (sides are a tile-only control), while the border
+ * width/colour block itself is always shown. The radius slider stays; only the
+ * maps are conditional. The stroke block is absent unless a line, polyline or
+ * arc is selected (or the line/arc tool is active). The selection actions are
  * revealed by the selection itself: with nothing selected there is no
  * “التحديد” block and no disabled buttons.
  */
@@ -49,6 +50,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { tileIconPath } from "@/lib/canvas/items";
 import {
+  BORDER_ALL,
+  BORDER_BOTTOM,
+  BORDER_LEFT,
+  BORDER_RIGHT,
+  BORDER_TOP,
   CORNER_BOTTOM_LEFT,
   CORNER_BOTTOM_RIGHT,
   CORNER_TOP_LEFT,
@@ -71,7 +77,7 @@ import type { ArrangeAction } from "@/lib/canvas/ops";
 import { MESSAGES } from "./messages";
 import { INK_SWATCHES, formatCount, mergedSwatches, swatchLabel } from "./editor-palette";
 import { ColourField, PanelSection, SliderField } from "./editor-controls";
-import { SHAPE_LABELS, SHAPE_ORDER } from "./interaction";
+import { SHAPE_LABELS, SHAPE_ORDER, toggleBorderSide } from "./interaction";
 import type { DrawStyle } from "./interaction";
 import { shapeDigit, shortcutAriaLabel } from "./shortcut-hints";
 import { ShortcutTooltip } from "./shortcut-tooltip";
@@ -113,6 +119,13 @@ const CORNER_GLYPHS: Record<number, string> = {
   [CORNER_BOTTOM_LEFT]: "M2 2 L22 2 L22 22 L10 22 A8 8 0 0 1 2 14 Z",
 };
 
+const SIDE_GLYPHS: Record<number, string> = {
+  [BORDER_TOP]: "M2.5 2.5 H21.5",
+  [BORDER_RIGHT]: "M21.5 2.5 V21.5",
+  [BORDER_BOTTOM]: "M2.5 21.5 H21.5",
+  [BORDER_LEFT]: "M2.5 2.5 V21.5",
+};
+
 function CornerGlyph({ corner }: { corner: number }) {
   return (
     <svg viewBox="0 0 24 24" aria-hidden className="size-5">
@@ -127,7 +140,28 @@ function CornerGlyph({ corner }: { corner: number }) {
   );
 }
 
-/** One button of the physical 2×2 corner map. */
+/** The box the border wraps, with this side drawn thick just outside it. */
+function SideGlyph({ side }: { side: number }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden className="size-5">
+      <path
+        d="M5 5 H19 V19 H5 Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1}
+        strokeOpacity={0.4}
+      />
+      <path
+        d={SIDE_GLYPHS[side]}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2.5}
+      />
+    </svg>
+  );
+}
+
+/** One button of a physical corner map or side map. */
 function GlyphToggle({
   pressed,
   label,
@@ -402,6 +436,8 @@ export interface ShapeStylePanelProps {
   style: DrawStyle;
   /** Whether the 2×2 corner map can affect the current tool or selection. */
   showRoundingCorners: boolean;
+  /** Whether the 3×3 side map can affect the current tool or selection. */
+  showBorderSides: boolean;
   /** Whether the cap/join block can affect the current tool or selection. */
   showStrokeStyle: boolean;
   /** Recent ink colours, offered by the border colour field. */
@@ -423,15 +459,16 @@ export interface ShapeStylePanelProps {
 /**
  * The style half of the drawing controls: rounding (the radius slider for
  * every target, the corner map only where corners exist), stroke ends and
- * joins (lines and arcs only), and the border (every item). The corner map
- * and the stroke block drop out when the current target cannot take them, so
- * a line or arc tool never offers a dead corner map and a tiles-only selection
- * never offers caps. The radius slider stays; only the four corner toggles are
- * conditional.
+ * joins (lines and arcs only), and the border (every item: width and colour
+ * always, the side map only for tile targets). The maps drop out when the
+ * current target cannot take them, so a line or arc tool never offers a dead
+ * corner or side map and a tiles-only selection never offers caps. The radius
+ * slider and the border width/colour stay; only the maps are conditional.
  */
 export function ShapeStylePanel({
   style,
   showRoundingCorners,
+  showBorderSides,
   showStrokeStyle,
   inkSwatches,
   setRounding,
@@ -442,7 +479,8 @@ export function ShapeStylePanel({
   setStrokeJoin,
 }: ShapeStylePanelProps) {
   const { radius, corners } = style.rounding;
-  const { width, color } = style.border;
+  const { width, color, sides } = style.border;
+  const sideMask = sides ?? BORDER_ALL;
   const swatches = useMemo(
     () => mergedSwatches(inkSwatches, INK_SWATCHES),
     [inkSwatches],
@@ -453,6 +491,10 @@ export function ShapeStylePanel({
 
   const toggleCorner = (corner: number) => {
     setRounding({ ...style.rounding, corners: corners ^ corner });
+  };
+
+  const toggleSide = (side: number) => {
+    setBorder({ ...style.border, sides: toggleBorderSide(sides, side) });
   };
 
   return (
@@ -589,6 +631,52 @@ export function ShapeStylePanel({
           onPreview={previewBorderWidth}
           onCommit={(value) => setBorder({ ...style.border, width: value })}
         />
+        {showBorderSides && (
+          /* `dir="ltr"` keeps the 3×3 map physical, exactly like the corner
+             map: the top button is the top edge in Arabic and in English. */
+          <div
+            className="mx-auto grid w-fit grid-cols-3 grid-rows-3 gap-1"
+            dir="ltr"
+            role="group"
+            aria-label={MESSAGES.borderSides}
+          >
+            <GlyphToggle
+              pressed={(sideMask & BORDER_TOP) !== 0}
+              label={MESSAGES.borderTop}
+              position="col-start-2 row-start-1"
+              onClick={() => toggleSide(BORDER_TOP)}
+            >
+              <SideGlyph side={BORDER_TOP} />
+            </GlyphToggle>
+            <GlyphToggle
+              pressed={(sideMask & BORDER_LEFT) !== 0}
+              label={MESSAGES.borderLeft}
+              position="col-start-1 row-start-2"
+              onClick={() => toggleSide(BORDER_LEFT)}
+            >
+              <SideGlyph side={BORDER_LEFT} />
+            </GlyphToggle>
+            <GlyphToggle
+              pressed={(sideMask & BORDER_RIGHT) !== 0}
+              label={MESSAGES.borderRight}
+              position="col-start-3 row-start-2"
+              onClick={() => toggleSide(BORDER_RIGHT)}
+            >
+              <SideGlyph side={BORDER_RIGHT} />
+            </GlyphToggle>
+            <GlyphToggle
+              pressed={(sideMask & BORDER_BOTTOM) !== 0}
+              label={MESSAGES.borderBottom}
+              position="col-start-2 row-start-3"
+              onClick={() => toggleSide(BORDER_BOTTOM)}
+            >
+              <SideGlyph side={BORDER_BOTTOM} />
+            </GlyphToggle>
+          </div>
+        )}
+        <p className="text-xs text-muted-foreground/80">
+          {MESSAGES.borderHint}
+        </p>
         <ColourField
           label={MESSAGES.borderColor}
           value={color}

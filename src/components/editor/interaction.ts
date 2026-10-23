@@ -21,6 +21,7 @@
  */
 
 import {
+  BORDER_ALL,
   CORNER_ALL,
   DEFAULT_BORDER,
   DEFAULT_STROKE_CAP,
@@ -28,6 +29,7 @@ import {
   RATIO_PRESETS,
   VIEWBOX_SIZE,
   cellSize,
+  clampBorderSides,
   circularSectors,
   itemSignature as signatureOf,
   linePoint,
@@ -155,6 +157,19 @@ export function applyDrawStyle(
 }
 
 /**
+ * Flips one side of a border mask. An absent mask means all four sides, so
+ * the first click on a fresh style removes that side and leaves the other
+ * three on — the mask the panel shows before any edit. A stored mask is
+ * clamped to the four real sides first, exactly like the model's sanitizer.
+ */
+export function toggleBorderSide(
+  sides: number | undefined,
+  side: number,
+): number {
+  return (sides === undefined ? BORDER_ALL : clampBorderSides(sides)) ^ side;
+}
+
+/**
  * Whether the stroke cap/join block can affect the current target. With a
  * selection, only the selected items matter: any line, polyline or arc makes
  * the block applicable (tiles in a mixed selection simply ignore cap/join),
@@ -183,14 +198,14 @@ export function strokeStyleApplies(
 }
 
 /**
- * Whether the 2×2 corner map is offered for the current target. The radius
- * slider is always shown; only the four corner toggles depend on the target.
- * With a selection the map appears when the selection contains a tile (a
- * mixed selection keeps it; a lines/arcs-only selection does not), and with
- * nothing selected it is hidden for the line and arc tools. The border is
- * never conditional: every item type can take one.
+ * Whether a tile is the current target — the one predicate behind every
+ * tile-only control: the rounded-corner map, the border side map and the shape
+ * palette. With a selection, any selected tile makes it true (a mixed
+ * selection keeps the controls, a lines/arcs-only or stale selection does
+ * not). With nothing selected it is true for the pen, select, eraser and hand,
+ * and false for the line and arc tools, whose next item is not a tile.
  */
-export function roundingCornersApplies(
+export function tileTargetApplies(
   tool: ToolId,
   items: readonly CanvasItem[],
   selection: readonly string[],
@@ -202,6 +217,19 @@ export function roundingCornersApplies(
     );
   }
   return tool !== "line" && tool !== "arc";
+}
+
+/**
+ * Whether the 2×2 corner map is offered for the current target. The radius
+ * slider is always shown; only the four corner toggles depend on the target.
+ * See `tileTargetApplies` for the exact rule.
+ */
+export function roundingCornersApplies(
+  tool: ToolId,
+  items: readonly CanvasItem[],
+  selection: readonly string[],
+): boolean {
+  return tileTargetApplies(tool, items, selection);
 }
 
 /**

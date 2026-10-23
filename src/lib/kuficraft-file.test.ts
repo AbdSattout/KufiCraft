@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  BORDER_ALL,
+  BORDER_LEFT,
+  BORDER_RIGHT,
+  BORDER_TOP,
   CORNER_ALL,
   DEFAULT_BORDER_COLOR,
   DEFAULT_PROJECT_CONFIG,
@@ -741,6 +745,69 @@ describe("normalizeItem", () => {
     ).toEqual(arcItem);
   });
 
+  it("reads a tile's border side subset and clamps a hostile mask", () => {
+    const config = sampleConfig();
+    const plain = sampleItems()[0];
+    const border = { width: 2, color: "#000000" };
+    expect(
+      normalizeItem(
+        {
+          ...plain,
+          border: { ...border, sides: BORDER_TOP | BORDER_RIGHT },
+        },
+        config,
+      ),
+    ).toMatchObject({ border: { ...border, sides: BORDER_TOP | BORDER_RIGHT } });
+
+    // All four sides is the absent mask, exactly like a pre-sides border.
+    expect(
+      normalizeItem(
+        { ...plain, border: { ...border, sides: BORDER_ALL } },
+        config,
+      ),
+    ).toMatchObject({ border });
+    expect(
+      normalizeItem(
+        { ...plain, border: { ...border, sides: BORDER_ALL } },
+        config,
+      ),
+    ).not.toHaveProperty("border.sides");
+
+    // Unknown bits are masked away; a broken or missing mask is all four.
+    expect(
+      normalizeItem(
+        { ...plain, border: { ...border, sides: BORDER_TOP | 16 } },
+        config,
+      ),
+    ).toMatchObject({ border: { ...border, sides: BORDER_TOP } });
+    expect(
+      normalizeItem(
+        { ...plain, border: { ...border, sides: "top" } },
+        config,
+      ),
+    ).toMatchObject({ border });
+
+    // No side on at all is the off state, even with a positive width.
+    expect(
+      normalizeItem({ ...plain, border: { ...border, sides: 0 } }, config),
+    ).not.toHaveProperty("border");
+    expect(
+      normalizeItem({ ...plain, border: { ...border, sides: 16 } }, config),
+    ).not.toHaveProperty("border");
+  });
+
+  it("strips sides from line, stroke and arc borders", () => {
+    const config = sampleConfig();
+    for (const item of sampleItems().slice(2)) {
+      const border = { width: 2, color: "#000000", sides: BORDER_LEFT };
+      const normalized = normalizeItem({ ...item, border }, config);
+      expect(normalized).toMatchObject({
+        border: { width: 2, color: "#000000" },
+      });
+      expect(normalized).not.toHaveProperty("border.sides");
+    }
+  });
+
   it("round-trips style fields through export and parse", () => {
     const config = sampleConfig();
     const items: CanvasItem[] = [
@@ -751,7 +818,7 @@ describe("normalizeItem", () => {
         row: 0,
         zone: 0,
         rounding: { radius: 0.15, corners: 5 },
-        border: { width: 3, color: "#123456" },
+        border: { width: 3, color: "#123456", sides: BORDER_TOP | BORDER_LEFT },
       },
       {
         type: "line",

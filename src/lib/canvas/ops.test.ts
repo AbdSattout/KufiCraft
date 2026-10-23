@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  BORDER_TOP,
   CORNER_ALL,
   DEFAULT_PROJECT_CONFIG,
   RATIO_PRESETS,
@@ -755,6 +756,25 @@ describe("lineItems", () => {
         color: "#00ff00",
       },
     ]);
+  });
+
+  it("does not leak a tile side mask into the line tool's square run", () => {
+    const config = makeConfig();
+    const squares = lineItems(
+      config,
+      [
+        { column: 0, row: 0 },
+        { column: 2, row: 0 },
+      ],
+      false,
+      undefined,
+      { border: { width: 2, color: "#000000", sides: BORDER_TOP } },
+    );
+    expect(squares).toHaveLength(3);
+    for (const square of squares) {
+      expect(square.border).toEqual({ width: 2, color: "#000000" });
+      expect(square.border).not.toHaveProperty("sides");
+    }
   });
 
   it("stores the document ink on squares and on a polyline", () => {

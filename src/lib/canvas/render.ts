@@ -10,7 +10,7 @@
  * the string renderer and the React canvas can never drift apart.
  */
 
-import { MAX_THUMBNAIL_LENGTH, VIEWBOX_SIZE } from "./model";
+import { MAX_THUMBNAIL_LENGTH, VIEWBOX_SIZE, digest } from "./model";
 import type { CanvasItem, ProjectConfig } from "./model";
 import { itemOf } from "./items";
 import { gridPaths } from "./grid";
@@ -95,7 +95,7 @@ function renderSvgString(
         ` stroke-opacity="${INK_OPACITY}" stroke-width="${GRID_WIDTH}"/>`,
     );
   }
-  for (const item of items) {
+  for (const [index, item] of items.entries()) {
     const rendered = itemOf(item).draw(config);
     const d =
       parts.precision === undefined
@@ -103,6 +103,28 @@ function renderSvgString(
         : roundPathNumbers(rendered.path, parts.precision);
     const color = escapeXml(itemOf(item).resolvedColor(config));
     const key = parts.includeKeys ? ` data-k="${escapeXml(item.key)}"` : "";
+    // A partial tile border is clipped to the outside bands of its selected
+    // sides. The id carries the index and a content digest, so it is
+    // deterministic and, when several rendered SVGs are inlined in one page
+    // (dashboard thumbnails), two documents share an id only when their clip
+    // geometry is identical — the case where either reference clips the same.
+    const clip = rendered.border?.clip;
+    const clipRects =
+      clip === undefined
+        ? ""
+        : clip
+            .map(
+              (rect) =>
+                `<rect x="${num(rect.x)}" y="${num(rect.y)}"` +
+                ` width="${num(rect.w)}" height="${num(rect.h)}"/>`,
+            )
+            .join("");
+    const clipId = `kc-border-${index}-${digest(clipRects)}`;
+    if (clip !== undefined) {
+      out.push(
+        `<defs><clipPath id="${clipId}" clipPathUnits="userSpaceOnUse">${clipRects}</clipPath></defs>`,
+      );
+    }
     // The border is the item's own path stroked once, before the ink: a wider
     // copy of a stroked item, or a native outline under a filled one. The fill
     // (or the ink stroke) covers the inner half, leaving exactly the border
@@ -112,7 +134,9 @@ function renderSvgString(
       out.push(
         `<path${key} d="${d}" fill="none" stroke="${escapeXml(rendered.border.color)}"` +
           ` stroke-width="${num(rendered.border.width)}"` +
-          ` stroke-linecap="${rendered.cap}" stroke-linejoin="${rendered.join}"/>`,
+          ` stroke-linecap="${rendered.cap}" stroke-linejoin="${rendered.join}"` +
+          (clip !== undefined ? ` clip-path="url(#${clipId})"` : "") +
+          `/>`,
       );
     }
     if (rendered.mode === "stroke") {

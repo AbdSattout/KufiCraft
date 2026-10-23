@@ -10,6 +10,9 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  BORDER_ALL,
+  BORDER_LEFT,
+  BORDER_TOP,
   CIRCULAR_ANGULAR_UNIT,
   CORNER_ALL,
   CORNER_TOP_LEFT,
@@ -971,6 +974,109 @@ describe("rounding / border", () => {
     expect(parseItem(bordered).draw(SQUARE).border).toEqual({
       color: "#000000",
       width: 6,
+    });
+  });
+
+  it("clips a partial tile border to the selected outside bands", () => {
+    const bounds = zoneRect(SQUARE, 1, 2, 0);
+    const subject = parseItem(
+      makeTile({
+        column: 1,
+        row: 2,
+        zone: 0,
+        border: {
+          width: 2,
+          color: "#000000",
+          sides: BORDER_TOP | BORDER_LEFT,
+        },
+      }),
+    );
+    // The native stroke is still 2 × width; the clip keeps only the band
+    // outside the box, one rect per selected side, in top/right/bottom/left
+    // order.
+    expect(subject.draw(SQUARE).border).toEqual({
+      color: "#000000",
+      width: 4,
+      clip: [
+        { x: bounds.x - 2, y: bounds.y - 2, w: bounds.w + 4, h: 2 },
+        { x: bounds.x - 2, y: bounds.y - 2, w: 2, h: bounds.h + 4 },
+      ],
+    });
+    expect(subject.toJSON()).toMatchObject({
+      border: { width: 2, color: "#000000", sides: BORDER_TOP | BORDER_LEFT },
+    });
+  });
+
+  it("leaves a whole tile border unclipped and stores no mask", () => {
+    const plain = parseItem(
+      makeTile({
+        column: 0,
+        row: 0,
+        zone: 0,
+        border: { width: 3, color: "#000000" },
+      }),
+    );
+    const masked = parseItem(
+      makeTile({
+        column: 0,
+        row: 0,
+        zone: 0,
+        border: { width: 3, color: "#000000", sides: BORDER_ALL },
+      }),
+    );
+    // All four sides is the absent mask: same JSON, same all-sides paint.
+    expect(masked.toJSON()).toEqual(plain.toJSON());
+    expect(masked.toJSON()).not.toHaveProperty("border.sides");
+    expect(masked.draw(SQUARE)).toEqual(plain.draw(SQUARE));
+    expect(plain.draw(SQUARE).border).toEqual({ color: "#000000", width: 6 });
+    expect(plain.draw(SQUARE).border).not.toHaveProperty("clip");
+  });
+
+  it("normalises line, stroke and arc borders to the whole box", () => {
+    const subjects = [
+      stroke([
+        { column: 0, row: 0 },
+        { column: 2, row: 2 },
+      ]),
+      arc({ column: 0, row: 6 }, { column: 4, row: 6 }),
+      line({ column: 0, row: 1 }, { column: 4, row: 1 }),
+    ];
+    for (const item of subjects) {
+      const styled = styleItem(item, {
+        border: { width: 2, color: "#000000", sides: BORDER_TOP },
+      });
+      // A side mask is tile-only: the stored border drops it and the paint
+      // covers the whole path, exactly like a border without a mask.
+      expect(styled).not.toHaveProperty("border.sides");
+      const drawn = parseItem(styled).draw(SQUARE);
+      expect(drawn.border).not.toHaveProperty("clip");
+      expect(parseItem(styled).draw(SQUARE).border).toEqual(
+        parseItem(
+          styleItem(item, { border: { width: 2, color: "#000000" } }),
+        ).draw(SQUARE).border,
+      );
+    }
+  });
+
+  it("ignores a side-only patch on a non-tile, keeping the object", () => {
+    const run = line({ column: 0, row: 1 }, { column: 4, row: 1 });
+    const bordered = styleItem(run, { border: BORDER });
+    // The only difference is the mask: after normalisation the border is the
+    // same whole border, so the item keeps its identity.
+    expect(
+      styleItem(bordered, {
+        border: { width: 3, color: "#7c2d12", sides: BORDER_TOP },
+      }),
+    ).toBe(bordered);
+    // A width/colour patch still applies, as a whole border.
+    const wider = styleItem(bordered, {
+      border: { width: 5, color: "#7c2d12", sides: BORDER_TOP },
+    });
+    expect(wider).toMatchObject({ border: { width: 5, color: "#7c2d12" } });
+    expect(wider).not.toHaveProperty("border.sides");
+    expect(parseItem(wider).draw(SQUARE).border).toEqual({
+      color: "#7c2d12",
+      width: 10,
     });
   });
 

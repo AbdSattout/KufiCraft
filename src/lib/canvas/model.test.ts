@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   ANCHOR_GRID,
+  BORDER_ALL,
+  BORDER_BOTTOM,
+  BORDER_LEFT,
+  BORDER_RIGHT,
+  BORDER_TOP,
   CENTRE_ANCHOR,
   CORNER_ALL,
   CORNER_BOTTOM_LEFT,
@@ -22,6 +27,7 @@ import {
   anchorOf,
   arcKey,
   arcPoint,
+  clampBorderSides,
   clampBorderWidth,
   clampRoundingRadius,
   hasAnchor,
@@ -44,6 +50,7 @@ import {
   snapRatio,
   strokeKey,
   tileKey,
+  wholeBorder,
 } from "@/lib/canvas/model";
 import type {
   ArcItem,
@@ -215,6 +222,66 @@ describe("rounding / border model", () => {
     expect(sanitizeBorder({ width: 2, color: long })?.color).toBe(
       long.slice(0, MAX_COLOR_LENGTH),
     );
+  });
+
+  it("names the four border sides and their whole mask", () => {
+    expect(BORDER_TOP).toBe(1);
+    expect(BORDER_RIGHT).toBe(2);
+    expect(BORDER_BOTTOM).toBe(4);
+    expect(BORDER_LEFT).toBe(8);
+    expect(BORDER_ALL).toBe(15);
+  });
+
+  it("clamps a side mask to the four real sides", () => {
+    expect(clampBorderSides(Number.NaN)).toBe(BORDER_ALL);
+    expect(clampBorderSides(-1)).toBe(BORDER_ALL);
+    expect(clampBorderSides(BORDER_TOP | BORDER_LEFT | 16)).toBe(
+      BORDER_TOP | BORDER_LEFT,
+    );
+    expect(clampBorderSides(3.9)).toBe(3);
+    expect(clampBorderSides(BORDER_ALL)).toBe(BORDER_ALL);
+  });
+
+  it("stores only a side subset and drops an empty mask", () => {
+    // Absent and all-four are the same whole border: sides are not stored.
+    expect(sanitizeBorder({ width: 2, color: "#000000" })).toEqual({
+      width: 2,
+      color: "#000000",
+    });
+    expect(
+      sanitizeBorder({ width: 2, color: "#000000", sides: BORDER_ALL }),
+    ).toEqual({ width: 2, color: "#000000" });
+
+    // A subset round-trips, masked to the real sides.
+    expect(
+      sanitizeBorder({
+        width: 2,
+        color: "#000000",
+        sides: BORDER_TOP | BORDER_RIGHT,
+      }),
+    ).toEqual({
+      width: 2,
+      color: "#000000",
+      sides: BORDER_TOP | BORDER_RIGHT,
+    });
+    expect(
+      sanitizeBorder({ width: 2, color: "#000000", sides: BORDER_LEFT | 16 }),
+    ).toEqual({ width: 2, color: "#000000", sides: BORDER_LEFT });
+
+    // No side on is the off state, even with a positive width.
+    expect(
+      sanitizeBorder({ width: 2, color: "#000000", sides: 0 }),
+    ).toBeUndefined();
+    expect(
+      sanitizeBorder({ width: 2, color: "#000000", sides: 16 }),
+    ).toBeUndefined();
+  });
+
+  it("drops sides from a whole border, keeping identity when absent", () => {
+    const border = { width: 2, color: "#000000" };
+    expect(wholeBorder(border)).toBe(border);
+    expect(wholeBorder({ ...border, sides: BORDER_TOP })).toEqual(border);
+    expect(wholeBorder({ ...border, sides: BORDER_ALL })).toEqual(border);
   });
 
   it("normalises caps and joins, dropping the defaults from storage", () => {
@@ -609,6 +676,19 @@ describe("itemSignature", () => {
     };
     expect(itemSignature(rounded)).not.toBe(itemSignature(tile));
     expect(itemSignature(bordered)).not.toBe(itemSignature(tile));
+    // Only a side subset changes the signature; absent and all-four are one.
+    expect(
+      itemSignature({
+        ...tile,
+        border: { width: 2, color: "#000000", sides: BORDER_ALL },
+      }),
+    ).toBe(itemSignature(bordered));
+    expect(
+      itemSignature({
+        ...tile,
+        border: { width: 2, color: "#000000", sides: BORDER_TOP },
+      }),
+    ).not.toBe(itemSignature(bordered));
     expect(
       itemSignature({
         ...rounded,

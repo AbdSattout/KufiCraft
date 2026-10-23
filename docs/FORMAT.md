@@ -67,6 +67,9 @@ existed.
 // any item — one stroke around the whole shape
 "border": { "width": 2, "color": "#7c2d12" }
 
+// a tile — which sides of the box paint (absent = all four)
+"border": { "width": 2, "color": "#7c2d12", "sides": 5 }
+
 // a stroked item (diagonal line, polyline or arc) — how its ink ends and turns
 "cap": "round",
 "join": "bevel"
@@ -108,6 +111,14 @@ existed.
 * `border.color` is the border's own colour. New borders store black
   (`#000000`) unless the user picks another; an empty or missing stored colour
   also resolves to black. It is never the item's ink colour.
+* `border.sides` is a **tile-only** mask of the box sides as seen on screen:
+  `1` top, `2` right, `4` bottom, `8` left, `15` all four. Absent means all
+  four and is the canonical whole mask — never written — so a pre-sides border
+  round-trips byte-stably; only a proper subset is stored. Unknown bits are
+  dropped. No side on (`0` after masking) is the off state, exactly like width
+  `0`: the border drops. A **line, polyline or arc** has no mask: its reader
+  and constructors normalise the border to the whole form, so a hostile file
+  cannot clip a non-tile.
 * A border is **the item's own path stroked once, before the item**, in the
   border colour — never a translated copy, a second shape or a filter:
   * a **stroked** item (a polyline, an arc, a diagonal line fallback) is
@@ -118,12 +129,21 @@ existed.
     `2 × border.width` wide, painted before the fill. The fill covers the inner
     half, so the band is exactly `border.width` outside every edge and corner —
     rounded corners, circles, pills and concave shapes included.
+  * a tile's **`sides` subset** keeps that same native stroke and clips it to
+    the outside band of the selected sides (one rect per side, starting one
+    band outside the box and stopping on its edge); the SVG output carries the
+    rects in a `clipPath clipPathUnits="userSpaceOnUse"` addressed by the
+    border path alone. A whole mask emits no clip and is byte-identical to the
+    pre-sides rendering.
 * Normalisation on read/write (backend and file import): radius clamped to
   `[0, 0.5]`, border width clamped to `[0, 12]`, colours capped at
-  `MAX_COLOR_LENGTH`. A zero radius drops `rounding`; a zero (or broken) border
-  width drops `border`; an unknown cap/join falls back to `butt`/`miter` and the
-  defaults are dropped. Absent is the canonical “off” state, so a round-trip
-  stays byte-stable. An empty border colour normalises to black.
+  `MAX_COLOR_LENGTH`, the side mask masked to the four real bits. A zero radius
+  drops `rounding`; a zero (or broken) border width and an empty side mask drop
+  `border`; an unknown cap/join falls back to `butt`/`miter` and the
+  defaults are dropped. All four sides are omitted, so the canonical whole
+  border keeps its pre-sides JSON shape. Absent is the canonical “off” state,
+  so a round-trip stays byte-stable. An empty border colour normalises to
+  black.
 
 ## Rules
 

@@ -66,10 +66,10 @@ import {
   pruneSelection,
   recolourItems,
   reshapeItems,
-  roundingCornersApplies,
   selectionFillColor,
   strokeStyleApplies,
   styleForSelection,
+  tileTargetApplies,
   wheelSteps,
   wheelZoomDelta,
   zoomScrollOffset,
@@ -152,6 +152,17 @@ export interface EditorController {
    * line and arc. The radius slider is always shown.
    */
   showRoundingCorners: boolean;
+  /**
+   * Whether the 3×3 border side map is offered. Same tile-target rule as the
+   * corner map; the border width and colour fields are always shown.
+   */
+  showBorderSides: boolean;
+  /**
+   * Whether the shape palette (shape buttons + rotation) is offered. Same
+   * tile-target rule: it is a tile-only control, so the line/arc tools and
+   * selections with no tile hide the whole section.
+   */
+  showShapePalette: boolean;
   arc: ArcStyle;
   setArcDirection: (direction: ArcDirection) => void;
   setArcSize: (size: ArcSize) => void;
@@ -406,15 +417,19 @@ export function useEditor(
   );
 
   /**
-   * The corner map is a tile-corner control: a selection decides (any selected
-   * tile keeps it visible, lines/arcs alone hide it) and, with nothing
-   * selected, only the line and arc tools hide it. The radius slider stays
-   * visible for every target.
+   * The tile-only controls (corner map, border sides, shape palette) share one
+   * target predicate: a selection decides (any selected tile keeps them
+   * visible, lines/arcs alone hide them) and, with nothing selected, only the
+   * line and arc tools hide them. The radius slider and the border
+   * width/colour stay visible for every target.
    */
-  const showRoundingCorners = useMemo(
-    () => roundingCornersApplies(tool, items, selection),
+  const tileTarget = useMemo(
+    () => tileTargetApplies(tool, items, selection),
     [items, selection, tool],
   );
+  const showRoundingCorners = tileTarget;
+  const showBorderSides = tileTarget;
+  const showShapePalette = tileTarget;
 
   /**
    * A grid switch drops any armed gesture: it was aimed at the old geometry,
@@ -1154,6 +1169,8 @@ export function useEditor(
     panelStyle,
     showStrokeStyle,
     showRoundingCorners,
+    showBorderSides,
+    showShapePalette,
     arc,
     setArcDirection,
     setArcSize,

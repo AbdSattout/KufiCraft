@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  BORDER_ALL,
+  BORDER_LEFT,
+  BORDER_TOP,
   DEFAULT_BORDER,
   DEFAULT_PROJECT_CONFIG,
   MAX_COLOR_LENGTH,
@@ -111,20 +114,44 @@ describe("editor preferences", () => {
     expect(defaulted.border).toEqual({ width: 4, color: "#000000" });
   });
 
-  it("resets a pre-width-switch border once, so its old width is not carried", () => {
+  it("preserves an old pre-width-switch border now that sides are back", () => {
     const storage = new MemoryStorage({
       [EDITOR_PREFS_KEY]: JSON.stringify({
         border: { sides: 15, width: 2, color: "#123456" },
       }),
     });
-    expect(loadEditorPrefs(storage).border).toEqual(DEFAULT_BORDER);
-    // Saving writes the current shape, so the stale mask is gone for good.
+    // Sides are a real feature again, so the stored border is kept; all four
+    // sides is the canonical no-mask shape and is written back without it.
+    expect(loadEditorPrefs(storage).border).toEqual({
+      width: 2,
+      color: "#123456",
+    });
     saveEditorPrefs(loadEditorPrefs(storage), storage);
     const stored = JSON.parse(storage.getItem(EDITOR_PREFS_KEY) ?? "{}") as {
       border?: Record<string, unknown>;
     };
-    expect(stored.border).toEqual(DEFAULT_BORDER);
+    expect(stored.border).toEqual({ width: 2, color: "#123456" });
     expect(stored.border).not.toHaveProperty("sides");
+  });
+
+  it("round-trips a border side subset and clamps its mask", () => {
+    const subset = {
+      ...DEFAULT_EDITOR_PREFS,
+      border: { width: 4, color: "#123456", sides: BORDER_TOP | BORDER_LEFT },
+    };
+    const storage = new MemoryStorage();
+    saveEditorPrefs(subset, storage);
+    expect(loadEditorPrefs(storage).border).toEqual(subset.border);
+
+    const clamped = loadEditorPrefs(
+      new MemoryStorage({
+        [EDITOR_PREFS_KEY]: JSON.stringify({
+          border: { width: 4, color: "#123456", sides: BORDER_ALL | 16 },
+        }),
+      }),
+    );
+    // Unknown bits are dropped; all four sides is the no-mask shape.
+    expect(clamped.border).toEqual({ width: 4, color: "#123456" });
   });
 
   it("reads stroke caps and joins, falling back to the defaults", () => {

@@ -22,12 +22,14 @@
  */
 
 import {
+  BORDER_ALL,
   DEFAULT_PROJECT_CONFIG,
   DEFAULT_STROKE_CAP,
   DEFAULT_STROKE_JOIN,
   arcKey,
   arcPoint,
   cellSize,
+  clampBorderSides,
   compareFragments,
   fragmentPoint,
   hasAnchor,
@@ -39,6 +41,7 @@ import {
   sanitizeRounding,
   strokeKey,
   tileKey,
+  wholeBorder,
   zoneOf,
 } from "./model";
 import type {
@@ -85,7 +88,7 @@ import {
   zoneRect,
 } from "./geometry";
 import type { CircularSlice, PathCmd, Point, Rect } from "./geometry";
-import { borderPaint } from "./border";
+import { borderBand, borderClipRects, borderPaint, borderSides } from "./border";
 import type { BorderPaint } from "./border";
 import { cellCentre, linePointPosition } from "./grid";
 import { roundCorners, roundingRadius } from "./rounding";
@@ -196,6 +199,20 @@ export function sliceBounds(slice: CircularSlice): Rect {
   return boundsOfPoints(points);
 }
 
+/**
+ * A tile's border as it is stored: `sides` only when it is a proper subset of
+ * the four sides. All four is the absent mask, so a width/colour border keeps
+ * the pre-sides JSON shape exactly.
+ */
+function storedTileBorder(border: ItemBorder | undefined): ItemBorder | undefined {
+  if (border === undefined || border.sides === undefined) return border;
+  const sides = clampBorderSides(border.sides);
+  if (sides === BORDER_ALL) {
+    return { width: border.width, color: border.color };
+  }
+  return sides === border.sides ? border : { width: border.width, color: border.color, sides };
+}
+
 /* ------------------------------------------------------------------ */
 /* The parent class                                                    */
 /* ------------------------------------------------------------------ */
@@ -232,7 +249,25 @@ export abstract class KufiItem {
       border,
       rendered.mode === "stroke" ? rendered.width : 0,
     );
-    return paint === undefined ? rendered : { ...rendered, border: paint };
+    if (paint === undefined) return rendered;
+    const clip = this.borderClip(config, borderSides(border));
+    return clip === undefined
+      ? { ...rendered, border: paint }
+      : { ...rendered, border: { ...paint, clip } };
+  }
+
+  /**
+   * The outside bands a partial border is clipped to. Only a tile overrides
+   * this: line, polyline and arc borders are always whole (the editor hides
+   * the side map for those targets and the constructors drop a stray mask).
+   */
+  protected borderClip(
+    config: ProjectConfig,
+    sides: number,
+  ): readonly Rect[] | undefined {
+    void config;
+    void sides;
+    return undefined;
   }
 
   abstract bounds(config: ProjectConfig): Rect;
@@ -307,7 +342,7 @@ export class Tile extends KufiItem {
     this.shape = init.shape;
     this.rotation = init.rotation;
     this.rounding = init.rounding;
-    this.border = init.border;
+    this.border = storedTileBorder(init.border);
     this.color = init.color;
   }
 
@@ -392,6 +427,16 @@ export class Tile extends KufiItem {
     );
   }
 
+  protected borderClip(
+    config: ProjectConfig,
+    sides: number,
+  ): readonly Rect[] | undefined {
+    if (this.border === undefined) return undefined;
+    const band = borderBand(this.border);
+    if (band === undefined) return undefined;
+    return borderClipRects(this.bounds(config), sides, band);
+  }
+
   bounds(config: ProjectConfig): Rect {
     if (config.gridType === "circular") {
       return sliceBounds(circularSlice(config, this.column, this.row, this.zone));
@@ -455,7 +500,11 @@ export class Tile extends KufiItem {
     const rounding =
       style.rounding === undefined ? this.rounding : (style.rounding ?? undefined);
     const border =
-      style.border === undefined ? this.border : (style.border ?? undefined);
+      style.border === undefined
+        ? this.border
+        : style.border === null
+          ? undefined
+          : storedTileBorder(style.border);
     if (
       shape === this.shape &&
       rotation === this.rotation &&
@@ -487,14 +536,18 @@ export function sameRounding(
   return a.radius === b.radius && a.corners === b.corners;
 }
 
-/** Value equality of two borders (`undefined` = none). */
+/** Value equality of two borders (`undefined` = none; absent sides = all). */
 export function sameBorder(
   a: ItemBorder | undefined,
   b: ItemBorder | undefined,
 ): boolean {
   if (a === b) return true;
   if (a === undefined || b === undefined) return false;
-  return a.width === b.width && a.color === b.color;
+  return (
+    a.width === b.width &&
+    a.color === b.color &&
+    borderSides(a) === borderSides(b)
+  );
 }
 
 /** The stored form of a cap: the default is the absent state. */
@@ -555,7 +608,7 @@ export class Line extends KufiItem {
     this.from = plainFragment(from);
     this.to = plainFragment(to);
     this.rounding = init.rounding;
-    this.border = init.border;
+    this.border = init.border === undefined ? undefined : wholeBorder(init.border);
     this.cap = activeCap(init.cap);
     this.join = activeJoin(init.join);
     this.color = init.color;
@@ -709,7 +762,11 @@ export class Line extends KufiItem {
     const rounding =
       style.rounding === undefined ? this.rounding : (style.rounding ?? undefined);
     const border =
-      style.border === undefined ? this.border : (style.border ?? undefined);
+      style.border === undefined
+        ? this.border
+        : style.border === null
+          ? undefined
+          : wholeBorder(style.border);
     const cap = style.cap === undefined ? this.cap : activeCap(style.cap);
     const join = style.join === undefined ? this.join : activeJoin(style.join);
     if (
@@ -770,7 +827,7 @@ export class Stroke extends KufiItem {
     this.points = init.points.map(plainLinePoint);
     this.closed = init.closed ?? false;
     this.rounding = init.rounding;
-    this.border = init.border;
+    this.border = init.border === undefined ? undefined : wholeBorder(init.border);
     this.cap = activeCap(init.cap);
     this.join = activeJoin(init.join);
     this.color = init.color;
@@ -937,7 +994,11 @@ export class Stroke extends KufiItem {
     const rounding =
       style.rounding === undefined ? this.rounding : (style.rounding ?? undefined);
     const border =
-      style.border === undefined ? this.border : (style.border ?? undefined);
+      style.border === undefined
+        ? this.border
+        : style.border === null
+          ? undefined
+          : wholeBorder(style.border);
     const cap = style.cap === undefined ? this.cap : activeCap(style.cap);
     const join = style.join === undefined ? this.join : activeJoin(style.join);
     if (
@@ -1027,7 +1088,7 @@ export class Arc extends KufiItem {
     this.to = plainArcPoint(to);
     this.direction = init.direction;
     this.size = init.size;
-    this.border = init.border;
+    this.border = init.border === undefined ? undefined : wholeBorder(init.border);
     this.cap = activeCap(init.cap);
     this.join = activeJoin(init.join);
     this.color = init.color;
@@ -1225,7 +1286,11 @@ export class Arc extends KufiItem {
       return this;
     }
     const border =
-      style.border === undefined ? this.border : (style.border ?? undefined);
+      style.border === undefined
+        ? this.border
+        : style.border === null
+          ? undefined
+          : wholeBorder(style.border);
     const cap = style.cap === undefined ? this.cap : activeCap(style.cap);
     const join = style.join === undefined ? this.join : activeJoin(style.join);
     if (

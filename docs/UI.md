@@ -226,7 +226,10 @@ the colour swatches instead of locking into a fixed grid, with a single
 rotation button that cycles quarter turns
 (0° → 90° → 180° → 270° → 0°, `R` from the keyboard too). There is deliberately
 **no “إعادة الشكل” button**: the cycle comes back around, and the palette
-re-selects a shape, so a reset only ever saved a click. The style itself is the
+re-selects a shape, so a reset only ever saved a click. It is a tile-only
+section: with nothing selected it is hidden for the line and arc tools, and
+with a selection it is hidden when the selection contains no tile at all (a
+mixed selection keeps it). The style itself is the
 user's, not the board's — see *Settings persistence*. With a selection, a style
 edit is a one-off item patch: the draw style (and the prefs written from it)
 changes only when nothing is selected, so a selected tile's radius, border,
@@ -254,17 +257,33 @@ and for the pen, select, eraser and hand. When shown, it has two three-button
 rows — نهاية الخط (`مسطّحة`, `دائرية`, `مربّعة`) and وصلة الخط (`حادّة`,
 `دائرية`, `مشطوفة`) — for the next diagonal line, polyline or arc and for any
 stroked item in the selection. The defaults are `مسطّحة` and `حادّة`; a border
-on the same item inherits both. The border applies to every item type and is
-always shown. It is painted **outside** the shape — a band whose visible width
-is the slider value, so it never eats into the ink — and its block has only
-that width slider (`0` = no border) and a colour field; the width is the
+on the same item inherits both. The border applies to every item type and its
+block is always shown: the width slider, the side map for tile targets, the
+hint that the band is painted outside the shape
+(`يُرسم الحد خارج الشكل، فلا يغطي الحبر.`), and the colour field. It is
+painted **outside** the shape — a band whose visible width
+is the slider value, so it never eats into the ink — and the width is the
 switch: raising it above `0` adds the border, and a new border starts black
-until the user picks another colour.
+until the user picks another colour. The side map is a physical 3×3 map under
+the slider (four edge buttons around an empty centre), centred like the corner
+map and laid out `dir="ltr"` for the same RTL reason, with a `text-xs`
+muted hint below it. All four sides start on and toggle independently; a side
+switched off clips the band to the sides that remain, so the unselected edges
+show no border while a rounded or circular tile keeps its curve on the painted
+sides. A tile with every side off is the off state, exactly like width `0`; a
+line, polyline or arc border is always whole — its constructors drop a stray
+mask on write, and the map is hidden for those targets; the line tool's
+straight-run squares keep the whole border too, since a line gesture never
+offers the side map. The map obeys the same
+tile-target rule as the corner map: hidden for the line and arc tools with
+nothing selected, and for a selection containing no tile; present for the pen,
+select, eraser and hand with nothing selected; kept by a mixed selection.
 
-Sidebar, top to bottom: الأشكال (palette + rotation), the fill row (لون الحبر
+Sidebar, top to bottom: الأشكال (palette + rotation, tile targets only), the
+fill row (لون الحبر
 with nothing selected, لون التحديد with a selection), التحديد (only while
 something is selected), الاستدارة, أطراف الخط (only for a line/polyline/arc
-target), الحدود, then the board — لون الورقة, نسبة الحبر as the five presets
+target), الحدود (width and colour always, sides for tiles), then the board — لون الورقة, نسبة الحبر as the five presets
 `1:1`…`1:5` (live re-render; the `1:1` hint explains that ink and space are
 equal there, and every preset shows the inner edges of its ink squares), حجم
 الخلية (`base`), قطاعات الدائرة (circular boards only: the angular division, its

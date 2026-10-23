@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  BORDER_ALL,
+  BORDER_BOTTOM,
+  BORDER_LEFT,
+  BORDER_TOP,
   CORNER_ALL,
   DEFAULT_BORDER,
   DEFAULT_PROJECT_CONFIG,
@@ -68,6 +72,8 @@ import {
   shiftSelection,
   strokeStyleApplies,
   styleForSelection,
+  tileTargetApplies,
+  toggleBorderSide,
   wheelSteps,
   wheelZoomDelta,
   zoomPercent,
@@ -944,7 +950,10 @@ describe("strokeStyleApplies", () => {
   });
 });
 
-describe("roundingCornersApplies", () => {
+describe("tileTargetApplies / roundingCornersApplies", () => {
+  // One predicate sits behind the corner map, the side map and the shape
+  // palette; the rounding wrapper is a thin alias of it.
+  const predicates = [tileTargetApplies, roundingCornersApplies] as const;
   const line = makeLine({ column: 0, row: 1 }, { column: 4, row: 1 });
   const stroke = makeStroke(
     [
@@ -962,34 +971,72 @@ describe("roundingCornersApplies", () => {
   const plain = tile(0, 0);
 
   it("shows for the tile tools with nothing selected", () => {
-    for (const tool of ["pen", "select", "eraser", "hand"] as const) {
-      expect(roundingCornersApplies(tool, [], [])).toBe(true);
+    for (const applies of predicates) {
+      for (const tool of ["pen", "select", "eraser", "hand"] as const) {
+        expect(applies(tool, [], [])).toBe(true);
+      }
     }
   });
 
   it("hides for the line and arc tools with nothing selected", () => {
-    expect(roundingCornersApplies("line", [], [])).toBe(false);
-    expect(roundingCornersApplies("arc", [], [])).toBe(false);
+    for (const applies of predicates) {
+      expect(applies("line", [], [])).toBe(false);
+      expect(applies("arc", [], [])).toBe(false);
+    }
   });
 
   it("shows when the selection contains a tile", () => {
-    expect(roundingCornersApplies("select", [plain], [plain.key])).toBe(true);
+    for (const applies of predicates) {
+      expect(applies("select", [plain], [plain.key])).toBe(true);
+    }
   });
 
   it("hides for a lines-only selection even under the pen", () => {
-    for (const item of [line, stroke, arc]) {
-      expect(roundingCornersApplies("pen", [item], [item.key])).toBe(false);
+    for (const applies of predicates) {
+      for (const item of [line, stroke, arc]) {
+        expect(applies("pen", [item], [item.key])).toBe(false);
+      }
     }
   });
 
   it("shows for a mixed selection when any selected item is a tile", () => {
-    expect(
-      roundingCornersApplies("line", [plain, line], [plain.key, line.key]),
-    ).toBe(true);
+    for (const applies of predicates) {
+      expect(applies("line", [plain, line], [plain.key, line.key])).toBe(true);
+    }
   });
 
   it("hides a stale selection even under the pen", () => {
-    expect(roundingCornersApplies("pen", [plain], ["missing-item"])).toBe(false);
+    for (const applies of predicates) {
+      expect(applies("pen", [plain], ["missing-item"])).toBe(false);
+    }
+  });
+});
+
+describe("toggleBorderSide", () => {
+  it("starts from all four sides when the mask is absent", () => {
+    expect(toggleBorderSide(undefined, BORDER_TOP)).toBe(
+      BORDER_ALL & ~BORDER_TOP,
+    );
+    expect(toggleBorderSide(undefined, BORDER_BOTTOM)).toBe(
+      BORDER_ALL & ~BORDER_BOTTOM,
+    );
+  });
+
+  it("flips exactly the clicked side and leaves the rest", () => {
+    expect(toggleBorderSide(BORDER_TOP, BORDER_LEFT)).toBe(
+      BORDER_TOP | BORDER_LEFT,
+    );
+    expect(toggleBorderSide(BORDER_TOP | BORDER_LEFT, BORDER_TOP)).toBe(
+      BORDER_LEFT,
+    );
+  });
+
+  it("can turn every side off, the empty mask the model drops", () => {
+    expect(toggleBorderSide(BORDER_TOP, BORDER_TOP)).toBe(0);
+  });
+
+  it("clamps a stored mask before flipping it", () => {
+    expect(toggleBorderSide(BORDER_TOP | 16, BORDER_TOP)).toBe(0);
   });
 });
 
@@ -1056,6 +1103,18 @@ describe("styleForSelection", () => {
     expect(DEFAULT_STYLE.rounding).toEqual({ radius: 0, corners: CORNER_ALL });
     expect(DEFAULT_STYLE.cap).toBe("butt");
     expect(DEFAULT_STYLE.join).toBe("miter");
+  });
+
+  it("shows a tile's border side subset so the map reflects the board", () => {
+    const masked: CanvasItem = {
+      ...tile(0, 0),
+      border: { width: 2, color: "#000000", sides: BORDER_TOP | BORDER_LEFT },
+    };
+    expect(styleForSelection(DEFAULT_STYLE, masked).border).toEqual({
+      width: 2,
+      color: "#000000",
+      sides: BORDER_TOP | BORDER_LEFT,
+    });
   });
 
   it("shows the off states for an item without style and no rounding on an arc", () => {

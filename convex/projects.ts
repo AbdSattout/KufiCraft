@@ -19,6 +19,7 @@ import {
   sanitizeRounding,
   sanitizeStrokeCap,
   sanitizeStrokeJoin,
+  wholeBorder,
   snapRatio,
   arcKey,
   arcPoint,
@@ -109,9 +110,12 @@ function sanitizeItem(item: CanvasItem, config: ProjectConfig): CanvasItem | nul
   const color = capColor(item.color);
   const key = (value: string) => requireKey(value);
   // A border is the one style every item type can carry; `undefined` stays
-  // `undefined` (the absent state), and a zero width normalises away.
+  // `undefined` (the absent state), and a zero width or empty side mask
+  // normalises away. The side mask belongs to tiles, so the other item types
+  // store the whole-border form.
   const border =
     item.border === undefined ? undefined : sanitizeBorder(item.border);
+  const whole = border === undefined ? undefined : wholeBorder(border);
 
   switch (item.type) {
     case "tile": {
@@ -149,7 +153,7 @@ function sanitizeItem(item: CanvasItem, config: ProjectConfig): CanvasItem | nul
         const rounding = sanitizeRounding(item.rounding);
         if (rounding !== undefined) next.rounding = rounding;
       }
-      if (border !== undefined) next.border = border;
+      if (whole !== undefined) next.border = whole;
       const cap = sanitizeStrokeCap(item.cap);
       const join = sanitizeStrokeJoin(item.join);
       if (cap !== undefined) next.cap = cap;
@@ -181,7 +185,7 @@ function sanitizeItem(item: CanvasItem, config: ProjectConfig): CanvasItem | nul
         const rounding = sanitizeRounding(item.rounding);
         if (rounding !== undefined) next.rounding = rounding;
       }
-      if (border !== undefined) next.border = border;
+      if (whole !== undefined) next.border = whole;
       const cap = sanitizeStrokeCap(item.cap);
       const join = sanitizeStrokeJoin(item.join);
       if (cap !== undefined) next.cap = cap;
@@ -222,7 +226,7 @@ function sanitizeItem(item: CanvasItem, config: ProjectConfig): CanvasItem | nul
         direction,
         size,
       };
-      if (border !== undefined) next.border = border;
+      if (whole !== undefined) next.border = whole;
       const cap = sanitizeStrokeCap(item.cap);
       const join = sanitizeStrokeJoin(item.join);
       if (cap !== undefined) next.cap = cap;

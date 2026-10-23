@@ -21,6 +21,7 @@
  */
 
 import {
+  BORDER_ALL,
   CORNER_ALL,
   DEFAULT_BACKGROUND,
   DEFAULT_BASE,
@@ -50,6 +51,7 @@ import {
   sanitizeStrokeCap,
   sanitizeStrokeJoin,
   snapRatio,
+  wholeBorder,
   strokeKey,
   tileKey,
 } from "@/lib/canvas/model";
@@ -296,12 +298,15 @@ function itemRounding(value: unknown): ItemRounding | undefined {
  * Reads an untrusted border object. The width is the switch: a missing or
  * broken width is the absent state, so the whole field drops rather than
  * silently outlining the shape. A missing / empty colour defaults to black.
+ * A missing side mask means all four sides; a stored mask is clamped to the
+ * four real bits. Both go through the shared sanitiser.
  */
 function itemBorder(value: unknown): ItemBorder | undefined {
   if (!isRecord(value)) return undefined;
   return sanitizeBorder({
     width: isFiniteNumber(value.width) ? value.width : DEFAULT_BORDER_WIDTH,
     color: itemColour(value.color) ?? DEFAULT_BORDER_COLOR,
+    sides: isFiniteNumber(value.sides) ? value.sides : BORDER_ALL,
   });
 }
 
@@ -320,6 +325,8 @@ export function normalizeItem(
     config.gridType === "circular" ? circularSectors(config) - 1 : maxColumn;
   const colour = itemColour(value.color);
   const border = itemBorder(value.border);
+  // The side mask is a tile concern; every other type stores a whole border.
+  const whole = border === undefined ? undefined : wholeBorder(border);
   const rounding = itemRounding(value.rounding);
   const cap = sanitizeStrokeCap(value.cap);
   const join = sanitizeStrokeJoin(value.join);
@@ -359,7 +366,7 @@ export function normalizeItem(
         to,
       };
       if (rounding !== undefined) item.rounding = rounding;
-      if (border !== undefined) item.border = border;
+      if (whole !== undefined) item.border = whole;
       if (cap !== undefined) item.cap = cap;
       if (join !== undefined) item.join = join;
       if (colour !== undefined) item.color = colour;
@@ -394,7 +401,7 @@ export function normalizeItem(
       };
       if (closed) item.closed = true;
       if (rounding !== undefined) item.rounding = rounding;
-      if (border !== undefined) item.border = border;
+      if (whole !== undefined) item.border = whole;
       if (cap !== undefined) item.cap = cap;
       if (join !== undefined) item.join = join;
       if (colour !== undefined) item.color = colour;
@@ -438,7 +445,7 @@ export function normalizeItem(
         direction,
         size,
       };
-      if (border !== undefined) item.border = border;
+      if (whole !== undefined) item.border = whole;
       if (cap !== undefined) item.cap = cap;
       if (join !== undefined) item.join = join;
       if (colour !== undefined) item.color = colour;
