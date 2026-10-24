@@ -7,6 +7,7 @@ import {
   useReducer,
   useRef,
   useState,
+  type ChangeEvent,
   type FormEvent,
 } from "react";
 import { useAction } from "convex/react";
@@ -77,7 +78,7 @@ export function AuthPanel() {
   const [conditionalBusy, setConditionalBusy] = useState(false);
   const busyRef = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  /** True once the user has typed; browser passkey autofill never presses a key. */
+  /** True once the visitor has edited the field; a browser fill never types. */
   const typedRef = useRef(false);
   /** True while a conditional `get()` is waiting for the autofill UI. */
   const conditionalPendingRef = useRef(false);
@@ -298,7 +299,35 @@ export function AuthPanel() {
     }
   }
 
-  function handleChange(next: string) {
+  function handleBeforeInput() {
+    /*
+     * Mobile virtual keyboards often omit keydown (or report it as
+     * `Unidentified`), so `typedRef` must be set from the editing event too.
+     * A passkey fill that does dispatch `beforeinput` is still covered by the
+     * `onRequest` signal once its assertion starts; the important direction
+     * is never treating a keystroke as autofill.
+     */
+    typedRef.current = true;
+  }
+
+  function handleChange(event: ChangeEvent<HTMLInputElement>) {
+    const next = event.target.value;
+    /*
+     * Fallback for browsers that do not dispatch `beforeinput`: a non-empty
+     * inputType names a real edit (`insertText`, `deleteContentBackward`,
+     * `insertCompositionText`, …). Passkey/password autofill replaces the
+     * whole value (`insertReplacementText`) or fires no input event at all.
+     */
+    const inputType = (event.nativeEvent as InputEvent).inputType;
+    if (
+      inputType !== undefined &&
+      inputType !== "" &&
+      inputType !== "insertReplacementText" &&
+      inputType !== "insertFromAutofill"
+    ) {
+      typedRef.current = true;
+    }
+
     if (next !== value) dispatch({ type: "RESET" });
     setValue(next);
 
@@ -352,7 +381,8 @@ export function AuthPanel() {
             spellCheck={false}
             autoFocus
             value={value}
-            onChange={(event) => handleChange(event.target.value)}
+            onChange={handleChange}
+            onBeforeInput={handleBeforeInput}
             onKeyDown={(event) => {
               // Tab/arrows/Escape are not typing; autofill never presses a key.
               if (

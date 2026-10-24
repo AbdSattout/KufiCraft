@@ -230,7 +230,9 @@ Sign-in/sign-up must work **without** passwords, email or OAuth:
      saved passkeys appear in the browser's own autofill; choosing one signs in
      without the button. The browser exposes no selection event, so the panel
      starts its busy state from either a silent username fill or the start of
-     the verify request. A manual `get()`/`create()` aborts the pending
+     the verify request. Typing is detected from `beforeinput`/`inputType`, not
+     keydown alone: virtual keyboards can omit keydown, and a keystroke must
+     never be mistaken for a fill. A manual `get()`/`create()` aborts the pending
      conditional ceremony, so the field re-arms when an attempt settles (and
      when it is focused while empty) — without that, suggestions would stop
      after the first attempt. This is an enhancement only; the
