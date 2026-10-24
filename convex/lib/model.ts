@@ -587,7 +587,7 @@ export interface TileItem {
   zone: Zone;
   /** Shape variant; absent means `square`. */
   shape?: ShapeId;
-  /** Rotation in quarter turns; absent means 0. */
+  /** Rotation in quarter turns; absent means 0. Ignored by the square. */
   rotation?: Rotation;
   /** Corner rounding; absent means square corners. */
   rounding?: ItemRounding;

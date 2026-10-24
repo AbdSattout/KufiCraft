@@ -220,8 +220,10 @@ sets the local flag until the canvas blurs.
 Shape palette (applies to the next drawn tiles and to the current selection):
 square, circle, triangle, quarter circle, semicircle, pentagon, curve, hamza1,
 hamza2, comb — ten glyphs, each drawn by the same `KufiShape` that paints the
-canvas fragment, so the palette icon **respects the current rotation**
-(`tileIconPath`). The glyphs flow side by side and wrap to the next row like
+canvas fragment, so a shaped palette icon **respects the current rotation**
+(`tileIconPath`). The square icon never changes: the square is
+rotation-invariant and always shows the same filled glyph. The glyphs flow side
+by side and wrap to the next row like
 the colour swatches instead of locking into a fixed grid, with a single
 rotation button that cycles quarter turns
 (0° → 90° → 180° → 270° → 0°, `R` from the keyboard too). There is deliberately

@@ -17,7 +17,10 @@
  * A shape is authored as path commands inside a local `0…w × 0…h` box, so the
  * **same** renderer draws the canvas fragment, the toolbar icon (through
  * `tileIconPath`) and the circular-grid fit. Rotation is quarter turns
- * clockwise about the box centre and shifts each arc's x-axis-rotation with it.
+ * clockwise about the box centre and shifts each arc's x-axis-rotation with it
+ * — except for the `square`, which is rotation-invariant: it *is* the
+ * fragment's box, so every turn fills that box unchanged (a quarter turn of a
+ * non-square space strip would otherwise swap its sides).
  */
 
 import type { ItemRounding, Rotation, ShapeId } from "./model";
@@ -43,6 +46,16 @@ export abstract class KufiShape {
   /** How the palette names it (the old app's `title`). */
   abstract readonly label: string;
 
+  /**
+   * True when a quarter turn cannot change the shape's footprint because the
+   * shape *is* its fragment's box. Only the square qualifies: on a non-1:1
+   * board a space fragment is `w × h` with `w !== h`, so rotating the authored
+   * rectangle about its centre would swap the sides and stop filling the
+   * fragment. `path` and the circular-grid fit ignore `rotation` for such a
+   * shape and keep its physical corner mask as stored.
+   */
+  readonly rotationInvariant: boolean = false;
+
   /** Authored commands in a local `0…w × 0…h` box. */
   abstract commands(w: number, h: number): PathCmd[];
 
@@ -50,16 +63,21 @@ export abstract class KufiShape {
    * Filled path of this shape inside `box`, rotated `rotation` quarter turns
    * clockwise around the box centre, with `rounding`'s corners rounded.
    *
-   * The mask is stored physically (top right means top right on screen), while
-   * the shape is authored unrotated, so it is rotated **back** by the shape's
-   * rotation before the corners are chosen.
+   * A rotation-invariant shape (the square) ignores `rotation`: it fills the
+   * box exactly as given at every turn, and its physically stored corner mask
+   * is used as-is. For every other shape the mask is stored physically (top
+   * right means top right on screen) while the shape is authored unrotated, so
+   * it is rotated **back** by the shape's rotation before the corners are
+   * chosen.
    */
   path(box: Rect, rotation: Rotation = 0, rounding?: ItemRounding): string {
-    const turns = normalizeTurns(rotation);
+    const turns = this.rotationInvariant ? 0 : normalizeTurns(rotation);
     const radius = roundingRadius(rounding, box.w, box.h);
     if (radius <= 0) {
-      // Hot path: most fragments are plain, unrotated ink rectangles.
-      if (this.id === "square" && turns === 0) return rectPath(box);
+      // Hot path: most fragments are plain, unrotated ink rectangles. A
+      // rotation-invariant shape is the rectangle itself, so it bypasses the
+      // frame mapping even when a rotation is stored.
+      if (this.rotationInvariant) return rectPath(box);
       return this.inFrame(box.w, box.h, turns, baseFrame(box.x, box.y), 0);
     }
     return this.inFrame(box.w, box.h, turns, baseFrame(box.x, box.y), 0, {
@@ -73,6 +91,9 @@ export abstract class KufiShape {
    * where the fragment is radial/tangential rather than axis-aligned. There is
    * no axis-aligned box on that grid, so a `rounding` mask is read in the
    * shape's **own** frame (the fragment's radial/tangential box).
+   *
+   * A rotation-invariant shape is mapped through the frame unrotated: it fills
+   * the frame's own box, whatever `rotation` says.
    */
   inFrame(
     w: number,
@@ -82,7 +103,7 @@ export abstract class KufiShape {
     rotDeg: number,
     rounding?: CornerRounding,
   ): string {
-    const turns = normalizeTurns(rotation);
+    const turns = this.rotationInvariant ? 0 : normalizeTurns(rotation);
     const turned = composeFrames(quarterTurnFrame(w / 2, h / 2, turns), frame);
     const authored = this.commands(w, h);
     const cmds =
@@ -109,6 +130,7 @@ function normalizeTurns(rotation: Rotation): Rotation {
 class Square extends KufiShape {
   readonly id = "square" as const;
   readonly label = "مربع";
+  readonly rotationInvariant = true;
   commands(w: number, h: number): PathCmd[] {
     return [M(0, 0), L(w, 0), L(w, h), L(0, h), Z];
   }

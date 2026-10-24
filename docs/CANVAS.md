@@ -135,7 +135,10 @@ recolour behaviour), on the client (`paintItems`) and on the backend
 | `arc` | `from`, `to` (`ArcPoint` — a fragment + optional `anchor`), `direction`, `size`, `cap?`, `join?`, `color?` | `arc:<f>><f>\|<direction>\|<size>` (fragments canonical by column, then row, then zone); an arc with a stored anchor ends in `\|<digest>` of its endpoints — an anchor-less arc keys exactly as before |
 
 * `shape` is one of the ten `ShapeId`s (`SHAPE_IDS`), absent = `square`;
-  `rotation` is quarter turns clockwise (`0…3`), absent = 0.
+  `rotation` is quarter turns clockwise (`0…3`), absent = 0. `square` is
+  **rotation-invariant** — it always fills its fragment's own box, including
+  the non-square `space × ink` / `ink × space` strips at `1:2…1:5` — so the
+  renderer ignores its `rotation`; the other nine shapes rotate normally.
 * `color` is a **per-item** colour: it is always written when an item is created
   (`resolvedColor(config, color) = color ?? config.ink`), so changing
   `config.ink` later never repaints what is already on the board. Absent means
@@ -738,6 +741,12 @@ lives in `interaction.ts` and is covered by `interaction.test.ts`:
   confused with the `arc` tool); `comb` is the old untitled tenth entry.
 * Shape ids other than `square` are never stored as `"square"` — `square` is the
   absence of `shape`.
+* The `square` shape is **rotation-invariant**: it *is* the fragment's own box,
+  so `KufiShape.path` ignores its stored `rotation` and leaves the physical
+  corner mask unrotated. A quarter turn of a non-square space strip would swap
+  its width and height and stop filling the fragment. On the circular grid a
+  square is its annular sector, so every turn draws the same sector. Non-square
+  shapes keep rotating normally.
 * `hamza1` / `hamza2` band thickness `min(w, h)/3`; `curve` (old `arc`) band
   thickness `min(w, h)/2`, bulging outward — the palette glyphs are the
   specification (the old `getPathForShape` only ever drew squares).

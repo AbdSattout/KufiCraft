@@ -465,16 +465,16 @@ export class Tile extends KufiItem {
 
   /**
    * Circular fragment: the zone fragment *is* an annular sector, so the square
-   * shape renders as one (and has no corners to round — the sector's own
-   * corners are grid geometry, not the shape's box). Other shapes are fitted
-   * into the slice's radial/tangential frame, which keeps the palette usable on
-   * a polar grid; their corners are rounded in that local frame.
+   * shape renders as one — it is rotation-invariant, so every turn draws the
+   * same sector (and has no corners to round — the sector's own corners are
+   * grid geometry, not the shape's box). Other shapes are fitted into the
+   * slice's radial/tangential frame, which keeps the palette usable on a polar
+   * grid; their corners are rounded in that local frame.
    */
   private circularPath(config: ProjectConfig): string {
     const slice = circularSlice(config, this.column, this.row, this.zone);
-    if (shapeById(this.shape).id === "square" && (this.rotation ?? 0) % 4 === 0) {
-      return slicePath(slice);
-    }
+    const shape = shapeById(this.shape);
+    if (shape.rotationInvariant) return slicePath(slice);
     const aMid = (slice.a1 + slice.a2) / 2;
     const rMid = (slice.r1 + slice.r2) / 2;
     const w = slice.r2 - slice.r1;
@@ -485,7 +485,7 @@ export class Tile extends KufiItem {
     const py = slice.cy + rMid * sin;
     // Local +x runs outward along the radius, local +y counter-clockwise.
     const radius = roundingRadius(this.rounding, w, h);
-    return shapeById(this.shape).inFrame(
+    return shape.inFrame(
       w,
       h,
       this.rotation ?? 0,
@@ -1705,7 +1705,9 @@ export function makeArc(init: ArcInit): ArcItem {
 /**
  * The path the pen paints for `shape` at `rotation`, fitted to a square of
  * `size` — the **same** `Tile.render` the canvas uses, which is what keeps the
- * palette honest. The icon is that path in a `0 0 size size` viewBox.
+ * palette honest. The icon is that path in a `0 0 size size` viewBox. The
+ * square is rotation-invariant, so its icon is the same at every rotation;
+ * every other shape previews its turn.
  */
 export function tileIconPath(
   shape: ShapeId | undefined,

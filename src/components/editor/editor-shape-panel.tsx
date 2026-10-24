@@ -86,7 +86,8 @@ import { usePrimaryModifier } from "./use-primary-modifier";
 /**
  * The palette glyph is the pen's own path — `tileIconPath` runs the very same
  * `Tile.render` the canvas uses — so the icons follow the current rotation and
- * can never show a shape the pen would not paint.
+ * can never show a shape the pen would not paint. The square is
+ * rotation-invariant: its glyph is the same filled box at every rotation.
  */
 function ShapeGlyph({
   shape,

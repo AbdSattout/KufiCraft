@@ -4,7 +4,8 @@
  * The contract is geometric, so the assertions are too: a rounded corner must
  * be a cubic whose controls sit halfway between the trimmed endpoints and the
  * corner, a mask must select exactly the physical corners it names (also on a
- * rotated shape), and the trim must never exceed half an edge.
+ * rotated non-square shape, while the square stays unrotated), and the trim
+ * must never exceed half an edge.
  */
 
 import { describe, expect, it } from "vitest";
@@ -251,20 +252,11 @@ describe("roundCorners", () => {
     expect(found[0].end).toEqual({ x: 10, y: 2 });
   });
 
-  it("rounds through the shape palette, rotating the physical mask with the shape", () => {
-    const square = shapeById("square");
-    expect(square.path(BOX, 0)).toBe(rectPath(BOX));
-
-    const rounded = square.path(BOX, 0, { radius: 0.2, corners: CORNER_ALL });
-    expect(rounded).not.toBe(rectPath(BOX));
-    expect(rounded).toContain(" C ");
-    expect(rounded).not.toContain(" A ");
-
-    // A physical top-left corner on a shape turned a quarter clockwise is the
-    // authored bottom-left corner.
+  it("rounds through the shape palette, rotating the physical mask with non-square shapes", () => {
+    const triangle = shapeById("triangle");
     const box: Rect = { x: 5, y: 7, w: 10, h: 10 };
     const local = roundCorners(
-      square.commands(box.w, box.h),
+      triangle.commands(box.w, box.h),
       { x: 0, y: 0, w: box.w, h: box.h },
       2,
       CORNER_BOTTOM_LEFT,
@@ -274,8 +266,36 @@ describe("roundCorners", () => {
       baseFrame(box.x, box.y),
     );
     expect(
-      square.path(box, 1, { radius: 0.2, corners: CORNER_TOP_LEFT }),
+      triangle.path(box, 1, { radius: 0.2, corners: CORNER_TOP_LEFT }),
     ).toBe(cmdsToPath(mapCommands(local, turned, 90)));
+  });
+
+  it("keeps the square's box and physical mask through every turn", () => {
+    const square = shapeById("square");
+    for (const turn of [0, 1, 2, 3] as const) {
+      expect(square.path(BOX, turn)).toBe(rectPath(BOX));
+    }
+
+    const rounded = square.path(BOX, 0, { radius: 0.2, corners: CORNER_ALL });
+    expect(rounded).not.toBe(rectPath(BOX));
+    expect(rounded).toContain(" C ");
+    expect(rounded).not.toContain(" A ");
+
+    // A rotation-invariant square keeps the physical top-left corner at the
+    // top-left: the mask is not carried around the box with the turn.
+    const box: Rect = { x: 5, y: 7, w: 10, h: 10 };
+    const topLeft = square.path(box, 0, {
+      radius: 0.2,
+      corners: CORNER_TOP_LEFT,
+    });
+    for (const turn of [1, 2, 3] as const) {
+      expect(
+        square.path(box, turn, { radius: 0.2, corners: CORNER_TOP_LEFT }),
+      ).toBe(topLeft);
+    }
+    expect(topLeft).not.toBe(
+      square.path(box, 0, { radius: 0.2, corners: CORNER_BOTTOM_LEFT }),
+    );
   });
 
   it("rounds interior vertices of the pentagon but leaves a circle alone", () => {

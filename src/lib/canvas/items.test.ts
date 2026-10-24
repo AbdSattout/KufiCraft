@@ -587,6 +587,83 @@ describe("render", () => {
 });
 
 /* ------------------------------------------------------------------ */
+/* square rotation invariance                                          */
+/* ------------------------------------------------------------------ */
+
+describe("square rotation invariance", () => {
+  const ROTATIONS: Rotation[] = [0, 1, 2, 3];
+
+  it("fills every fragment at every ratio and turn", () => {
+    for (const preset of RATIO_PRESETS) {
+      const config = makeConfig({ ratio: preset.ratio });
+      for (const zone of [0, 1, 2, 3] as Zone[]) {
+        const box = zoneRect(config, 1, 1, zone);
+        for (const rotation of ROTATIONS) {
+          // Exactly the fragment rectangle — not merely the same bounds — so a
+          // quarter turn cannot swap a non-square strip's width and height.
+          expect(
+            itemRender(config, tile(1, 1, zone, { shape: "square", rotation }))
+              .path,
+          ).toBe(rectPath(box));
+        }
+      }
+    }
+  });
+
+  it("keeps a rounded square on a non-square fragment unrotated", () => {
+    const config = makeConfig({ ratio: 2 / 3 });
+    const box = zoneRect(config, 2, 1, 1); // x-space strip: space × ink.
+    expect(box.w).not.toBe(box.h);
+    const rounding = { radius: 0.2, corners: CORNER_TOP_LEFT };
+    const unrotated = shapePath("square", box, 0, rounding);
+    expect(unrotated).toContain(" C ");
+    for (const rotation of ROTATIONS) {
+      // The silhouette is the fragment box at every turn, and the stored
+      // (physical) corner mask does not travel around it.
+      expect(
+        itemRender(
+          config,
+          tile(2, 1, 1, { shape: "square", rotation, rounding }),
+        ).path,
+      ).toBe(unrotated);
+    }
+  });
+
+  it("leaves rounded ink squares as they were", () => {
+    const box = zoneRect(SQUARE, 1, 2, 0);
+    const rounding = { radius: 0.2, corners: CORNER_TOP_LEFT };
+    const unrotated = shapePath("square", box, 0, rounding);
+    for (const rotation of ROTATIONS) {
+      expect(
+        itemRender(SQUARE, tile(1, 2, 0, { shape: "square", rotation, rounding }))
+          .path,
+      ).toBe(unrotated);
+    }
+  });
+
+  it("still rotates every non-square shape", () => {
+    const config = makeConfig({ ratio: 3 / 4 });
+    const box = zoneRect(config, 1, 1, 1); // x-space strip: space × ink.
+    expect(box.w).not.toBe(box.h);
+    for (const shape of SHAPE_IDS.filter((id) => id !== "square")) {
+      const paths = ROTATIONS.map(
+        (rotation) => itemRender(config, tile(1, 1, 1, { shape, rotation })).path,
+      );
+      expect(new Set(paths).size, shape).toBe(4);
+    }
+  });
+
+  it("draws the square as its annular fragment at every turn", () => {
+    const slice = circularSlice(CIRCULAR, 1, 2, 1);
+    for (const rotation of ROTATIONS) {
+      expect(
+        itemRender(CIRCULAR, tile(1, 2, 1, { shape: "square", rotation })).path,
+      ).toBe(slicePath(slice));
+    }
+  });
+});
+
+/* ------------------------------------------------------------------ */
 /* bounds / contains                                                   */
 /* ------------------------------------------------------------------ */
 
@@ -1317,6 +1394,13 @@ describe("tileIconPath", () => {
     const rotations: Rotation[] = [0, 1, 2, 3];
     const paths = rotations.map((rotation) => tileIconPath("triangle", rotation, 100));
     expect(new Set(paths).size).toBe(4);
+  });
+
+  it("keeps the square icon fixed and consistent at every rotation", () => {
+    const rotations: Rotation[] = [0, 1, 2, 3];
+    const squares = rotations.map((rotation) => tileIconPath("square", rotation, 100));
+    expect(new Set(squares).size).toBe(1);
+    expect(squares[0]).toBe("M 0 0 L 100 0 L 100 100 L 0 100 Z");
   });
 });
 
