@@ -303,6 +303,17 @@ which owns the geometry for that item and nothing else:
 `makeTile` / `makeLine` / `makeStroke` / `makeArc` are the factories the tools
 use, and `styleItem` / `colorItem` / `moveItem` are the pure edit helpers.
 
+**Hit testing is the item's own paint, never its border.** `contains` answers
+for exactly what the renderer paints: a tile's zone rectangle, a straight
+line's bar, a stroke/arc band of half the ink width around its centreline. A
+border is an outline painted *outside* that shape (§5 «Rendering contract»), so
+including it would let a thick border claim the neighbouring fragment; `Tile`
+has always ignored its border in `contains`, and every item now follows that
+rule. This is why a line bar gets **no** `ink/2` padding: at the default 1:3
+preset that would grow an ink bar from 7.5 to 15 units and a space stripe from
+2.5 to 10, reaching the adjacent rows. Thin space stripes are still selectable
+because the hit test is their exact painted rectangle.
+
 ### Stacking (z-order)
 
 `items` **is** the render order: the last item in the array paints on top, and
@@ -505,6 +516,15 @@ anchor-less diagonal) — in `kuficraft-file.ts` and in the backend's
 `sanitizeItem`, so the next write stores the arc that was already on screen.
 Every other legacy arc keeps its key byte-identically; only a repaired arc's
 `|quarter` changes the key, and only on the next write.
+
+**Hit area.** An arc is painted as a stroke of `inkUnit(config)` width, so
+`Arc.contains` tests half that width (`ink/2`) on either side of the centreline,
+inside the arc's angular sweep. Outside the sweep it measures to the nearest
+endpoint, which is the round-cap half-disc of the same radius; `butt` caps are
+flush, so that endpoint disc is a small bounded over-touch, and a `square`
+cap's outer corners are not hit. Every cap allowance is bounded by `ink/2`, so
+the hit area never grows past the width the stroke paints. The old full-
+`inkUnit` radial tolerance doubled the painted band and is gone.
 
 * A rib is a **square-grid item**: a circular board hides every `arc` (§3), so
   the class carries no polar geometry. (Earlier rounds drew a circular arc at the

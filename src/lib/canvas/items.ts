@@ -326,6 +326,13 @@ export abstract class KufiItem {
 
   abstract bounds(config: ProjectConfig): Rect;
 
+  /**
+   * Geometric hit test for selection, the eraser and the tools. It covers the
+   * item's **own paint only**: a border is an outline painted outside the
+   * shape (`draw`), so including it would let a thick border claim a
+   * neighbouring fragment. `Tile` has always worked this way, and every item
+   * follows it.
+   */
   abstract contains(config: ProjectConfig, point: Point): boolean;
 
   abstract cellRange(): CellRange;
@@ -771,12 +778,33 @@ export class Line extends KufiItem {
     );
   }
 
+  /**
+   * Hit testing matches the painted bar exactly, with no `ink/2` padding.
+   *
+   * A straight run is filled as `bar(config)` (rounded corners stay inside
+   * that rectangle), and every edge of the bar is a fragment edge. Padding it
+   * would grow an ink bar from 7.5 to 15 units at the default 1:3 preset — into
+   * the rows above and below — and a space-stripe bar, which is thinner than
+   * the ink unit at every dense preset, would grow into the ink square beside
+   * it. Exact geometry is also what `Tile.contains` does, so a click in a
+   * neighbouring fragment never hits the bar.
+   *
+   * The invalid diagonal fallback is rendered as a stroke of ink width through
+   * the two cell centres; its hit test is the same half-width band
+   * `Stroke.contains` uses, not the whole bounding box.
+   */
   contains(config: ProjectConfig, point: Point): boolean {
     if (this.from.row === this.to.row || this.from.column === this.to.column) {
-      const tolerance = inkUnit(config) / 2;
-      return rectContains(expandRect(this.bounds(config), tolerance), point);
+      return rectContains(this.bar(config), point);
     }
-    return rectContains(this.bounds(config), point);
+    return (
+      distanceToPolyline(
+        point,
+        [cellCentre(config, this.from), cellCentre(config, this.to)],
+        false,
+      ) <=
+      inkUnit(config) / 2 + 1e-9
+    );
   }
 
   cellRange(): CellRange {
@@ -1298,10 +1326,27 @@ export class Arc extends KufiItem {
     return rectFrom(points, inkUnit(config) / 2);
   }
 
+  /**
+   * Hit testing matches the rendered stroke: half the ink width on either side
+   * of the centreline, clipped to the arc's own angular sweep.
+   *
+   * `render` strokes the path at `inkUnit(config)`, so the painted band is
+   * `ink/2` wide radially. The old test used the full `inkUnit`, which doubled
+   * the band and reached neighbouring fragments. Outside the sweep
+   * `distanceToArc` measures to the nearest endpoint — a half-disc of the same
+   * `ink/2` radius. That is exact for `round` caps and a small, bounded
+   * over-touch for `butt` caps (which are flush); `square` caps reach a little
+   * further along the tangent than that disc, so their outer corners stay
+   * unpainted by the hit test. Every cap allowance is bounded by `ink/2`, so
+   * the hit area never grows past the width the stroke paints.
+   *
+   * A border is outside the stroke and is not part of the hit area (see
+   * `KufiItem.contains`).
+   */
   contains(config: ProjectConfig, point: Point): boolean {
     const { start, end, radius, largeArc, sweep } = this.geometry(config);
     const centre = arcCentre(start, end, radius, largeArc, sweep);
-    return distanceToArc(point, centre) <= inkUnit(config);
+    return distanceToArc(point, centre) <= inkUnit(config) / 2 + 1e-9;
   }
 
   cellRange(): CellRange {

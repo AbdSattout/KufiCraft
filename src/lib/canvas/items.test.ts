@@ -17,6 +17,7 @@ import {
   CORNER_ALL,
   CORNER_TOP_LEFT,
   DEFAULT_PROJECT_CONFIG,
+  RATIO_PRESETS,
   SHAPE_IDS,
   arcKey,
   canvasItemValidator,
@@ -35,6 +36,7 @@ import type {
   CanvasItem,
   CanvasItemType,
   Cell,
+  FragmentPoint,
   LineItem,
   LinePoint,
   ProjectConfig,
@@ -46,6 +48,7 @@ import type {
 } from "@/lib/canvas/model";
 import {
   CENTER,
+  arcCentre,
   circularSlice,
   inkUnit,
   polar,
@@ -104,7 +107,7 @@ function tile(
   return { type: "tile", key: tileKey(column, row, zone), column, row, zone, ...extra };
 }
 
-function line(from: Cell, to: Cell, color?: string): LineItem {
+function line(from: FragmentPoint, to: FragmentPoint, color?: string): LineItem {
   return {
     type: "line",
     key: lineKey(from, to),
@@ -600,15 +603,94 @@ describe("bounds / contains", () => {
     expect(itemContains(SQUARE, subject, { x: bounds.x, y: bounds.y })).toBe(true);
   });
 
-  it("pads a line's hit area by half an ink thickness", () => {
+  it("hits a horizontal line's painted bar, never the rows beside it", () => {
     const cell = cellSize(SQUARE);
     const ink = inkUnit(SQUARE);
     const subject = line({ column: 0, row: 1 }, { column: 4, row: 1 });
-    expect(itemBounds(SQUARE, subject)).toEqual({ x: 0, y: cell, w: 4 * cell + ink, h: ink });
-    expect(itemContains(SQUARE, subject, { x: 5, y: cell + ink / 2 })).toBe(true); // on the bar
-    expect(itemContains(SQUARE, subject, { x: 5, y: cell + ink + 1 })).toBe(true); // within ink/2
-    expect(itemContains(SQUARE, subject, { x: 5, y: 25 })).toBe(false); // a cell away
-    expect(itemContains(SQUARE, subject, { x: 5, y: 3 })).toBe(false); // the row above
+    const bar = new Line({ from: subject.from, to: subject.to }).bar(SQUARE);
+    expect(bar).toEqual({ x: 0, y: cell, w: 4 * cell + ink, h: ink });
+
+    // On the painted bar.
+    expect(itemContains(SQUARE, subject, { x: 5, y: bar.y + bar.h / 2 })).toBe(true);
+    // The same cell's y-space strip starts at the bar's bottom edge; one unit
+    // inside it is outside the line (the old ink/2 padding reached it).
+    expect(itemContains(SQUARE, subject, { x: 5, y: bar.y + bar.h + 1 })).toBe(false);
+    // The row above's y-space strip ends at the bar's top edge.
+    expect(itemContains(SQUARE, subject, { x: 5, y: bar.y - 1 })).toBe(false);
+    // Just past either end of the run is another fragment too.
+    expect(itemContains(SQUARE, subject, { x: bar.x + bar.w + 1, y: bar.y + bar.h / 2 })).toBe(false);
+    expect(itemContains(SQUARE, subject, { x: bar.x - 1, y: bar.y + bar.h / 2 })).toBe(false);
+  });
+
+  it("keeps a dense space-stripe line inside its thin stripe", () => {
+    // 1:5 leaves a space stripe only 1/6 of a cell thick — far thinner than
+    // the ink unit the old hit test padded by.
+    const dense = makeConfig({ ratio: RATIO_PRESETS[4].ratio });
+    const cell = cellSize(dense);
+    const ink = inkUnit(dense);
+    const space = cell - ink;
+    const subject = line(
+      { column: 0, row: 1, zone: 2 },
+      { column: 4, row: 1, zone: 2 },
+    );
+    const bar = new Line({ from: subject.from, to: subject.to }).bar(dense);
+    expect(bar).toEqual({ x: 0, y: cell + ink, w: 4 * cell + ink, h: space });
+
+    // The thin stripe itself stays selectable.
+    expect(itemContains(dense, subject, { x: 5, y: bar.y + bar.h / 2 })).toBe(true);
+    // One unit up is the cell's ink fragment; one unit down is the next row.
+    expect(itemContains(dense, subject, { x: 5, y: bar.y - 1 })).toBe(false);
+    expect(itemContains(dense, subject, { x: 5, y: bar.y + bar.h + 1 })).toBe(false);
+    // …and the run's own end does not spill into the next cell either.
+    expect(itemContains(dense, subject, { x: bar.x + bar.w + 1, y: bar.y + bar.h / 2 })).toBe(false);
+  });
+
+  it("hits a vertical line's painted bar, never the columns beside it", () => {
+    const cell = cellSize(SQUARE);
+    const ink = inkUnit(SQUARE);
+    const subject = line({ column: 1, row: 0 }, { column: 1, row: 4 });
+    const bar = new Line({ from: subject.from, to: subject.to }).bar(SQUARE);
+    expect(bar).toEqual({ x: cell, y: 0, w: ink, h: 4 * cell + ink });
+
+    expect(itemContains(SQUARE, subject, { x: bar.x + bar.w / 2, y: 10 })).toBe(true);
+    // The same cell's x-space strip starts at the bar's right edge.
+    expect(itemContains(SQUARE, subject, { x: bar.x + bar.w + 1, y: 10 })).toBe(false);
+    // The column to the left ends at the bar's left edge.
+    expect(itemContains(SQUARE, subject, { x: bar.x - 1, y: 10 })).toBe(false);
+    // Just past the end of the run is another fragment.
+    expect(itemContains(SQUARE, subject, { x: bar.x + bar.w / 2, y: bar.y + bar.h + 1 })).toBe(false);
+  });
+
+  it("hits a diagonal line's stroke band, not its whole bounding box", () => {
+    // A line that is neither axis-aligned is invalid, but legacy data may hold
+    // one: it renders as a stroke of ink width through the two cell centres.
+    const cell = cellSize(SQUARE);
+    const ink = inkUnit(SQUARE);
+    const subject = line({ column: 0, row: 0 }, { column: 2, row: 3 });
+    const from = { x: ink / 2, y: ink / 2 };
+    const to = { x: 2 * cell + ink / 2, y: 3 * cell + ink / 2 };
+    const middle = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
+    expect(itemContains(SQUARE, subject, middle)).toBe(true);
+    // The bounding box corner is far from the painted diagonal.
+    expect(
+      itemContains(SQUARE, subject, {
+        x: from.x + 1,
+        y: to.y - 1,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not grow a line's hit area by its border width", () => {
+    const cell = cellSize(SQUARE);
+    const ink = inkUnit(SQUARE);
+    const bar = line({ column: 0, row: 1 }, { column: 4, row: 1 });
+    const bordered = styleItem(bar, {
+      border: { width: 3, color: "#000000" },
+    });
+    // The border is painted outside the bar, but hit testing is the item's own
+    // paint (the same rule Tile has always followed).
+    expect(itemContains(SQUARE, bordered, { x: 5, y: cell + ink / 2 })).toBe(true);
+    expect(itemContains(SQUARE, bordered, { x: 5, y: cell + ink + 1 })).toBe(false);
   });
 
   it("contains a point within ink/2 of a string", () => {
@@ -647,11 +729,46 @@ describe("bounds / contains", () => {
     expect(itemContains(CIRCULAR, subject, at(23.75, 0.9))).toBe(false); // past the angle
   });
 
-  it("contains a point on an arc within its ink thickness", () => {
+  it("contains a point on an arc, and only within half its ink width", () => {
     const subject = arc({ column: 0, row: 6 }, { column: 4, row: 6 });
     // The semicircle peaks one radius above its centre line.
     expect(itemContains(SQUARE, subject, { x: 23.75, y: 47.5 })).toBe(true);
+    // Four units above the peak: outside the painted half-width (ink/2), but
+    // inside the old full-ink tolerance.
+    expect(itemContains(SQUARE, subject, { x: 23.75, y: 43.5 })).toBe(false);
     expect(itemContains(SQUARE, subject, { x: 500, y: 500 })).toBe(false);
+  });
+
+  it("uses the rendered stroke's half-width as the arc's radial band", () => {
+    const ink = inkUnit(SQUARE);
+    for (const size of ["quarter", "half"] as const) {
+      const subject = new Arc({
+        from: { column: 0, row: 6 },
+        to: { column: 4, row: 6 },
+        direction: "clockwise",
+        size,
+      });
+      const { start, end, radius, largeArc, sweep } = subject.geometry(SQUARE);
+      const centre = arcCentre(start, end, radius, largeArc, sweep);
+      const angle = centre.start + centre.delta / 2;
+      const on = polar(centre.cx, centre.cy, centre.r, angle);
+      const outside = polar(
+        centre.cx,
+        centre.cy,
+        centre.r + ink / 2 + 0.5,
+        angle,
+      );
+      const inside = polar(
+        centre.cx,
+        centre.cy,
+        centre.r - ink / 2 - 0.5,
+        angle,
+      );
+
+      expect(subject.contains(SQUARE, on)).toBe(true);
+      expect(subject.contains(SQUARE, outside)).toBe(false);
+      expect(subject.contains(SQUARE, inside)).toBe(false);
+    }
   });
 });
 

@@ -932,6 +932,41 @@ describe("EraserTool", () => {
 
     expect(out.commit?.items).toEqual([bystander]);
   });
+
+  it("brushes the neighbouring tile without erasing the line above it", () => {
+    // The line is topmost. Its exact bar starts at row 1; the tile sits in the
+    // y-space strip of row 0, one unit above the bar. The old ink/2 padding
+    // reached into that strip, so the eraser would have hit the line first and
+    // deleted it instead of the tile the pointer was on.
+    const line = makeLine({ column: 0, row: 1 }, { column: 4, row: 1 });
+    const neighbour = makeTile({ column: 1, row: 0, zone: 2 });
+    const ctx = context([neighbour, line], { tool: "eraser" });
+
+    const start = beginTool("eraser", ctx, NO_STATE, input(fragmentPointOf(1, 0, 2)));
+    const out = endTool("eraser", ctx, start.state);
+
+    expect(out.commit?.items).toEqual([line]);
+  });
+
+  it("brushes the neighbouring tile without erasing the arc above it", () => {
+    // The arc is topmost and its left spring point is on the ink edge of row
+    // 6. The tile's centre is one row below that point, 6.27 units away: inside
+    // the old full-ink tolerance (7.52) but well outside the painted ink/2
+    // band (3.76).
+    const rib = makeArc({
+      from: { column: 0, row: 6 },
+      to: { column: 4, row: 6 },
+      direction: "clockwise",
+      size: "half",
+    });
+    const neighbour = makeTile({ column: 0, row: 7, zone: 0 });
+    const ctx = context([neighbour, rib], { tool: "eraser" });
+
+    const start = beginTool("eraser", ctx, NO_STATE, input(pointOf(0, 7)));
+    const out = endTool("eraser", ctx, start.state);
+
+    expect(out.commit?.items).toEqual([rib]);
+  });
 });
 
 describe("SelectTool", () => {
