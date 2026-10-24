@@ -45,6 +45,7 @@ import {
   zoneOf,
 } from "./model";
 import type {
+  Anchor,
   ArcDirection,
   ArcItem,
   ArcPoint,
@@ -156,6 +157,59 @@ function rectFrom(points: readonly Point[], pad: number): Rect {
  */
 function plainFragment(point: FragmentPoint): FragmentPoint {
   return fragmentPoint(point.column, point.row, point.zone);
+}
+
+/** A fragment with its canonical (zone-0 included) zone. */
+function fragmentAnchor(point: FragmentPoint): Anchor {
+  return { column: point.column, row: point.row, zone: zoneOf(point) };
+}
+
+/**
+ * One axis of a signed half-cell translation.
+ *
+ * A zone bit is an absolute half of its cell: bit 0 is the right half, bit 1
+ * the bottom half. Moving `half` half-cells therefore adds to the absolute
+ * half coordinate `2 · index + bit`; the carry or borrow lands in the cell
+ * index and the remainder is the new bit. This is a real translation — a
+ * right-half fragment pushed right moves into the next cell, instead of
+ * flipping back into the left half of its own cell (which a zone XOR did).
+ */
+function shiftedHalf(
+  index: number,
+  bit: 0 | 1,
+  half: number,
+): { index: number; bit: 0 | 1 } {
+  const t = 2 * index + bit + half;
+  return {
+    index: Math.floor(t / 2),
+    bit: (((t % 2) + 2) % 2) as 0 | 1,
+  };
+}
+
+/** A fragment translated by whole cells plus signed half-cell steps. */
+function shiftedFragment(
+  fragment: FragmentPoint,
+  columns: number,
+  rows: number,
+  halfColumns: number,
+  halfRows: number,
+): Anchor {
+  const zone = zoneOf(fragment);
+  const x = shiftedHalf(
+    fragment.column + columns,
+    (zone & 1) as 0 | 1,
+    halfColumns,
+  );
+  const y = shiftedHalf(
+    fragment.row + rows,
+    ((zone >> 1) & 1) as 0 | 1,
+    halfRows,
+  );
+  return {
+    column: x.index,
+    row: y.index,
+    zone: (x.bit | (y.bit << 1)) as Zone,
+  };
 }
 
 /**
@@ -277,12 +331,26 @@ export abstract class KufiItem {
   abstract cellRange(): CellRange;
 
   /**
-   * The same item shifted by whole cells, with an optional XOR of its zone
-   * bits (keys are derived, so they follow). The mask is only a translation
-   * at 1:1, where the four fragments are congruent; callers pass `0` at every
-   * denser ratio.
+   * The same item shifted by whole cells plus an optional signed half-cell
+   * displacement, in half-cell units (keys are derived, so they follow). Half
+   * steps are a translation only at 1:1, where the four fragments are
+   * congruent; callers pass `0` at every denser ratio and on the circular
+   * grid. Each fragment carries or borrows on its own, so a mixed-zone item
+   * keeps its shape instead of folding one end back over the other.
    */
-  abstract moved(columns: number, rows: number, zoneMask?: Zone): KufiItem;
+  abstract moved(
+    columns: number,
+    rows: number,
+    halfColumns?: number,
+    halfRows?: number,
+  ): KufiItem;
+
+  /**
+   * Every fragment the item addresses: its tile quadrant, its two endpoints,
+   * or every stroke point. A move needs them to clamp half steps at the grid
+   * edge per fragment rather than per cell.
+   */
+  abstract fragments(): readonly Anchor[];
 
   /** Colour override; `undefined` returns the item to the config ink. */
   withColor(color: string | undefined): KufiItem {
@@ -468,11 +536,14 @@ export class Tile extends KufiItem {
     };
   }
 
-  moved(columns: number, rows: number, zoneMask = 0): Tile {
+  fragments(): readonly Anchor[] {
+    return [{ column: this.column, row: this.row, zone: this.zone }];
+  }
+
+  moved(columns: number, rows: number, halfColumns = 0, halfRows = 0): Tile {
+    const at = shiftedFragment(this, columns, rows, halfColumns, halfRows);
     return new Tile({
-      column: this.column + columns,
-      row: this.row + rows,
-      zone: (this.zone ^ zoneMask) as Zone,
+      ...at,
       shape: this.shape,
       rotation: this.rotation,
       rounding: this.rounding,
@@ -717,18 +788,14 @@ export class Line extends KufiItem {
     };
   }
 
-  moved(columns: number, rows: number, zoneMask = 0): Line {
+  fragments(): readonly Anchor[] {
+    return [fragmentAnchor(this.from), fragmentAnchor(this.to)];
+  }
+
+  moved(columns: number, rows: number, halfColumns = 0, halfRows = 0): Line {
     return new Line({
-      from: {
-        column: this.from.column + columns,
-        row: this.from.row + rows,
-        zone: (zoneOf(this.from) ^ zoneMask) as Zone,
-      },
-      to: {
-        column: this.to.column + columns,
-        row: this.to.row + rows,
-        zone: (zoneOf(this.to) ^ zoneMask) as Zone,
-      },
+      from: shiftedFragment(this.from, columns, rows, halfColumns, halfRows),
+      to: shiftedFragment(this.to, columns, rows, halfColumns, halfRows),
       rounding: this.rounding,
       border: this.border,
       cap: this.cap,
@@ -950,16 +1017,22 @@ export class Stroke extends KufiItem {
     return cellRangeOf(this.points);
   }
 
-  moved(columns: number, rows: number, zoneMask = 0): Stroke {
+  fragments(): readonly Anchor[] {
+    return this.points.map(fragmentAnchor);
+  }
+
+  moved(columns: number, rows: number, halfColumns = 0, halfRows = 0): Stroke {
     return new Stroke({
-      points: this.points.map((point) =>
-        linePoint(
-          point.column + columns,
-          point.row + rows,
-          (zoneOf(point) ^ zoneMask) as Zone,
-          point.anchor,
-        ),
-      ),
+      points: this.points.map((point) => {
+        const at = shiftedFragment(
+          point,
+          columns,
+          rows,
+          halfColumns,
+          halfRows,
+        );
+        return linePoint(at.column, at.row, at.zone, point.anchor);
+      }),
       closed: this.closed,
       rounding: this.rounding,
       border: this.border,
@@ -1240,20 +1313,22 @@ export class Arc extends KufiItem {
     };
   }
 
-  moved(columns: number, rows: number, zoneMask = 0): Arc {
+  fragments(): readonly Anchor[] {
+    return [fragmentAnchor(this.from), fragmentAnchor(this.to)];
+  }
+
+  moved(columns: number, rows: number, halfColumns = 0, halfRows = 0): Arc {
+    const from = shiftedFragment(
+      this.from,
+      columns,
+      rows,
+      halfColumns,
+      halfRows,
+    );
+    const to = shiftedFragment(this.to, columns, rows, halfColumns, halfRows);
     return new Arc({
-      from: arcPoint(
-        this.from.column + columns,
-        this.from.row + rows,
-        (zoneOf(this.from) ^ zoneMask) as Zone,
-        this.from.anchor,
-      ),
-      to: arcPoint(
-        this.to.column + columns,
-        this.to.row + rows,
-        (zoneOf(this.to) ^ zoneMask) as Zone,
-        this.to.anchor,
-      ),
+      from: arcPoint(from.column, from.row, from.zone, this.from.anchor),
+      to: arcPoint(to.column, to.row, to.zone, this.to.anchor),
       direction: this.direction,
       size: this.size,
       border: this.border,
@@ -1443,13 +1518,21 @@ export function itemCellRange(item: CanvasItem): CellRange {
   return itemOf(item).cellRange();
 }
 
+/** Every fragment the item addresses (tile quadrant, endpoints, stroke points). */
+export function itemFragments(item: CanvasItem): readonly Anchor[] {
+  return itemOf(item).fragments();
+}
+
 export function moveItem(
   item: CanvasItem,
   columns: number,
   rows: number,
-  zoneMask: Zone = 0,
+  halfColumns: number = 0,
+  halfRows: number = 0,
 ): CanvasItem {
-  return itemOf(item).moved(columns, rows, zoneMask).toJSON();
+  return itemOf(item)
+    .moved(columns, rows, halfColumns, halfRows)
+    .toJSON();
 }
 
 export function colorItem(item: CanvasItem, color: string | undefined): CanvasItem {

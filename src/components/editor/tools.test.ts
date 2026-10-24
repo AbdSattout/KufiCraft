@@ -16,7 +16,7 @@ import {
   DEFAULT_STYLE,
   moveItems,
 } from "./interaction";
-import type { ToolContext } from "./interaction";
+import type { MoveOffset, ToolContext } from "./interaction";
 import {
   NO_STATE,
   TOOLS,
@@ -43,6 +43,16 @@ import {
 const CONFIG: ProjectConfig = { ...DEFAULT_PROJECT_CONFIG, base: 10 };
 /** The equal 1:1 cell, where the four fragments are congruent. */
 const EQUAL: ProjectConfig = { ...CONFIG, ratio: RATIO_PRESETS[0].ratio };
+
+/** A move offset: whole cells plus signed half-cell steps. */
+function move(
+  dColumn: number,
+  dRow: number,
+  dHalfColumn = 0,
+  dHalfRow = 0,
+): MoveOffset {
+  return { dColumn, dRow, dHalfColumn, dHalfRow };
+}
 
 function context(
   items: readonly CanvasItem[] = [],
@@ -955,7 +965,7 @@ describe("SelectTool", () => {
     // diffs it against what it has (`toOps`), so a commit holding only the
     // fragments would read as "delete everything else".
     expect(out.commit?.items).toEqual(
-      moveItems(CONFIG, items, [tile.key], 2, 1),
+      moveItems(CONFIG, items, [tile.key], move(2, 1)),
     );
     expect(out.commit?.items).toHaveLength(items.length);
     expect(out.commit?.items).toContainEqual(other);
@@ -1042,7 +1052,7 @@ describe("SelectTool", () => {
       input(fragmentPointOf(2, 2, 1, EQUAL)),
     );
 
-    // The preview is the commit: both resolve the same zone toggle.
+    // The preview is the commit: both resolve the same signed half-cell step.
     expect(previewTool("select", ctx, dragged.state).items).toEqual([
       makeTile({ column: 2, row: 2, zone: 1 }),
     ]);
@@ -1076,7 +1086,7 @@ describe("SelectTool", () => {
     expect(out.commit?.selection).toEqual([tileKey(4, 3, 2)]);
   });
 
-  it("applies the same zone toggle to a multi-selection", () => {
+  it("applies the same half-cell translation to a multi-selection", () => {
     const first = makeTile({ column: 2, row: 2, zone: 0 });
     const second = makeTile({ column: 5, row: 2, zone: 1 });
     const ctx = context([first, second], {
@@ -1090,7 +1100,9 @@ describe("SelectTool", () => {
       NO_STATE,
       input(fragmentPointOf(2, 2, 0, EQUAL)),
     );
-    // One cell right, zone 0 -> 1: both items get the same half-cell shift.
+    // The pointer moves 1½ cells (left half of cell 2 to right half of cell
+    // 3), so every fragment moves 1½ cells: the right-hand zone 1 carries
+    // into the ink half of cell 7, it does not flip back left.
     const dragged = moveTool(
       "select",
       ctx,
@@ -1101,11 +1113,11 @@ describe("SelectTool", () => {
 
     expect(out.commit?.selection).toEqual([
       tileKey(3, 2, 1),
-      tileKey(6, 2, 0),
+      tileKey(7, 2, 0),
     ]);
     expect(out.commit?.items.map((item) => item.key)).toEqual([
       tileKey(3, 2, 1),
-      tileKey(6, 2, 0),
+      tileKey(7, 2, 0),
     ]);
   });
 
@@ -1133,10 +1145,10 @@ describe("SelectTool", () => {
     expect(out.commit?.selection).toEqual([tileKey(3, 3, 0)]);
   });
 
-  it("clamps the pointer at the edge but still applies its zone toggle", () => {
-    // Last column, middle row: the x edge has no space fragment left of the
-    // board, but the y zone is still on it. A pointer dragged off the right
-    // edge clamps into the last cell's ink zone; its y zone still toggles.
+  it("clamps the pointer at the edge without inventing a half step", () => {
+    // Last column, middle row: a pointer dragged off the right edge clamps
+    // into the last cell's ink half, so there is no x half step at all; the
+    // y half step still applies.
     const tile = makeTile({ column: 99, row: 50, zone: 0 });
     const ctx = context([tile], { config: EQUAL, tool: "select" });
     const start = beginTool(

@@ -53,7 +53,6 @@ import type {
   ShapeId,
   StrokeCap,
   StrokeJoin,
-  Zone,
 } from "@/lib/canvas/model";
 import {
   cellCentre,
@@ -70,6 +69,7 @@ import {
   itemBounds as boundsOfItem,
   itemCellRange,
   itemContains as hitTestItem,
+  itemFragments,
   itemIntersectsRect,
   makeArc,
   makeLine,
@@ -504,51 +504,139 @@ export function clampDelta(
   return { dColumn: clampedColumn, dRow: clampedRow };
 }
 
+/** Whether the board carries congruent half-cell zones: only the 1:1 square. */
+function hasHalfCellZones(config: ProjectConfig): boolean {
+  return config.gridType === "square" && config.ratio === RATIO_PRESETS[0].ratio;
+}
+
 /**
- * How far an item moves: whole cells plus the zone bits a 1:1 pointer move
- * toggles on every fragment it carries.
+ * Splits a net half-cell translation into whole cells plus a signed remainder.
+ * A remainder keeps the move's direction, so one half step left is
+ * `{ dColumn: 0, dHalfColumn: -1 }`, not a zone flip. The two parts are only a
+ * representation: every item translates by `2 · dColumn + dHalfColumn` halves,
+ * which is what lets a mixed-zone item carry and borrow per fragment.
+ */
+function splitHalfMove(halfColumns: number, halfRows: number): MoveOffset {
+  const whole = (halves: number): number => {
+    const value = Math.trunc(halves / 2);
+    return value === 0 ? 0 : value; // normalise -0
+  };
+  const dColumn = whole(halfColumns);
+  const dRow = whole(halfRows);
+  return {
+    dColumn,
+    dRow,
+    dHalfColumn: halfColumns - 2 * dColumn,
+    dHalfRow: halfRows - 2 * dRow,
+  };
+}
+
+/**
+ * How far a selection moves: whole cells plus a **signed** half-cell
+ * displacement, in half-cell units (1 = half a cell; negative = left/top).
  *
- * A zone is a quadrant of the cell, so moving from one zone to another is a
- * half-cell translation — but **only at 1:1**, where all four fragments are
- * congruent. At every denser preset a zone change would resize the fragment,
- * so moves keep the item's zones and let them ride along.
+ * A zone is a quadrant of the cell, so moving between zones is a half-cell
+ * translation — but **only at 1:1**, where all four fragments are congruent.
+ * At every denser preset a zone change would resize the fragment, so moves
+ * keep the item's zones and let them ride along; the circular grid has no
+ * cartesian half-cell zones at all.
  */
 export interface MoveOffset {
   dColumn: number;
   dRow: number;
-  /** Zone bits to XOR into every moved fragment (`0` at every ratio but 1:1). */
-  zone: Zone;
+  /** Signed x half-cell displacement (`0` outside the 1:1 square grid). */
+  dHalfColumn: number;
+  /** Signed y half-cell displacement (`0` outside the 1:1 square grid). */
+  dHalfRow: number;
 }
 
 /**
  * The translation between two pointer anchors.
  *
- * The cell delta carries the move; at 1:1 the pointer's start/end zones add a
- * uniform half-cell translation, expressed as an XOR mask so it applies to
- * every zone an item carries (tile, line/arc ends, stroke points) without
- * knowing what those zones are. Anchors stay relative to their own fragment,
- * so a point keeps its position inside the translated square.
- *
- * Anchors are the pointer's, not the grabbed item's: the item follows the
- * pointer's fragment, which is what makes a same-cell zone drag work.
+ * At 1:1 the pointer's absolute half-cell coordinate is `2 · column + zone
+ * bit`; subtracting the start from the end gives the signed half-cell
+ * displacement. Splitting that displacement into cells and a remainder is
+ * only a representation — the per-fragment carry happens in the item's move,
+ * so zone 1 travelling right lands in the next cell instead of folding back
+ * into the left half. Anchors are the pointer's, not the grabbed item's: the
+ * item follows the pointer's fragment, which is what makes a same-cell zone
+ * drag work.
  */
 export function moveOffset(
   config: ProjectConfig,
   from: Anchor,
   to: Anchor,
 ): MoveOffset {
-  const zone =
-    config.gridType === "square" && config.ratio === RATIO_PRESETS[0].ratio
-      ? ((from.zone ^ to.zone) as Zone)
-      : 0;
-  return {
-    dColumn: to.column - from.column,
-    dRow: to.row - from.row,
-    zone,
-  };
+  const dColumn = to.column - from.column;
+  const dRow = to.row - from.row;
+  if (!hasHalfCellZones(config)) {
+    return { dColumn, dRow, dHalfColumn: 0, dHalfRow: 0 };
+  }
+  return splitHalfMove(
+    2 * dColumn + (to.zone & 1) - (from.zone & 1),
+    2 * dRow + ((to.zone >> 1) & 1) - ((from.zone >> 1) & 1),
+  );
 }
 
-/** Clamps a move's cells to the grid, leaving its zone toggle untouched. */
+/** Allowed net half-cell translation per axis for the selected fragments. */
+interface HalfMoveLimits {
+  minColumn: number;
+  maxColumn: number;
+  minRow: number;
+  maxRow: number;
+}
+
+/**
+ * The range of net half-cell translations that keeps every selected fragment
+ * on the board.
+ *
+ * A fragment's absolute half coordinate is `2 · column + bit`; translating it
+ * by `H` halves leaves the grid when the result falls outside `[0, 2 ·
+ * maxIndex + 1]`. Limits are taken across every fragment (both endpoints of a
+ * line/arc, every stroke point), so one right-edge space fragment clamps the
+ * whole selection exactly as it would a tile.
+ */
+function halfMoveLimits(
+  config: ProjectConfig,
+  items: readonly CanvasItem[],
+  keys: readonly string[],
+): HalfMoveLimits {
+  const wanted = new Set(keys);
+  const grid = cellLimits(config);
+  let minColumn = -Infinity;
+  let maxColumn = Infinity;
+  let minRow = -Infinity;
+  let maxRow = Infinity;
+  let found = false;
+  for (const item of items) {
+    if (!wanted.has(item.key)) continue;
+    for (const fragment of itemFragments(item)) {
+      found = true;
+      const x = fragment.zone & 1;
+      const y = (fragment.zone >> 1) & 1;
+      minColumn = Math.max(minColumn, -2 * fragment.column - x);
+      maxColumn = Math.min(
+        maxColumn,
+        2 * (grid.maxColumn - fragment.column) + 1 - x,
+      );
+      minRow = Math.max(minRow, -2 * fragment.row - y);
+      maxRow = Math.min(maxRow, 2 * (grid.maxRow - fragment.row) + 1 - y);
+    }
+  }
+  if (!found) return { minColumn: 0, maxColumn: 0, minRow: 0, maxRow: 0 };
+  return { minColumn, maxColumn, minRow, maxRow };
+}
+
+/**
+ * Clamps a move to the grid.
+ *
+ * A pure whole-cell move keeps the old cell clamp on every board, so a drag
+ * that cannot fit does not turn into a stray half step. When a move carries a
+ * half component, the **net** half-cell translation is clamped instead of the
+ * cell and half parts separately: a right-edge fragment in zone 1 or 3 has no
+ * room for `+½`, but an inward `-½` is still legal, and clamping the parts
+ * independently could let a clamped cell delta reverse the half step.
+ */
 export function clampMoveOffset(
   config: ProjectConfig,
   items: readonly CanvasItem[],
@@ -562,7 +650,33 @@ export function clampMoveOffset(
     offset.dColumn,
     offset.dRow,
   );
-  return { ...offset, ...delta };
+  if (!hasHalfCellZones(config)) {
+    return {
+      dColumn: delta.dColumn,
+      dRow: delta.dRow,
+      dHalfColumn: 0,
+      dHalfRow: 0,
+    };
+  }
+  const limits = halfMoveLimits(config, items, keys);
+  const halfColumn =
+    offset.dHalfColumn === 0
+      ? 2 * delta.dColumn
+      : Math.min(
+          Math.max(
+            2 * offset.dColumn + offset.dHalfColumn,
+            limits.minColumn,
+          ),
+          limits.maxColumn,
+        );
+  const halfRow =
+    offset.dHalfRow === 0
+      ? 2 * delta.dRow
+      : Math.min(
+          Math.max(2 * offset.dRow + offset.dHalfRow, limits.minRow),
+          limits.maxRow,
+        );
+  return splitHalfMove(halfColumn, halfRow);
 }
 
 /** Sector indices wrap on the circular grid, so a move cannot escape the ring. */
@@ -617,38 +731,40 @@ function wrapRows(config: ProjectConfig, item: CanvasItem): CanvasItem {
 function shiftedItem(
   config: ProjectConfig,
   item: CanvasItem,
-  dColumn: number,
-  dRow: number,
-  zoneMask: Zone,
+  offset: MoveOffset,
 ): CanvasItem {
-  const moved = moveItem(item, dColumn, dRow, zoneMask);
+  const half = hasHalfCellZones(config);
+  const moved = moveItem(
+    item,
+    offset.dColumn,
+    offset.dRow,
+    half ? offset.dHalfColumn : 0,
+    half ? offset.dHalfRow : 0,
+  );
   return config.gridType === "circular" ? wrapRows(config, moved) : moved;
 }
 
 /**
- * The listed items moved by `(dColumn, dRow)` and the optional `zoneMask`, in
- * their original order — the moved **fragments only**, which is what a live
- * preview paints over the board. A commit needs the whole board, so use
- * `moveItems` for one: a `ToolCommit` is diffed against the document
- * (`toOps`), and a list of fragments alone reads as “delete everything else”.
+ * The listed items moved by `offset`, in their original order — the moved
+ * **fragments only**, which is what a live preview paints over the board. A
+ * commit needs the whole board, so use `moveItems` for one: a `ToolCommit` is
+ * diffed against the document (`toOps`), and a list of fragments alone reads
+ * as “delete everything else”.
  *
- * `zoneMask` is the 1:1 translation mask from `moveOffset`; every item's
- * fragments toggle by the same bits, so the preview and the commit can share
- * one offset.
+ * The same offset drives preview and commit; its signed half-cell part is
+ * applied per fragment, so a mixed-zone selection keeps its internal layout.
  */
 export function shiftSelection(
   config: ProjectConfig,
   items: readonly CanvasItem[],
   keys: readonly string[],
-  dColumn: number,
-  dRow: number,
-  zoneMask: Zone = 0,
+  offset: MoveOffset,
 ): CanvasItem[] {
   const wanted = new Set(keys);
   const moved: CanvasItem[] = [];
   for (const item of items) {
     if (wanted.has(item.key)) {
-      moved.push(shiftedItem(config, item, dColumn, dRow, zoneMask));
+      moved.push(shiftedItem(config, item, offset));
     }
   }
   return moved;
@@ -666,21 +782,23 @@ interface MovePlan {
 }
 
 /**
- * Moves the listed items by whole cells (clamped to the grid) plus the 1:1
- * zone toggle. Shape, rotation, colour and the arc's direction/size are
- * preserved; keys follow the anchors. Moved items keep their relative order
- * and land on top.
+ * Moves the listed items by `offset`, clamped to the grid. Shape, rotation,
+ * colour and the arc's direction/size are preserved; keys follow the anchors.
+ * Moved items keep their relative order and land on top.
  */
 function movePlan(
   config: ProjectConfig,
   items: readonly CanvasItem[],
   keys: readonly string[],
-  dColumn: number,
-  dRow: number,
-  zoneMask: Zone = 0,
+  offset: MoveOffset,
 ): MovePlan {
-  const delta = clampDelta(config, items, keys, dColumn, dRow);
-  if (delta.dColumn === 0 && delta.dRow === 0 && zoneMask === 0) {
+  const delta = clampMoveOffset(config, items, keys, offset);
+  if (
+    delta.dColumn === 0 &&
+    delta.dRow === 0 &&
+    delta.dHalfColumn === 0 &&
+    delta.dHalfRow === 0
+  ) {
     return { items: [...items], movedByKey: new Map() };
   }
   const wanted = new Set(keys);
@@ -689,13 +807,7 @@ function movePlan(
   const movedByKey = new Map<string, string>();
   for (const item of items) {
     if (wanted.has(item.key)) {
-      const next = shiftedItem(
-        config,
-        item,
-        delta.dColumn,
-        delta.dRow,
-        zoneMask,
-      );
+      const next = shiftedItem(config, item, delta);
       moved.push(next);
       movedByKey.set(item.key, next.key);
     } else {
@@ -706,7 +818,7 @@ function movePlan(
 }
 
 /**
- * Moves the listed items by whole cells (clamped to the grid) and answers with
+ * Moves the listed items by `offset` (clamped to the grid) and answers with
  * the whole board. Shape, rotation, colour and the arc's direction/size are
  * preserved; keys follow the anchors. Moved items keep their relative order
  * and land on top.
@@ -715,10 +827,9 @@ export function moveItems(
   config: ProjectConfig,
   items: readonly CanvasItem[],
   keys: readonly string[],
-  dColumn: number,
-  dRow: number,
+  offset: MoveOffset,
 ): CanvasItem[] {
-  return movePlan(config, items, keys, dColumn, dRow).items;
+  return movePlan(config, items, keys, offset).items;
 }
 
 /** A move with the selection remapped to the moved items' new keys. */
@@ -735,8 +846,8 @@ export interface MoveSelectionResult {
  * items. This is the move entry point gesture code should use: `moveItems`
  * alone returns the board, and a caller that then keeps the **old** keys would
  * silently drop the selection on the next render (`pruneSelection` drops keys
- * with no item). `zoneMask` is the 1:1 translation from `moveOffset`, passed
- * alongside the cell delta so a same-cell zone drag still renames the
+ * with no item). `offset` is the `moveOffset` translation — cell delta and
+ * signed half-cell carry together — so a same-cell zone drag still renames the
  * fragments. `keys` comes back in the same order so a multi-selection stays in
  * the order the user built it; a move clamped to zero keeps every key as it is.
  */
@@ -744,11 +855,9 @@ export function moveItemsWithSelection(
   config: ProjectConfig,
   items: readonly CanvasItem[],
   keys: readonly string[],
-  dColumn: number,
-  dRow: number,
-  zoneMask: Zone = 0,
+  offset: MoveOffset,
 ): MoveSelectionResult {
-  const plan = movePlan(config, items, keys, dColumn, dRow, zoneMask);
+  const plan = movePlan(config, items, keys, offset);
   const seen = new Set<string>();
   const remapped: string[] = [];
   for (const key of keys) {
@@ -830,13 +939,12 @@ export function duplicateItems(
   const taken = new Set(items.map((item) => item.key));
   const copies: CanvasItem[] = [];
   const newKeys: string[] = [];
-  for (const item of shiftSelection(
-    config,
-    items,
-    keys,
-    delta.dColumn,
-    delta.dRow,
-  )) {
+  for (const item of shiftSelection(config, items, keys, {
+    dColumn: delta.dColumn,
+    dRow: delta.dRow,
+    dHalfColumn: 0,
+    dHalfRow: 0,
+  })) {
     if (taken.has(item.key)) continue;
     taken.add(item.key);
     copies.push(item);

@@ -82,6 +82,7 @@ import {
 } from "./interaction";
 import type {
   DrawStyle,
+  MoveOffset,
   ScrollLike,
   ToolContext,
   WheelGesture,
@@ -95,6 +96,16 @@ const equal: ProjectConfig = { ...square, ratio: RATIO_PRESETS[0].ratio };
 const circular12: ProjectConfig = { ...circular, circularSectors: 12 };
 
 type TileExtra = Partial<Pick<TileItem, "shape" | "rotation" | "color">>;
+
+/** A move offset: whole cells plus signed half-cell steps. */
+function move(
+  dColumn: number,
+  dRow: number,
+  dHalfColumn = 0,
+  dHalfRow = 0,
+): MoveOffset {
+  return { dColumn, dRow, dHalfColumn, dHalfRow };
+}
 
 function tile(
   column: number,
@@ -402,8 +413,7 @@ describe("selection operations", () => {
       square,
       items,
       [tileKey(0, 0, 0), tileKey(1, 0, 0)],
-      2,
-      3,
+      move(2, 3),
     );
     const circle = moved.find((item) => item.key === tileKey(2, 3, 0));
     expect(circle).toMatchObject({
@@ -420,7 +430,7 @@ describe("selection operations", () => {
 
   it("moves a space fragment without changing its zone", () => {
     const space = tile(3, 4, 2);
-    expect(moveItems(square, [space], [space.key], 1, 1)).toEqual([
+    expect(moveItems(square, [space], [space.key], move(1, 1))).toEqual([
       tile(4, 5, 2),
     ]);
   });
@@ -430,8 +440,7 @@ describe("selection operations", () => {
       square,
       items,
       [tileKey(9, 9, 0), tileKey(0, 0, 0)],
-      1,
-      0,
+      move(1, 0),
     );
     expect(shifted.map((item) => item.key)).toEqual([
       tileKey(1, 0, 0),
@@ -444,8 +453,7 @@ describe("selection operations", () => {
       square,
       items,
       [tileKey(9, 9, 0), tileKey(0, 0, 0), tileKey(1, 0, 0)],
-      2,
-      3,
+      move(2, 3),
     );
     // Keys embed the cell, so every moved item has a new identity. The
     // returned keys follow the selection order, not the board order.
@@ -461,8 +469,7 @@ describe("selection operations", () => {
         square,
         items,
         [tileKey(9, 9, 0), tileKey(0, 0, 0), tileKey(1, 0, 0)],
-        2,
-        3,
+        move(2, 3),
       ),
     );
   });
@@ -472,7 +479,7 @@ describe("selection operations", () => {
     // A stray key is kept too: `pruneSelection` owns dropping keys that have
     // no item, so the move helper never silently rewrites the selection.
     const keys = [tileKey(99, 99, 0), "ghost"];
-    const moved = moveItemsWithSelection(square, corner, keys, 5, 5);
+    const moved = moveItemsWithSelection(square, corner, keys, move(5, 5));
     expect(moved.keys).toEqual(keys);
     expect(moved.items).toEqual(corner);
   });
@@ -483,8 +490,7 @@ describe("selection operations", () => {
       circular,
       ring,
       [tileKey(2, 35, 0)],
-      1,
-      2,
+      move(1, 2),
     );
     expect(moved.keys).toEqual([tileKey(3, 1, 0)]);
     expect(moved.items.map((item) => item.key)).toEqual([tileKey(3, 1, 0)]);
@@ -500,17 +506,22 @@ describe("selection operations", () => {
       dColumn: -5,
       dRow: -5,
     });
-    const moved = moveItems(square, items, [tileKey(9, 9, 0)], 4, 4);
+    const moved = moveItems(square, items, [tileKey(9, 9, 0)], move(4, 4));
     expect(moved.some((item) => item.key === tileKey(13, 13, 0))).toBe(true);
   });
 
   it("wraps sectors when moving on the circular grid", () => {
     const items2 = [tile(2, 35, 0)];
-    const moved = moveItems(circular, items2, [tileKey(2, 35, 0)], 1, 2);
+    const moved = moveItems(circular, items2, [tileKey(2, 35, 0)], move(1, 2));
     expect(moved[0].key).toBe(tileKey(3, 1, 0));
     // On a 12-sector ring the same relative move leaves 11 and lands on 1.
     const shorter = [tile(2, 11, 0)];
-    const wrapped = moveItems(circular12, shorter, [tileKey(2, 11, 0)], 1, 2);
+    const wrapped = moveItems(
+      circular12,
+      shorter,
+      [tileKey(2, 11, 0)],
+      move(1, 2),
+    );
     expect(wrapped[0].key).toBe(tileKey(3, 1, 0));
   });
 
@@ -586,143 +597,287 @@ describe("selection operations", () => {
   });
 });
 
-describe("1:1 zone-aware moves", () => {
-  it("turns a same-cell zone change into a move", () => {
+describe("1:1 half-cell moves", () => {
+  const allZones = (): TileItem[] => [0, 1, 2, 3].map((zone) =>
+    tile(2, 2, zone as Zone),
+  );
+
+  function moveAll(
+    board: readonly CanvasItem[],
+    offset: MoveOffset,
+    config: ProjectConfig = equal,
+  ) {
+    return moveItemsWithSelection(
+      config,
+      board,
+      board.map((item) => item.key),
+      offset,
+    );
+  }
+
+  it("turns a same-cell zone change into a signed half-cell move", () => {
     const from: Anchor = { column: 2, row: 2, zone: 0 };
     const to: Anchor = { column: 2, row: 2, zone: 1 };
-    // At 1:1 the two fragments are congruent, so the zone difference is the
-    // half-cell translation the item must make.
-    expect(moveOffset(equal, from, to)).toEqual({
-      dColumn: 0,
-      dRow: 0,
-      zone: 1,
-    });
+    expect(moveOffset(equal, from, to)).toEqual(move(0, 0, 1, 0));
 
     const item = tile(2, 2, 0);
-    const moved = moveItemsWithSelection(equal, [item], [item.key], 0, 0, 1);
+    const moved = moveAll([item], moveOffset(equal, from, to));
     expect(moved.items).toEqual([tile(2, 2, 1)]);
     expect(moved.keys).toEqual([tileKey(2, 2, 1)]);
   });
 
-  it("toggles every fragment an item carries, anchors included", () => {
-    const ink = tile(0, 0, 0);
+  it("carries all four zones right: zone 1 lands in the next cell", () => {
+    const board = allZones();
+    const moved = moveAll(board, move(0, 0, 1, 0));
+
+    // A uniform +½ translation, not an XOR: the right-hand fragments carry
+    // into the next cell and keep their half.
+    expect(moved.items).toEqual([
+      tile(2, 2, 1),
+      tile(3, 2, 0),
+      tile(2, 2, 3),
+      tile(3, 2, 2),
+    ]);
+    expect(moved.keys).toEqual([
+      tileKey(2, 2, 1),
+      tileKey(3, 2, 0),
+      tileKey(2, 2, 3),
+      tileKey(3, 2, 2),
+    ]);
+  });
+
+  it("borrows all four zones left", () => {
+    const from: Anchor = { column: 2, row: 2, zone: 1 };
+    const to: Anchor = { column: 2, row: 2, zone: 0 };
+    expect(moveOffset(equal, from, to)).toEqual(move(0, 0, -1, 0));
+
+    const moved = moveAll(allZones(), move(0, 0, -1, 0));
+    expect(moved.items).toEqual([
+      tile(1, 2, 1),
+      tile(2, 2, 0),
+      tile(1, 2, 3),
+      tile(2, 2, 2),
+    ]);
+  });
+
+  it("carries all four zones down", () => {
+    const from: Anchor = { column: 2, row: 2, zone: 0 };
+    const to: Anchor = { column: 2, row: 2, zone: 2 };
+    expect(moveOffset(equal, from, to)).toEqual(move(0, 0, 0, 1));
+
+    const moved = moveAll(allZones(), move(0, 0, 0, 1));
+    expect(moved.items).toEqual([
+      tile(2, 2, 2),
+      tile(2, 2, 3),
+      tile(2, 3, 0),
+      tile(2, 3, 1),
+    ]);
+  });
+
+  it("borrows all four zones up", () => {
+    const moved = moveAll(allZones(), move(0, 0, 0, -1));
+    expect(moved.items).toEqual([
+      tile(2, 1, 2),
+      tile(2, 1, 3),
+      tile(2, 2, 0),
+      tile(2, 2, 1),
+    ]);
+  });
+
+  it("carries both axes in a combined +x+y move", () => {
+    const moved = moveAll(allZones(), move(0, 0, 1, 1));
+    expect(moved.items).toEqual([
+      tile(2, 2, 3),
+      tile(3, 2, 2),
+      tile(2, 3, 1),
+      tile(3, 3, 0),
+    ]);
+  });
+
+  it("borrows both axes in a combined -x-y move", () => {
+    const moved = moveAll(allZones(), move(0, 0, -1, -1));
+    expect(moved.items).toEqual([
+      tile(1, 1, 3),
+      tile(2, 1, 2),
+      tile(1, 2, 1),
+      tile(2, 2, 0),
+    ]);
+  });
+
+  it("translates mixed-zone lines, strokes and arcs fragment by fragment", () => {
     const line = makeLine(
-      { column: 0, row: 1, zone: 0 },
-      { column: 3, row: 1, zone: 0 },
+      { column: 2, row: 2, zone: 0 },
+      { column: 4, row: 2, zone: 1 },
     );
     const arc = makeArc({
-      from: { column: 0, row: 2, zone: 0 },
-      to: { column: 3, row: 2, zone: 0 },
+      from: { column: 2, row: 3, zone: 1, anchor: { x: 0, y: 1 } },
+      to: { column: 4, row: 3, zone: 2 },
       direction: "clockwise",
-      size: "half",
+      size: "quarter",
     });
     const stroke = makeStroke(
       [
-        linePoint(0, 3, 0, { x: 0, y: 1 }),
-        linePoint(1, 3, 3),
+        linePoint(2, 4, 1, { x: 0, y: 1 }),
+        linePoint(3, 4, 0),
+        linePoint(4, 4, 3),
       ],
       false,
     );
-    const board = [ink, line, arc, stroke];
+    const board = [line, arc, stroke];
+
     const moved = shiftSelection(
       equal,
       board,
       board.map((item) => item.key),
-      0,
-      0,
-      1,
+      move(0, 0, 1, 0),
     );
 
-    expect(moved[0]).toMatchObject({ zone: 1 });
-    expect(moved[1]).toMatchObject({
-      from: { zone: 1 },
-      to: { zone: 1 },
-    });
-    expect(moved[2]).toMatchObject({
-      from: { zone: 1 },
-      to: { zone: 1 },
-    });
-    // A stroke point keeps its anchor relative to the translated fragment.
-    expect((moved[3] as StrokeItem).points).toMatchObject([
-      { column: 0, row: 3, zone: 1, anchor: { x: 0, y: 1 } },
-      { column: 1, row: 3, zone: 2 },
-    ]);
+    expect(moved[0]).toEqual(
+      makeLine({ column: 2, row: 2, zone: 1 }, { column: 5, row: 2, zone: 0 }),
+    );
+    // Endpoints carry independently and keep their own anchors.
+    expect(moved[1]).toEqual(
+      makeArc({
+        from: { column: 3, row: 3, zone: 0, anchor: { x: 0, y: 1 } },
+        to: { column: 4, row: 3, zone: 3 },
+        direction: "clockwise",
+        size: "quarter",
+      }),
+    );
+    expect(moved[2]).toEqual(
+      makeStroke(
+        [
+          linePoint(3, 4, 0, { x: 0, y: 1 }),
+          linePoint(3, 4, 1),
+          linePoint(5, 4, 2),
+        ],
+        false,
+      ),
+    );
   });
 
-  it("combines the cell delta with the zone toggle across cells", () => {
-    const from: Anchor = { column: 2, row: 2, zone: 0 };
-    const to: Anchor = { column: 4, row: 3, zone: 2 };
-    expect(moveOffset(equal, from, to)).toEqual({
-      dColumn: 2,
-      dRow: 1,
-      zone: 2,
-    });
-
-    const item = tile(2, 2, 0);
-    const moved = moveItemsWithSelection(equal, [item], [item.key], 2, 1, 2);
-    expect(moved.items).toEqual([tile(4, 3, 2)]);
-    expect(moved.keys).toEqual([tileKey(4, 3, 2)]);
-  });
-
-  it("applies one toggle to a multi-selection and remaps every key", () => {
-    const first = tile(2, 2, 0);
-    const second = tile(3, 2, 1);
+  it("moves a multi-zone selection as one translation and remaps every key", () => {
+    const first = tile(2, 2, 1);
+    const second = tile(5, 2, 3);
     const board = [first, second];
-    // The selection order is the user's, the board order is unchanged.
     const moved = moveItemsWithSelection(
       equal,
       board,
       [second.key, first.key],
-      1,
-      1,
-      1,
+      move(0, 0, 1, 0),
     );
-    expect(moved.items).toEqual([tile(3, 3, 1), tile(4, 3, 0)]);
-    expect(moved.keys).toEqual([tileKey(4, 3, 0), tileKey(3, 3, 1)]);
+
+    // Both fragments move +½: the right-hand zone 3 carries into column 6.
+    expect(moved.items).toEqual([tile(3, 2, 0), tile(6, 2, 2)]);
+    expect(moved.keys).toEqual([tileKey(6, 2, 2), tileKey(3, 2, 0)]);
   });
 
-  it("keeps zones on denser grids", () => {
+  it("keeps whole-cell moves on denser ratios", () => {
     const from: Anchor = { column: 2, row: 2, zone: 0 };
     // A zone change in the same cell is not a translation at 1:2 and denser.
-    expect(moveOffset(square, from, { column: 2, row: 2, zone: 1 })).toEqual({
-      dColumn: 0,
-      dRow: 0,
-      zone: 0,
-    });
-    expect(moveOffset(square, from, { column: 4, row: 3, zone: 2 })).toEqual({
-      dColumn: 2,
-      dRow: 1,
-      zone: 0,
-    });
+    expect(moveOffset(square, from, { column: 2, row: 2, zone: 1 })).toEqual(
+      move(0, 0),
+    );
+    expect(moveOffset(square, from, { column: 4, row: 3, zone: 2 })).toEqual(
+      move(2, 1),
+    );
 
-    const item = tile(2, 2, 0);
-    const moved = moveItemsWithSelection(square, [item], [item.key], 2, 1);
-    expect(moved.items).toEqual([tile(4, 3, 0)]);
-    expect(moved.keys).toEqual([tileKey(4, 3, 0)]);
+    const item = tile(2, 2, 2);
+    const moved = moveAll([item], move(2, 1), square);
+    expect(moved.items).toEqual([tile(4, 3, 2)]);
+    expect(moved.keys).toEqual([tileKey(4, 3, 2)]);
   });
 
-  it("clamps the cells at the edge but keeps the zone toggle", () => {
-    const board = [tile(99, 99, 0)];
-    const keys = [board[0].key];
-    const offset = clampMoveOffset(equal, board, keys, {
-      dColumn: 5,
-      dRow: 5,
-      zone: 3,
-    });
-    // The item cannot leave the board, but a fragment toggle lives inside its
-    // existing cell and is still a legal translation.
-    expect(offset).toEqual({ dColumn: 0, dRow: 0, zone: 3 });
+  it("never applies half steps on the circular grid", () => {
+    const circularEqual: ProjectConfig = {
+      ...circular,
+      ratio: RATIO_PRESETS[0].ratio,
+    };
+    const from: Anchor = { column: 2, row: 30, zone: 0 };
+    const to: Anchor = { column: 2, row: 30, zone: 1 };
+    expect(moveOffset(circularEqual, from, to)).toEqual(move(0, 0));
 
-    const moved = moveItemsWithSelection(
-      equal,
-      board,
-      keys,
-      offset.dColumn,
-      offset.dRow,
-      offset.zone,
+    const item = tile(2, 35, 1);
+    const clamped = clampMoveOffset(
+      circularEqual,
+      [item],
+      [item.key],
+      move(0, 0, 1, 1),
     );
-    expect(moved.items).toEqual([tile(99, 99, 3)]);
-    expect(moved.keys).toEqual([tileKey(99, 99, 3)]);
+    expect(clamped).toEqual(move(0, 0));
+
+    const moved = moveAll([item], move(1, 2), circularEqual);
+    expect(moved.items).toEqual([tile(3, 1, 1)]);
+    expect(moved.keys).toEqual([tileKey(3, 1, 1)]);
+  });
+
+  it("clamps an outward half step at the right edge but allows the inward one", () => {
+    const { maxColumn, maxRow } = cellLimits(equal);
+    const right = [tile(maxColumn, 50, 1)];
+    const rightKey = right[0].key;
+
+    // Zone 1 already occupies the right half of the last cell: +½ has no
+    // room, so only the half component is dropped.
+    expect(
+      clampMoveOffset(equal, right, [rightKey], move(0, 0, 1, 0)),
+    ).toEqual(move(0, 0));
+    expect(moveAll(right, move(0, 0, 1, 0)).items).toEqual(right);
+
+    // The same fragment can still step inward into the ink half.
+    expect(
+      clampMoveOffset(equal, right, [rightKey], move(0, 0, -1, 0)),
+    ).toEqual(move(0, 0, -1, 0));
+    expect(moveAll(right, move(0, 0, -1, 0)).items).toEqual([
+      tile(maxColumn, 50, 0),
+    ]);
+
+    // A zone-0 fragment at the edge has room for +½ inside its own cell.
+    const ink = [tile(maxColumn, 50, 0)];
+    expect(
+      clampMoveOffset(equal, ink, [ink[0].key], move(0, 0, 1, 0)),
+    ).toEqual(move(0, 0, 1, 0));
+    expect(moveAll(ink, move(0, 0, 1, 0)).items).toEqual([
+      tile(maxColumn, 50, 1),
+    ]);
+
+    // The bottom edge behaves the same on y.
+    const bottom = [tile(50, maxRow, 2)];
+    expect(
+      clampMoveOffset(equal, bottom, [bottom[0].key], move(0, 0, 0, 1)),
+    ).toEqual(move(0, 0));
+    expect(
+      clampMoveOffset(equal, bottom, [bottom[0].key], move(0, 0, 0, -1)),
+    ).toEqual(move(0, 0, 0, -1));
+
+    // A pure whole-cell move keeps the old clamp: an impossible cell step is
+    // dropped, not converted into a half step because the last cell has room
+    // for one.
+    const corner = [tile(maxColumn, maxRow, 0)];
+    expect(
+      clampMoveOffset(equal, corner, [corner[0].key], move(5, 5)),
+    ).toEqual(move(0, 0));
+  });
+
+  it("clamps the net translation, not its cell and half parts separately", () => {
+    const { maxColumn } = cellLimits(equal);
+    // Pointer entered the last cell from its left half -> +½ net. The cell
+    // step clamps to zero, but the half step must survive: both fragments
+    // move one half right, and the right-hand one lands in the ink half of
+    // the last cell instead of being pushed back left.
+    const board = [tile(maxColumn - 1, 50, 1), tile(maxColumn, 50, 0)];
+    const offset = move(1, 0, -1, 0);
+    expect(clampMoveOffset(equal, board, board.map((item) => item.key), offset))
+      .toEqual(move(0, 0, 1, 0));
+
+    const moved = moveAll(board, offset);
+    expect(moved.items).toEqual([
+      tile(maxColumn, 50, 0),
+      tile(maxColumn, 50, 1),
+    ]);
+    expect(moved.keys).toEqual([
+      tileKey(maxColumn, 50, 0),
+      tileKey(maxColumn, 50, 1),
+    ]);
   });
 });
 

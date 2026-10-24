@@ -86,7 +86,7 @@ export type ToolState =
   | { kind: "marquee"; from: Point; to: Point; base: readonly string[] }
   | {
       kind: "move";
-      /** Pointer anchors: the cell delta and the 1:1 zone toggle both ride here. */
+      /** Pointer anchors: the whole-cell and half-cell translation rides here. */
       from: Anchor;
       to: Anchor;
       keys: readonly string[];
@@ -299,7 +299,12 @@ class SelectTool extends KufiTool {
     }
     if (state.kind === "move") {
       const offset = moveFor(ctx, state);
-      if (offset.dColumn === 0 && offset.dRow === 0 && offset.zone === 0) {
+      if (
+        offset.dColumn === 0 &&
+        offset.dRow === 0 &&
+        offset.dHalfColumn === 0 &&
+        offset.dHalfRow === 0
+      ) {
         return { state: NO_STATE };
       }
       // The committed selection is the moved items' **new** keys: a key
@@ -312,9 +317,7 @@ class SelectTool extends KufiTool {
         ctx.config,
         ctx.items,
         [...state.keys],
-        offset.dColumn,
-        offset.dRow,
-        offset.zone,
+        offset,
       );
       return {
         state: NO_STATE,
@@ -340,19 +343,22 @@ class SelectTool extends KufiTool {
     }
     if (state.kind === "move") {
       const offset = moveFor(ctx, state);
-      if (offset.dColumn === 0 && offset.dRow === 0 && offset.zone === 0) {
+      if (
+        offset.dColumn === 0 &&
+        offset.dRow === 0 &&
+        offset.dHalfColumn === 0 &&
+        offset.dHalfRow === 0
+      ) {
         return EMPTY_PREVIEW;
       }
       // The same offset the commit resolves: a 1:1 zone drag previews the
-      // fragments in their new zones, not only their new cells.
+      // fragments in their translated cells, not only their cell delta.
       return {
         items: shiftSelection(
           ctx.config,
           ctx.items,
           [...state.keys],
-          offset.dColumn,
-          offset.dRow,
-          offset.zone,
+          offset,
         ),
         mode: "ghost",
         keys: [],
@@ -369,9 +375,10 @@ class SelectTool extends KufiTool {
  * The move a drag has resolved so far, clamped to the grid. Preview and
  * commit both call this, so the ghost and the stored board cannot disagree.
  *
- * At 1:1 a pointer that changes zone inside a cell still moves the item by the
- * zone toggle (`moveOffset`); at denser ratios the toggle is zero and the
- * zones ride along unchanged, because changing one would resize the fragment.
+ * At 1:1 a pointer that changes zone inside a cell still moves the item by a
+ * signed half-cell step (`moveOffset`); at denser ratios the half step is zero
+ * and the zones ride along unchanged, because changing one would resize the
+ * fragment.
  */
 function moveFor(
   ctx: ToolContext,

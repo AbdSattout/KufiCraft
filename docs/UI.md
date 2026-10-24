@@ -423,9 +423,11 @@ map:
   hand's rail button — puts the board's middle back in the middle. There are
   deliberately **no arrow-key pan bindings**.
 * Moves track the pointer 1:1. At the equal `1:1` ink ratio a drag is
-  **zone-aware**: moving between two zones of a cell is a real half-cell
-  translation, not a no-op. At denser presets the zone toggle is zero, so the
-  zones ride along and only the cells move (`docs/CANVAS.md` §3).
+  **zone-aware**: moving between two zones of a cell is a real signed half-cell
+  translation, not a no-op, and a fragment in the right/bottom half carries
+  into the next cell instead of flipping back into its own. At denser presets
+  there is no half step, so the zones ride along and only the cells move
+  (`docs/CANVAS.md` §3).
 
 Widget-local keys belong to the primitives, not this map: sliders take arrow
 keys, menus take arrows/`Enter`/`Escape`, and the project-name field commits on

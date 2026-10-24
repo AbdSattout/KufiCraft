@@ -175,15 +175,23 @@ tiles paint their own fragment's box, and the line/arc geometry springs off it
 (§5).
 
 * **Moves at 1:1 are zone-aware.** A drag tracks the pointer's anchor — cell
-  **and** zone — and resolves a `moveOffset`: the cell delta plus a uniform
-  XOR of the start/end zones. At the equal `1:1`, where the four fragments are
-  congruent, that toggle is a half-cell translation, so it applies to every
-  fragment a moved item carries (tile zone, line/arc endpoints, stroke points)
-  and each anchor stays relative to its own fragment. A same-cell drag between
-  two zones therefore moves the item instead of doing nothing. At denser
-  presets the toggle is zero — a zone change would resize the fragment — so
-  the zones ride along and only the cells move. Preview and commit resolve the
-  same offset, and the returned selection keys follow the new cells and zones.
+  **and** zone — and resolves a `moveOffset`: a signed half-cell displacement
+  (`2·Δcolumn + Δzone-bit` per axis). At the equal `1:1`, where the four
+  fragments are congruent, that displacement is a real translation: each
+  fragment's absolute half coordinate `2·column + bit` is shifted, and the
+  carry or borrow becomes a new cell and half. A right-half fragment pushed
+  right therefore moves into the next cell (zone 1 → next column, zone 0),
+  while its left-half neighbour lands in zone 1 of its own cell; a same-cell
+  drag between two zones moves the item instead of doing nothing. The signed
+  step applies to every fragment a moved item carries (tile zone, line/arc
+  endpoints, stroke points), and each anchor stays relative to its own
+  fragment. At denser presets the half step is zero — a zone change would
+  resize the fragment — so the zones ride along and only the cells move; the
+  circular grid has no cartesian half-cell zones and never takes a half step.
+  Preview and commit resolve the same offset, edge clamping shrinks the net
+  translation (an outward `+½` at the right/bottom edge is dropped while an
+  inward `−½` still applies), and the returned selection keys follow the new
+  cells and zones.
 
 * **Zone 0 is canonical storage of nothing.** `fragmentPoint()` / `linePoint()`
   drop an absent *or* zero zone, so every item, key and file written before
@@ -287,7 +295,8 @@ which owns the geometry for that item and nothing else:
 | `draw(config)` | `render` plus one optional border paint: a wider stroke of the same path, same cap/join |
 | `bounds(config)` / `contains(config, point)` | hit-testing and marquee geometry |
 | `cellRange()` | the cell box the item occupies (move/duplicate maths) |
-| `moved(dColumn, dRow, zoneMask?)` / `withColor(color)` | copy-on-write edits (the optional mask is the 1:1 zone toggle) |
+| `moved(dColumn, dRow, dHalfColumn?, dHalfRow?)` / `withColor(color)` | copy-on-write edits (the optional signed half-cell steps are a 1:1 translation) |
+| `fragments()` | every fragment the item addresses (move edge-clamping uses it) |
 | `toJSON()` | the stored `CanvasItem` (omits absent optional fields) |
 
 `parseItem(item)` / `itemOf(item)` map a stored item onto its class;
@@ -510,7 +519,7 @@ name. Adding a tool = one class + one registry line.
 
 | id | label | key | gesture |
 | --- | --- | --- | --- |
-| `select` | تحديد | `V` | click selects (shift toggles), drag on an item moves the selection (clamped to the grid; at 1:1 the pointer's zone toggles the moved fragments' zones), drag on empty space marquee-selects |
+| `select` | تحديد | `V` | click selects (shift toggles), drag on an item moves the selection (clamped to the grid; at 1:1 the pointer's signed half-cell displacement carries/borrows per fragment), drag on empty space marquee-selects |
 | `pen` | قلم | `P` | press/drag colours the fragments the pointer is moved over — every fragment it swept, and a fast drag fills all the fragments it flew over (`anchorsAlongStroke`), so speed never changes the stroke |
 | `line` | خط | `L` | **square grid only** (`creates: ["line"]`). Click sequence: click A, click B… commits an open run; click the last point again ends it, click the first one closes it. A drag also works (pointer-up ends the *drag*, not the run). Every click snaps to one of the nine anchors of the **fragment** under the cursor (ink or space), and the overlay's dot shows the point the next click would store; a run with no diagonal segment is squares (`straightLinesAsSquares`, default) or one bar |
 | `eraser` | ممحاة | `E` | click/drag removes whatever the pointer touches; a fast drag sweeps the cells it flew over (hidden items are never touched) |
