@@ -25,6 +25,7 @@ import {
   endTool,
   fallbackTool,
   isToolAvailable,
+  leaveTool,
   moveTool,
   previewTool,
   toolForShortcut,
@@ -587,6 +588,50 @@ describe("LineTool", () => {
     expect(out.state).toBe(NO_STATE);
     expect(out.commit?.items).toHaveLength(1);
     expect(out.commit?.items[0]).toMatchObject({ type: "stroke", closed: true });
+  });
+
+  it("commits the clicked points when another tool is chosen", () => {
+    const ctx = context();
+    let state = beginTool("line", ctx, NO_STATE, input(pointOf(1, 1))).state;
+    state = beginTool("line", ctx, state, input(pointOf(3, 3))).state;
+    state = beginTool("line", ctx, state, input(pointOf(5, 3))).state;
+    expect(expectLine(state).points).toHaveLength(3);
+
+    const out = leaveTool("line", "pen", ctx, state);
+    expect(out.state).toBe(NO_STATE);
+    expect(out.commit?.label).toBe("خط");
+    expect(out.commit?.items).toHaveLength(1);
+    expect(out.commit?.items[0]).toMatchObject({ type: "stroke" });
+  });
+
+  it("commits a two-point run too", () => {
+    const ctx = context();
+    const first = beginTool("line", ctx, NO_STATE, input(pointOf(1, 1)));
+    const second = beginTool("line", ctx, first.state, input(pointOf(3, 1)));
+
+    const out = leaveTool("line", "pen", ctx, second.state);
+    expect(out.commit?.items).toEqual([
+      makeTile({ column: 1, row: 1, zone: 0, color: CONFIG.ink }),
+      makeTile({ column: 2, row: 1, zone: 0, color: CONFIG.ink }),
+      makeTile({ column: 3, row: 1, zone: 0, color: CONFIG.ink }),
+    ]);
+  });
+
+  it("discards a pending run when the line tool is chosen again", () => {
+    const ctx = context();
+    let state = beginTool("line", ctx, NO_STATE, input(pointOf(1, 1))).state;
+    state = beginTool("line", ctx, state, input(pointOf(3, 1))).state;
+
+    expect(leaveTool("line", "line", ctx, state)).toEqual({ state: NO_STATE });
+  });
+
+  it("drops a one-point run when another tool is chosen", () => {
+    const ctx = context();
+    const first = beginTool("line", ctx, NO_STATE, input(pointOf(1, 1)));
+
+    expect(leaveTool("line", "pen", ctx, first.state)).toEqual({
+      state: NO_STATE,
+    });
   });
 });
 

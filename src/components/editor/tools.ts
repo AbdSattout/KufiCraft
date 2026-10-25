@@ -53,7 +53,6 @@ import {
   shiftSelection,
   type ArcStyle,
   type DrawStyle,
-  type LineRun,
   type MoveOffset,
   type ToolContext,
   type ToolId,
@@ -200,6 +199,18 @@ export abstract class KufiTool {
 
   /** Pointer up: the last chance to commit. */
   abstract end(ctx: ToolContext, state: ToolState): ToolOutcome;
+
+  /**
+   * Settles a live gesture when the user chooses a **different** tool. The
+   * default drops it: only a tool whose sequence is already meaningful
+   * without more input commits here (the line tool does). Re-clicking the
+   * active tool is handled by `leaveTool` as a cancel, never a settle.
+   */
+  settle(ctx: ToolContext, state: ToolState): ToolOutcome {
+    void ctx;
+    void state;
+    return { state: NO_STATE };
+  }
 
   /** What the overlay draws while `state` is live. */
   preview(ctx: ToolContext, state: ToolState): ToolPreview {
@@ -559,7 +570,7 @@ class LineTool extends KufiTool {
     if (!run.finished) {
       return { state: { kind: "line", points: run.points, hover: null } };
     }
-    return this.finish(ctx, run);
+    return this.commitRun(ctx, run.points, run.closed);
   }
 
   /**
@@ -601,9 +612,26 @@ class LineTool extends KufiTool {
     };
   }
 
+  /**
+   * Leaving the line tool draws the points already clicked as an open run —
+   * switching to another tool must not silently discard a visible sequence.
+   * One point still has no segment (`lineItems` returns nothing), and
+   * `leaveTool` keeps selecting the line tool again as an explicit cancel.
+   */
+  override settle(ctx: ToolContext, state: ToolState): ToolOutcome {
+    if (state.kind !== "line" || state.points.length < 2) {
+      return { state: NO_STATE };
+    }
+    return this.commitRun(ctx, state.points, false);
+  }
+
   /** Commits a finished run — the exact points and closing the preview showed. */
-  private finish(ctx: ToolContext, run: LineRun): ToolOutcome {
-    const items = lineItems(ctx.config, run.points, run.closed, undefined, ctx.style);
+  private commitRun(
+    ctx: ToolContext,
+    points: readonly LinePoint[],
+    closed: boolean,
+  ): ToolOutcome {
+    const items = lineItems(ctx.config, points, closed, undefined, ctx.style);
     if (items.length === 0) return { state: NO_STATE };
     const next = addItems({ items: ctx.items }, items).items;
     if (next === ctx.items) return { state: NO_STATE };
@@ -981,6 +1009,21 @@ export function endTool(
   state: ToolState,
 ): ToolOutcome {
   return REGISTRY[tool].end(ctx, state);
+}
+
+/**
+ * Settles the active tool's gesture when the user chooses `next`. A real tool
+ * change lets the old tool finish meaningful work (the line tool commits its
+ * clicked points); choosing the same tool again only cancels the gesture.
+ */
+export function leaveTool(
+  current: ToolId,
+  next: ToolId,
+  ctx: ToolContext,
+  state: ToolState,
+): ToolOutcome {
+  if (current === next) return { state: NO_STATE };
+  return REGISTRY[current].settle(ctx, state);
 }
 
 export function previewTool(

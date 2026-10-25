@@ -88,6 +88,7 @@ import {
   endTool,
   fallbackTool,
   isToolAvailable,
+  leaveTool,
   moveTool,
   previewTool,
   toolOf,
@@ -350,13 +351,6 @@ export function useEditor(
     null,
   );
 
-  const setToolStateAndReset = useCallback((next: ToolId) => {
-    setToolState(next);
-    stateRef.current = NO_STATE;
-    setState(NO_STATE);
-    panRef.current = null;
-  }, []);
-
   /**
    * Live selection: entries whose item disappeared (erased here, changed in
    * another tab) or that the grid hides (a circular board and its line/arc
@@ -516,6 +510,28 @@ export function useEditor(
   const context = useMemo<ToolContext>(
     () => ({ config, items, selection, tool, style, arc }),
     [arc, config, items, selection, style, tool],
+  );
+
+  /**
+   * Chooses a tool. A real change settles the old tool's gesture first — the
+   * line tool commits the points already clicked — and drops the selection,
+   * since selection actions belong to the select tool. Clicking the active
+   * tool again is the explicit cancel for its armed sequence.
+   */
+  const setToolStateAndReset = useCallback(
+    (next: ToolId) => {
+      if (next !== tool) {
+        applyOutcome(
+          leaveTool(tool, next, { ...context, selection: [] }, stateRef.current),
+        );
+        setSelectionState([]);
+      }
+      setToolState(next);
+      stateRef.current = NO_STATE;
+      setState(NO_STATE);
+      panRef.current = null;
+    },
+    [applyOutcome, context, tool],
   );
 
   const pointOf = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {

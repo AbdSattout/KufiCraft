@@ -183,7 +183,7 @@ see `docs/CANVAS.md` §6 for the contract.
 | --- | --- | --- |
 | تحديد (select) | `V` | click selects (shift toggles), drag on an item moves the selection, drag on empty space marquee-selects |
 | قلم (pen) | `P` | press/drag colours the cells the pointer is moved over — one fragment per cell, a fast drag fills the cells it flew over, nothing merged |
-| خط (line) | `L` | **square grid only** — click sequence: click A, click B… commits an open run; click the last point again to end it, click the first one to close it; a drag works too |
+| خط (line) | `L` | **square grid only** — click sequence: click A, click B… commits an open run; click the last point again to end it, click the first one to close it; a drag works too. Switching to another tool also commits the clicked points; choosing خط again discards them |
 | ممحاة (eraser) | `E` | click/drag removes whatever the pointer touches — a fast drag sweeps the cells it flew over (the swept items ring as a ghost); items the grid hides are never touched |
 | قوس (arc) | `A` | **square grid only** — press-drag-release A→B, or click A then click B: both ends snap to one of the nine anchors of the cell under the pointer, the armed start stays marked by the hover's own dot until it commits, and clicking the start again cancels |
 | يد (hand) | `H` | drags the *view*, not the board: press and drag to move around a board bigger than the pane, and double click (on the canvas or on the rail button) to put the middle of the board back in the middle |
@@ -194,6 +194,12 @@ same small dot the hover uses, on the point itself. The arc reveals its own
 controls next to it in the rail: اتجاه القوس (مع عقارب الساعة / عكس عقارب
 الساعة) and حجم القوس (ربع دائرة / نصف دائرة / ثلاثة أرباع).
 
+Choosing a **different** tool settles the old one instead of dropping its
+work: a line that already has two or more clicked points is drawn as an open
+run, then the new tool takes over. Choosing the line tool again is the explicit
+cancel, so the pending run is discarded. Every real tool change also clears the
+selection — selecting items belongs to the select tool.
+
 The line and arc tools are also **square-grid only** (their classes declare
 `creates: ["line"]` / `creates: ["arc"]`): the rail lists `toolsFor(gridType)`
 and drops them on a circular board, `L` / `A` are inert there, and a tool that
@@ -201,8 +207,9 @@ was active when the grid changed falls back to the first tool of the rail with
 its gesture cancelled. The items those tools drew earlier are **hidden on a
 circular board, never deleted**: not drawn, not selectable, not erasable, not
 exported, not in the thumbnail, and the status line counts what the board shows.
-The document keeps them, so switching back to a square grid brings them back
-untouched (`docs/CANVAS.md` §3).
+Its item and selection counts stay on one line; only the tool hint truncates
+when the strip is too narrow. The document keeps hidden items, so switching
+back to a square grid brings them back untouched (`docs/CANVAS.md` §3).
 
 Bigger boards scroll: the canvas sits in an `overflow-auto` pane, and the square
 centres itself with `margin: auto` so its overflow always lands on the reachable

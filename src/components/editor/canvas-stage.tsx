@@ -162,16 +162,16 @@ export function CanvasStage({
       </div>
 
       <div className="flex h-9 shrink-0 items-center gap-2 border-t border-border/70 bg-background px-3 text-xs text-muted-foreground">
-        <span className="tabular-nums">
+        <span className="shrink-0 whitespace-nowrap tabular-nums">
           {formatCount(shown.length)} {MESSAGES.itemsCount}
         </span>
         {selected > 0 ? (
-          <span className="tabular-nums text-foreground">
+          <span className="shrink-0 whitespace-nowrap tabular-nums text-foreground">
             · {MESSAGES.selectedCount} {formatCount(selected)}
           </span>
         ) : null}
         {active.hint ? (
-          <span className="truncate text-muted-foreground/80">
+          <span className="min-w-0 truncate text-muted-foreground/80">
             · {active.hint}
           </span>
         ) : null}

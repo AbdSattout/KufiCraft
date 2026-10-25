@@ -544,7 +544,7 @@ name. Adding a tool = one class + one registry line.
 | --- | --- | --- | --- |
 | `select` | تحديد | `V` | click selects (shift toggles), drag on an item moves the selection (clamped to the grid; at 1:1 the pointer's signed half-cell displacement carries/borrows per fragment), drag on empty space marquee-selects |
 | `pen` | قلم | `P` | press/drag colours the fragments the pointer is moved over — every fragment it swept, and a fast drag fills all the fragments it flew over (`anchorsAlongStroke`), so speed never changes the stroke |
-| `line` | خط | `L` | **square grid only** (`creates: ["line"]`). Click sequence: click A, click B… commits an open run; click the last point again ends it, click the first one closes it. A drag also works (pointer-up ends the *drag*, not the run). Every click snaps to one of the nine anchors of the **fragment** under the cursor (ink or space), and the overlay's dot shows the point the next click would store; a run with no diagonal segment is squares (`straightLinesAsSquares`, default) or one bar |
+| `line` | خط | `L` | **square grid only** (`creates: ["line"]`). Click sequence: click A, click B… commits an open run; click the last point again ends it, click the first one closes it. Choosing another tool also commits the clicked points; choosing `خط` again cancels them. A drag also works (pointer-up ends the *drag*, not the run). Every click snaps to one of the nine anchors of the **fragment** under the cursor (ink or space), and the overlay's dot shows the point the next click would store; a run with no diagonal segment is squares (`straightLinesAsSquares`, default) or one bar |
 | `eraser` | ممحاة | `E` | click/drag removes whatever the pointer touches; a fast drag sweeps the cells it flew over (hidden items are never touched) |
 | `arc` | قوس | `A` | **square grid only** (`creates: ["arc"]`). Press-drag-release A→B, **or** click A then click B (clicking the start cell again cancels). Each endpoint snaps to one of the nine anchors of the **fragment** under the cursor (`arcPointAt`) and stores it whole — the centre included, since an absent anchor means the legacy spring point (§5); the armed start is the same dot as the hover, and the ghost always shows the arc the click commits |
 | `hand` | يد | `H` | the one **view** tool: the pointer scrolls the canvas pane (`panScrollOffset`), `KufiTool.pans` tells the controller so, and a double click recentres the board (`centreScroll`) |
@@ -557,6 +557,11 @@ name. Adding a tool = one class + one registry line.
 
 * `KufiTool.persistent` — a tool whose in-flight state survives pointer-up
   (`line`, `arc`); the others commit on pointer-up.
+* `KufiTool.settle` — what leaving a tool does to its live state. The default
+  cancels it; the line tool commits the points already clicked as an open run
+  (`≥ 2` points). `leaveTool` applies it only on a **real** tool change;
+  choosing the active tool again cancels instead. The controller clears the
+  selection on the same switch.
 * `KufiTool.pans` — a view tool: it never sees pointer input, owns no
   `ToolState`, and can therefore never reach the document, the history or the
   server. Its rail button (and the canvas) answers a double click with
@@ -634,6 +639,11 @@ retraces itself does not brush a chord.
 6. **Preview = commit.** The ghost and the click both go through `lineRun`, so
    the overlay can never show an endpoint (or a closing) the commit does not
    draw — the fix that ended the old preview/commit drift.
+7. **Leaving settles, re-clicking cancels.** Choosing another tool (rail or
+   shortcut) calls `leaveTool` → `KufiTool.settle`, which commits the points
+   already clicked as an **open** run once there are at least two; a lone point
+   has no segment and draws nothing. Choosing `خط` again is the explicit
+   cancel, so the pending run is discarded rather than drawn.
 
 ### Arc rules
 
