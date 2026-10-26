@@ -299,8 +299,9 @@ equal there, and every preset shows the inner edges of its ink squares), حجم
 caption reading out the resulting sector angle — ٣٦ قطاعًا is ١٠°), نوع الشبكة
 (square/circular — switching warns that existing items may look different, and
 that lines and arcs are hidden on a circular board while staying in the
-drawing; the hint explains what each type is), خيارات اللوحة (إظهار الشبكة and
-تقطيع الخطوط) — and مسح الكل at the end (confirm). Section titles are 12 px
+drawing; the hint explains what each type is), خيارات اللوحة (إظهار الشبكة،
+اختيار النقاط الذكي، وتقطيع الخطوط) — and مسح الكل at the end (confirm).
+Section titles are 12 px
 normal weight in the heading face and foreground colour; control labels use
 the sans face and muted colour below them, so rounding reads as a section and
 نصف قطر الزاوية as its control, never the other way round.
@@ -317,6 +318,19 @@ families (cell borders plus the stronger inner ink edges) are what you draw
 every board, remembered in `kuficraft.editor-prefs.v2`. It is never part of an
 export, and the document's own `config.showGrid` is tolerated but no longer
 rendered (docs/FORMAT.md).
+
+اختيار النقاط الذكي is the line/arc point mode, also browser-only. It is on by
+default when the primary pointer is coarse and cannot hover (a phone or tablet)
+and off on a laptop; the rule is `(hover: none) and (pointer: coarse)`. With it
+on, a line always uses the clicked fragment's centre; an arc uses the bottom/top
+middle for a same-row chord (clockwise/counterclockwise), the left/right middle
+for a same-column chord, and both fragment centres otherwise. Off keeps the
+exact nine-anchor click. The setting is tri-state on disk: absent means “follow
+the device”, while a switch interaction writes an explicit `true`/`false` and
+from then on the device is never consulted. An automatic default is written as
+**absence**, never as the resolved boolean, so moving from a phone to a laptop
+does not silently become an override. The hint says the value lives in this
+browser only.
 
 In that same خيارات اللوحة section, **تقطيع الخطوط** is the line tool's shape:
 on (the default) it draws a run with no diagonal segment as one square per cell
@@ -355,28 +369,32 @@ Settings persistence (localStorage, per browser, no server round-trip) — and t
 line it draws between the **user** and the **board**:
 
 * `kuficraft.editor-prefs.v2` — the user's editor: tool, active shape, rotation,
-  arc direction and size, zoom, the grid guide (إظهار الشبكة, default on) and
-  the colour swatches history (last ≤ 8 ink colours). Loaded synchronously when
-  the editor mounts and applied to the toolbar so the app “opens the way you
-  left it”, and written as each change happens (never per project). The draw
-  style is learned only from edits with **nothing selected**: a style click with
-  a selection patches those items alone, so a one-off radius or border does not
-  become the next board's default. Zoom runs **0.1×–32×**, so a board far
-  larger than the pane is viewable whole and a dense one (a `base` = 4 cell is
-  ~3 px at 1×) is workable up close. The v2 key is deliberately fresh: a
-  stored 50 % radius and a 10-unit last config from earlier local sessions are
-  not carried into the new build; the v1 keys are left untouched but never
-  read.
+  arc direction and size, zoom, the grid guide (إظهار الشبكة, default on),
+  smart point selection (tri-state: absent = device default, explicit = user
+  choice) and the colour swatches history (last ≤ 8 ink colours). Loaded
+  synchronously when the editor mounts and applied to the toolbar so the app
+  “opens the way you left it”, and written as each change happens (never per
+  project). The draw style is learned only from edits with **nothing selected**:
+  a style click with a selection patches those items alone, so a one-off radius
+  or border does not become the next board's default. Zoom runs **0.1×–32×**,
+  so a board far larger than the pane is viewable whole and a dense one
+  (`base` = 4 cell is ~3 px at 1×) is workable up close. The v2 key is
+  deliberately fresh: a stored 50 % radius and a 10-unit last config from
+  earlier local sessions are not carried into the new build; the v1 keys are
+  left untouched but never read.
 * `kuficraft.last-config.v2` — the last committed project config, used as the
   default in the dashboard’s «لوحة جديدة» dialog and for new projects. The
   artwork settings — ink ratio, cell size, grid type, circular sector count, ink
   and paper colour, the تقطيع الخطوط flag — are remembered here rather than in
   the prefs, because they belong to the project and stay the open project's
   while it is open (`config` is authoritative for rendering).
-* The grid guide is the one **view** setting in the prefs: the editor draws the
-  canvas from the preference even when a document carries its own
-  `config.showGrid`. That document field is still written, exported and
-  tolerated (docs/FORMAT.md) — nothing renders from it.
+* The grid guide and smart-point mode are the **browser-owned** settings in the
+  prefs. For the grid, the editor draws the canvas from the preference even
+  when a document carries its own `config.showGrid`; that document field is
+  still written, exported and tolerated (docs/FORMAT.md) — nothing renders from
+  it. Smart points never touch `config` or the project at all: they are tool
+  behaviour, not artwork, and an unset value follows the device rather than
+  being materialised into the saved JSON.
 * Both keys are versioned and validated on read (corrupt/stale values fall back
   to model defaults, never throw).
 

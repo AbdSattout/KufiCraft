@@ -40,6 +40,7 @@ import {
   pointToCell,
   pointToLinePoint,
   runOf,
+  smartArcPoints,
 } from "@/lib/canvas/grid";
 
 /* ------------------------------------------------------------------ */
@@ -437,6 +438,24 @@ describe("pointToLinePoint", () => {
     });
   });
 
+  it("uses the fragment centre in smart mode, ignoring the nearest anchor", () => {
+    const ink = inkUnit(SQUARE);
+    // A precise click 1/8 into the ink snaps to the corner; smart mode keeps
+    // the same fragment but stores the centre (canonical absence of an anchor).
+    expect(pointToLinePoint(SQUARE, { x: ink / 8, y: ink / 8 })).toEqual(
+      linePoint(0, 0, undefined, { x: 0, y: 0 }),
+    );
+    expect(pointToLinePoint(SQUARE, { x: ink / 8, y: ink / 8 }, true)).toEqual(
+      linePoint(0, 0),
+    );
+    // A space fragment stays that space fragment; only its inner point moves.
+    const cell = cellSize(SQUARE);
+    const spaceMiddle = ink + (cell - ink) / 2;
+    expect(
+      pointToLinePoint(SQUARE, { x: spaceMiddle, y: 2 * cell }, true),
+    ).toEqual(linePoint(0, 2, 1));
+  });
+
   it("rounds a tie towards the higher anchor", () => {
     const ink = inkUnit(SQUARE);
     // ¼ of the ink is exactly between 0 and ½: ½ wins.
@@ -591,6 +610,61 @@ describe("pointToArcPoint", () => {
       row: 2,
       zone: 1,
       anchor: { x: 0.5, y: 0 },
+    });
+  });
+});
+
+describe("smartArcPoints", () => {
+  it("puts a same-row chord on the bottom or top middle by direction", () => {
+    const from = linePoint(1, 1);
+    const to = linePoint(4, 1);
+    expect(smartArcPoints(from, to, "clockwise")).toEqual({
+      from: { column: 1, row: 1, anchor: { x: 0.5, y: 1 } },
+      to: { column: 4, row: 1, anchor: { x: 0.5, y: 1 } },
+    });
+    expect(smartArcPoints(from, to, "counterclockwise")).toEqual({
+      from: { column: 1, row: 1, anchor: { x: 0.5, y: 0 } },
+      to: { column: 4, row: 1, anchor: { x: 0.5, y: 0 } },
+    });
+  });
+
+  it("puts a same-column chord on the left or right middle by direction", () => {
+    const from = linePoint(1, 1);
+    const to = linePoint(1, 4);
+    expect(smartArcPoints(from, to, "clockwise")).toEqual({
+      from: { column: 1, row: 1, anchor: { x: 0, y: 0.5 } },
+      to: { column: 1, row: 4, anchor: { x: 0, y: 0.5 } },
+    });
+    expect(smartArcPoints(from, to, "counterclockwise")).toEqual({
+      from: { column: 1, row: 1, anchor: { x: 1, y: 0.5 } },
+      to: { column: 1, row: 4, anchor: { x: 1, y: 0.5 } },
+    });
+  });
+
+  it("uses both fragment centres for a diagonal chord", () => {
+    expect(
+      smartArcPoints(linePoint(1, 1), linePoint(4, 4), "clockwise"),
+    ).toEqual({
+      from: { column: 1, row: 1, anchor: { x: 0.5, y: 0.5 } },
+      to: { column: 4, row: 4, anchor: { x: 0.5, y: 0.5 } },
+    });
+  });
+
+  it("keeps each endpoint's own fragment, zone included", () => {
+    expect(
+      smartArcPoints(linePoint(1, 1, 3), linePoint(4, 1, 2), "clockwise"),
+    ).toEqual({
+      from: { column: 1, row: 1, zone: 3, anchor: { x: 0.5, y: 1 } },
+      to: { column: 4, row: 1, zone: 2, anchor: { x: 0.5, y: 1 } },
+    });
+  });
+
+  it("falls back to the centre for a same-cell pair", () => {
+    expect(
+      smartArcPoints(linePoint(2, 3), linePoint(2, 3), "clockwise"),
+    ).toEqual({
+      from: { column: 2, row: 3, anchor: { x: 0.5, y: 0.5 } },
+      to: { column: 2, row: 3, anchor: { x: 0.5, y: 0.5 } },
     });
   });
 });

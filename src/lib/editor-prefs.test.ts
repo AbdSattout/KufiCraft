@@ -15,12 +15,14 @@ import {
   MAX_INK_SWATCHES,
   MAX_ZOOM,
   MIN_ZOOM,
+  SMART_POINTS_MEDIA,
   type StorageLike,
   loadEditorPrefs,
   loadLastConfig,
   rememberInkSwatch,
   saveEditorPrefs,
   saveLastConfig,
+  smartPointsFromMediaQuery,
 } from "./editor-prefs";
 
 class MemoryStorage implements StorageLike {
@@ -69,6 +71,7 @@ describe("editor preferences", () => {
       },
       zoom: 1.25,
       showGrid: false,
+      smartPoints: true,
       inkSwatches: ["#111827", "#7c2d12"],
       rounding: { radius: 0.15, corners: 5 },
       border: { width: 4, color: "#123456" },
@@ -77,6 +80,57 @@ describe("editor preferences", () => {
     };
     saveEditorPrefs(prefs, storage);
     expect(loadEditorPrefs(storage)).toEqual(prefs);
+  });
+
+  it("keeps smart points tri-state: automatic is absence, a choice is stored", () => {
+    expect(loadEditorPrefs(null).smartPoints).toBeNull();
+
+    // Automatic: saving must not turn the device default into a saved choice.
+    const automatic = new MemoryStorage();
+    saveEditorPrefs({ ...DEFAULT_EDITOR_PREFS }, automatic);
+    const autoRaw = JSON.parse(
+      automatic.getItem(EDITOR_PREFS_KEY) ?? "{}",
+    ) as Record<string, unknown>;
+    expect(autoRaw).not.toHaveProperty("smartPoints");
+
+    // Once chosen, both values survive a reopen (so the device is ignored).
+    const off = new MemoryStorage();
+    saveEditorPrefs({ ...DEFAULT_EDITOR_PREFS, smartPoints: false }, off);
+    expect(loadEditorPrefs(off).smartPoints).toBe(false);
+
+    const on = new MemoryStorage();
+    saveEditorPrefs({ ...DEFAULT_EDITOR_PREFS, smartPoints: true }, on);
+    expect(loadEditorPrefs(on).smartPoints).toBe(true);
+
+    // A damaged / old value falls back to automatic, never to a fake choice.
+    expect(
+      loadEditorPrefs(
+        new MemoryStorage({
+          [EDITOR_PREFS_KEY]: JSON.stringify({ smartPoints: "yes" }),
+        }),
+      ).smartPoints,
+    ).toBeNull();
+  });
+
+  it("defaults smart points to a coarse, hoverless pointer", () => {
+    expect(smartPointsFromMediaQuery(null)).toBe(false);
+
+    const queries: string[] = [];
+    expect(
+      smartPointsFromMediaQuery((query) => {
+        queries.push(query);
+        return { matches: true };
+      }),
+    ).toBe(true);
+    expect(queries).toEqual([SMART_POINTS_MEDIA]);
+    expect(smartPointsFromMediaQuery(() => ({ matches: false }))).toBe(false);
+
+    // A blocked matchMedia is not a reason to fail the editor open.
+    expect(
+      smartPointsFromMediaQuery(() => {
+        throw new Error("blocked");
+      }),
+    ).toBe(false);
   });
 
   it("keeps the draw style across boards — it is the user's, not the project's", () => {

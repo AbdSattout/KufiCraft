@@ -19,6 +19,7 @@
  */
 
 import {
+  CENTRE_ANCHOR,
   VIEWBOX_SIZE,
   anchorOf,
   arcPoint,
@@ -28,7 +29,15 @@ import {
   linePoint,
   zoneOf,
 } from "./model";
-import type { Anchor, Cell, LinePoint, ProjectConfig, Zone } from "./model";
+import type {
+  Anchor,
+  ArcDirection,
+  Cell,
+  InkPoint,
+  LinePoint,
+  ProjectConfig,
+  Zone,
+} from "./model";
 import { A, M, cmdsToPath, circularSlice, inkUnit, polar, zoneRect } from "./geometry";
 import type { Point } from "./geometry";
 
@@ -210,9 +219,19 @@ function pointToAnchorPoint(config: ProjectConfig, point: Point): LinePoint {
 /**
  * The line tool's point under a pointer: the anchor resolution above, with the
  * **centre dropped** — canonical storage of nothing (`docs/CANVAS.md` §3).
+ * With `smart` on, the pointer still chooses the fragment but the point is
+ * always that fragment's centre: the nine-anchor precision is exactly what
+ * the mobile default skips.
  */
-export function pointToLinePoint(config: ProjectConfig, point: Point): LinePoint {
+export function pointToLinePoint(
+  config: ProjectConfig,
+  point: Point,
+  smart = false,
+): LinePoint {
   const resolved = pointToAnchorPoint(config, point);
+  if (smart) {
+    return linePoint(resolved.column, resolved.row, resolved.zone);
+  }
   return linePoint(resolved.column, resolved.row, resolved.zone, resolved.anchor);
 }
 
@@ -226,6 +245,46 @@ export function pointToLinePoint(config: ProjectConfig, point: Point): LinePoint
 export function pointToArcPoint(config: ProjectConfig, point: Point): LinePoint {
   const resolved = pointToAnchorPoint(config, point);
   return arcPoint(resolved.column, resolved.row, resolved.zone, resolved.anchor);
+}
+
+/**
+ * Smart anchors for an **arc pair**, one per endpoint, in that endpoint's own
+ * fragment. A same-row chord springs off the bottom (clockwise) or top
+ * (counterclockwise) middle; a same-column chord off the left or right middle;
+ * anything else — the 45° diagonals an arc supports — uses both fragment
+ * centres. The row/column choices are the reference app's spring points
+ * (`Arc.fallbackAnchors`); the diagonal is deliberately the centre, which is
+ * the simple "else" rule of smart mode.
+ *
+ * The tap's exact anchor is ignored, but its fragment (`zone`) is preserved:
+ * smart mode loosens the position inside a fragment, never the fragment the
+ * designer touched.
+ */
+export function smartArcPoints(
+  from: LinePoint,
+  to: LinePoint,
+  direction: ArcDirection,
+): { from: LinePoint; to: LinePoint } {
+  const anchor = smartArcAnchor(from, to, direction);
+  return {
+    from: arcPoint(from.column, from.row, from.zone, anchor),
+    to: arcPoint(to.column, to.row, to.zone, anchor),
+  };
+}
+
+function smartArcAnchor(
+  from: LinePoint,
+  to: LinePoint,
+  direction: ArcDirection,
+): InkPoint {
+  if (from.row === to.row && from.column === to.column) return CENTRE_ANCHOR;
+  if (from.row === to.row) {
+    return { x: 0.5, y: direction === "clockwise" ? 1 : 0 };
+  }
+  if (from.column === to.column) {
+    return { x: direction === "clockwise" ? 0 : 1, y: 0.5 };
+  }
+  return CENTRE_ANCHOR;
 }
 
 /**

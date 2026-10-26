@@ -66,6 +66,7 @@ function context(
     tool: "pen",
     style: DEFAULT_STYLE,
     arc: DEFAULT_ARC_STYLE,
+    smartPoints: false,
     ...overrides,
   };
 }
@@ -534,6 +535,42 @@ describe("LineTool", () => {
     });
   });
 
+  it("uses the fragment centre in smart mode, on both the dot and the click", () => {
+    const ctx = context([], { smartPoints: true });
+    // Clicking the bottom-right corner usually stores that anchor; smart mode
+    // keeps the fragment (ink cell 1,1) and stores its centre instead.
+    const first = beginTool(
+      "line",
+      ctx,
+      NO_STATE,
+      input(anchorPointOf(1, 1, 1, 1)),
+    );
+    expect(expectLine(first.state).points).toEqual([
+      { column: 1, row: 1 },
+    ]);
+
+    const hovered = moveTool(
+      "line",
+      ctx,
+      first.state,
+      input(anchorPointOf(4, 2, 0, 0)),
+    );
+    const preview = previewTool("line", ctx, hovered.state);
+    expect(preview.marker).toEqual({ column: 1, row: 1 });
+    expect(preview.dot).toEqual({ column: 4, row: 2 });
+
+    const clicked = beginTool(
+      "line",
+      ctx,
+      hovered.state,
+      input(anchorPointOf(4, 2, 0, 0)),
+    );
+    expect(expectLine(clicked.state).points).toEqual([
+      { column: 1, row: 1 },
+      { column: 4, row: 2 },
+    ]);
+  });
+
   it("hovers an empty run, and its dot is exactly the next click's point", () => {
     const ctx = context();
     const hovered = moveTool("line", ctx, NO_STATE, input(anchorPointOf(2, 2, 1, 0)));
@@ -693,6 +730,111 @@ describe("ArcTool", () => {
       type: "arc",
       from: { column: 1, row: 1, anchor: { x: 0, y: 1 } },
       to: { column: 4, row: 1, anchor: { x: 1, y: 1 } },
+    });
+  });
+
+  it("uses the pair rule in smart mode, on the dots and the stored arc", () => {
+    const ctx = context([], {
+      smartPoints: true,
+      arc: { direction: "clockwise", size: "half" },
+    });
+    const armed = beginTool(
+      "arc",
+      ctx,
+      NO_STATE,
+      input(anchorPointOf(1, 1, 0, 0)),
+    ).state;
+    const moved = moveTool(
+      "arc",
+      ctx,
+      armed,
+      input(anchorPointOf(4, 1, 1, 1)),
+    );
+    const preview = previewTool("arc", ctx, moved.state);
+    // A horizontal chord sits on the bottom middles for clockwise.
+    expect(preview.marker).toEqual({
+      column: 1,
+      row: 1,
+      anchor: { x: 0.5, y: 1 },
+    });
+    expect(preview.dot).toEqual({
+      column: 4,
+      row: 1,
+      anchor: { x: 0.5, y: 1 },
+    });
+    expect(preview.items).toHaveLength(1);
+
+    const out = beginTool(
+      "arc",
+      ctx,
+      moved.state,
+      input(anchorPointOf(4, 1, 1, 1)),
+    );
+    expect(out.commit?.items).toEqual(preview.items);
+    expect(out.commit?.items[0]).toMatchObject({
+      type: "arc",
+      from: { column: 1, row: 1, anchor: { x: 0.5, y: 1 } },
+      to: { column: 4, row: 1, anchor: { x: 0.5, y: 1 } },
+    });
+  });
+
+  it("puts a smart vertical chord on the right for counterclockwise", () => {
+    const ctx = context([], {
+      smartPoints: true,
+      arc: { direction: "counterclockwise", size: "half" },
+    });
+    const armed = beginTool(
+      "arc",
+      ctx,
+      NO_STATE,
+      input(anchorPointOf(2, 1, 0, 0)),
+    ).state;
+    const moved = moveTool(
+      "arc",
+      ctx,
+      armed,
+      input(anchorPointOf(2, 4, 1, 1)),
+    ).state;
+    const out = beginTool(
+      "arc",
+      ctx,
+      moved,
+      input(anchorPointOf(2, 4, 1, 1)),
+    );
+
+    expect(out.commit?.items[0]).toMatchObject({
+      type: "arc",
+      from: { column: 2, row: 1, anchor: { x: 1, y: 0.5 } },
+      to: { column: 2, row: 4, anchor: { x: 1, y: 0.5 } },
+      direction: "counterclockwise",
+    });
+  });
+
+  it("uses both fragment centres for a smart diagonal", () => {
+    const ctx = context([], { smartPoints: true });
+    const armed = beginTool(
+      "arc",
+      ctx,
+      NO_STATE,
+      input(anchorPointOf(1, 1, 0, 0)),
+    ).state;
+    const moved = moveTool(
+      "arc",
+      ctx,
+      armed,
+      input(anchorPointOf(4, 4, 1, 1)),
+    ).state;
+    const out = beginTool(
+      "arc",
+      ctx,
+      moved,
+      input(anchorPointOf(4, 4, 1, 1)),
+    );
+
+    expect(out.commit?.items[0]).toMatchObject({
+      type: "arc",
+      from: { column: 1, row: 1, anchor: { x: 0.5, y: 0.5 } },
+      to: { column: 4, row: 4, anchor: { x: 0.5, y: 0.5 } },
     });
   });
 

@@ -124,6 +124,7 @@ function context(overrides: Partial<ToolContext> = {}): ToolContext {
     tool: "pen",
     style: DEFAULT_STYLE,
     arc: DEFAULT_ARC_STYLE,
+    smartPoints: false,
     ...overrides,
   };
 }

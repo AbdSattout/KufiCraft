@@ -118,6 +118,8 @@ function Panels({ editor }: { editor: EditorController }) {
         config={editor.config}
         itemsCount={editor.items.length}
         setShowGrid={editor.setShowGrid}
+        smartPoints={editor.smartPoints}
+        setSmartPoints={editor.setSmartPoints}
         patchConfig={editor.patchConfig}
         previewConfig={editor.previewConfig}
         clearAll={editor.clearAll}

@@ -279,6 +279,14 @@ export interface ToolContext {
   tool: ToolId;
   style: DrawStyle;
   arc: ArcStyle;
+  /**
+   * The user's smart point mode for the line and arc tools: the fragment is
+   * still the one under the pointer, but the point inside it is chosen by the
+   * tool instead of the exact nine-anchor click. This is the **resolved**
+   * preference (device default or an explicit choice), never the tri-state
+   * stored in the prefs.
+   */
+  smartPoints: boolean;
 }
 
 /* ------------------------------------------------------------------ */
@@ -352,10 +360,15 @@ export function anchorAt(config: ProjectConfig, point: Point): Anchor {
  * The line tool's point under `point`: the **fragment** under the cursor plus
  * the anchor nearest the pointer inside that fragment (nine positions). A
  * click on a space fragment stays on it — every fragment is a square the user
- * can draw on (`docs/CANVAS.md` §3).
+ * can draw on (`docs/CANVAS.md` §3). With `smart` on, the fragment's centre is
+ * used instead; the fragment is still the one clicked.
  */
-export function linePointAt(config: ProjectConfig, point: Point): LinePoint {
-  return pointToLinePoint(config, clampToCanvas(point));
+export function linePointAt(
+  config: ProjectConfig,
+  point: Point,
+  smart = false,
+): LinePoint {
+  return pointToLinePoint(config, clampToCanvas(point), smart);
 }
 
 /**

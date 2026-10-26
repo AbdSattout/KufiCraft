@@ -5,8 +5,8 @@
  *
  *   • `kuficraft.editor-prefs.v2` — how the editor opens: tool, shape and
  *     rotation, the arc style (direction + size), zoom, the construction grid,
- *     the last few ink colours and the next stroke's style (rounding, border,
- *     cap + join).
+ *     smart point selection, the last few ink colours and the next stroke's
+ *     style (rounding, border, cap + join).
  *   • `kuficraft.last-config.v2` — the last committed project config, used as
  *     the default in the dashboard's «لوحة جديدة» dialog. The ratio, cell size,
  *     grid type, colours and line shape live here, not in the prefs: they are
@@ -67,6 +67,39 @@ export const DEFAULT_ZOOM = 1;
 export const MIN_ZOOM = 0.1;
 export const MAX_ZOOM = 32;
 
+/**
+ * The device class that opens with smart point selection: a coarse primary
+ * pointer with no hover is a phone or tablet, where tapping one of nine
+ * anchors is the harder part. A laptop (fine pointer, hover) opens precise.
+ */
+export const SMART_POINTS_MEDIA = "(hover: none) and (pointer: coarse)";
+
+export type MediaQueryMatcher = (query: string) => { matches: boolean };
+
+/**
+ * Resolve the device default through an injected matcher. Exported so the
+ * browser call below stays a one-liner and the media rule is testable without
+ * a DOM; a missing or throwing `matchMedia` is simply not mobile.
+ */
+export function smartPointsFromMediaQuery(
+  matchMedia: MediaQueryMatcher | null,
+): boolean {
+  if (matchMedia === null) return false;
+  try {
+    return matchMedia(SMART_POINTS_MEDIA).matches;
+  } catch {
+    return false;
+  }
+}
+
+/** The device default when the user has never touched the setting. */
+export function defaultSmartPoints(): boolean {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return false;
+  }
+  return smartPointsFromMediaQuery(window.matchMedia.bind(window));
+}
+
 export interface EditorPrefs {
   tool: ToolId;
   shape: ShapeId;
@@ -75,6 +108,13 @@ export interface EditorPrefs {
   zoom: number;
   /** The construction grid — a view guide, the same for the user everywhere. */
   showGrid: boolean;
+  /**
+   * Smart point selection for the line and arc tools. `null` means “follow
+   * this device” (on for a phone/tablet); `true` / `false` is an explicit
+   * choice that survives moving to another device. Kept tri-state so an
+   * automatic default is never mistaken for a user override.
+   */
+  smartPoints: boolean | null;
   /** Recent ink colours, most-recent-first, deduped case-insensitively. */
   inkSwatches: string[];
   /** Corner rounding of the next drawn tiles (radius 0 = square corners). */
@@ -94,6 +134,7 @@ export const DEFAULT_EDITOR_PREFS: EditorPrefs = {
   arc: { direction: "clockwise", size: "half" },
   zoom: DEFAULT_ZOOM,
   showGrid: true,
+  smartPoints: null,
   inkSwatches: [],
   rounding: { radius: 0, corners: CORNER_ALL },
   border: { ...DEFAULT_BORDER },
@@ -267,6 +308,9 @@ export function loadEditorPrefs(
       typeof record.showGrid === "boolean"
         ? record.showGrid
         : DEFAULT_EDITOR_PREFS.showGrid,
+    // Tri-state: a non-boolean (absent included) means the device default.
+    smartPoints:
+      typeof record.smartPoints === "boolean" ? record.smartPoints : null,
     inkSwatches: normalizeSwatches(record.inkSwatches),
     rounding: roundingPref(record.rounding),
     border: borderPref(record.border),
@@ -280,10 +324,15 @@ export function saveEditorPrefs(
   prefs: EditorPrefs,
   storage: StorageLike | null = defaultStorage(),
 ): void {
-  writeRaw(storage, EDITOR_PREFS_KEY, {
+  // `smartPoints: null` is the automatic state, not an override: leave it out
+  // entirely so the next open still asks the device (and so a phone default
+  // never becomes a saved `true` on a laptop).
+  const stored: Record<string, unknown> = {
     ...prefs,
     border: borderPref(prefs.border),
-  });
+  };
+  if (stored.smartPoints === null) delete stored.smartPoints;
+  writeRaw(storage, EDITOR_PREFS_KEY, stored);
 }
 
 /** The last committed config, or `null` when absent / corrupt. */

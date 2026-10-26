@@ -14,9 +14,10 @@
  * it belongs with the drawing controls, above the selection actions — not
  * with the board settings.
  *
- * إظهار الشبكة is the one view guide in here: the construction grid follows
- * the *user* (it is a preference, drawn the same on every board), while every
- * other setting on this panel is the document's own.
+ * إظهار الشبكة and اختيار النقاط الذكي are the browser-owned settings in here:
+ * the construction grid and the line/arc point mode follow the *user* (they are
+ * preferences, not artwork), while every other setting on this panel belongs to
+ * the document.
  */
 
 import { useMemo, useState } from "react";
@@ -115,6 +116,9 @@ export interface SettingsPanelProps {
   itemsCount: number;
   /** Writes the grid guide to the user's preference (it is not document config). */
   setShowGrid: (show: boolean) => void;
+  /** The resolved smart point preference (device default or user choice). */
+  smartPoints: boolean;
+  setSmartPoints: (smart: boolean) => void;
   patchConfig: (patch: Partial<ProjectConfig>) => void;
   /** Live, mutation-free update while a slider is dragged. */
   previewConfig: (patch: Partial<ProjectConfig>) => void;
@@ -166,6 +170,8 @@ export function SettingsPanel({
   config,
   itemsCount,
   setShowGrid,
+  smartPoints,
+  setSmartPoints,
   patchConfig,
   previewConfig,
   clearAll,
@@ -302,6 +308,15 @@ export function SettingsPanel({
           onCheckedChange={setShowGrid}
           shortcut={{ kind: "toggleGrid" }}
         />
+        <ToggleRow
+          id="editor-smart-points"
+          label={MESSAGES.smartPoints}
+          checked={smartPoints}
+          onCheckedChange={setSmartPoints}
+        />
+        <p className="text-xs text-muted-foreground/80">
+          {MESSAGES.smartPointsHint}
+        </p>
         <ToggleRow
           id="editor-straight-lines"
           label={MESSAGES.straightLinesAsSquares}

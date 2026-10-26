@@ -41,6 +41,8 @@ import type { Id } from "../../../convex/_generated/dataModel";
 import {
   MAX_ZOOM,
   MIN_ZOOM,
+  SMART_POINTS_MEDIA,
+  defaultSmartPoints,
   loadEditorPrefs,
   rememberInkSwatch,
   saveEditorPrefs,
@@ -225,6 +227,14 @@ export interface EditorController {
   showGrid: boolean;
   setShowGrid: (show: boolean) => void;
 
+  /**
+   * Smart point selection for the line and arc tools. The resolved value
+   * combines the saved explicit choice with the device default; setting it
+   * stores an explicit choice from then on.
+   */
+  smartPoints: boolean;
+  setSmartPoints: (smart: boolean) => void;
+
   surfaceRef: React.RefObject<HTMLDivElement | null>;
   /** The scrollable canvas viewport (what the hand tool pans). */
   viewportRef: React.RefObject<HTMLDivElement | null>;
@@ -292,9 +302,38 @@ export function useEditor(
    */
   const zoomRef = useRef(initialPrefs.zoom);
   const [showGrid, setShowGridState] = useState(initialPrefs.showGrid);
+  /**
+   * Smart points are tri-state in the prefs. `smartPointsPref` is exactly what
+   * the user chose (`null` = never chose), while `deviceSmartPoints` follows
+   * the pointer media query only while no explicit choice exists. The tools
+   * receive the resolved boolean; the save effect receives the tri-state, so
+   * an automatic mobile default is never written as an override.
+   */
+  const [smartPointsPref, setSmartPointsPref] = useState<boolean | null>(
+    initialPrefs.smartPoints,
+  );
+  const [deviceSmartPoints, setDeviceSmartPoints] = useState(defaultSmartPoints);
   const labelRef = useRef("رسم");
   /** The line tool's run survives re-renders without a pointer being down. */
   const stateRef = useRef<ToolState>(NO_STATE);
+
+  // Follow the device only in automatic mode. The initial value already
+  // resolved synchronously on the client; this listener keeps a tablet that
+  // gains/loses its primary touch pointer in step. It never touches the pref,
+  // so nothing here can turn the automatic state into an override.
+  useEffect(() => {
+    if (smartPointsPref !== null) return;
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return;
+    }
+    const media = window.matchMedia(SMART_POINTS_MEDIA);
+    const sync = () => setDeviceSmartPoints(media.matches);
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
+  }, [smartPointsPref]);
+
+  const smartPoints = smartPointsPref ?? deviceSmartPoints;
 
   /**
    * What the canvas renders. The construction grid is a *view* guide — the same
@@ -508,8 +547,8 @@ export function useEditor(
   /* ---------------------------------------------------------------- */
 
   const context = useMemo<ToolContext>(
-    () => ({ config, items, selection, tool, style, arc }),
-    [arc, config, items, selection, style, tool],
+    () => ({ config, items, selection, tool, style, arc, smartPoints }),
+    [arc, config, items, selection, smartPoints, style, tool],
   );
 
   /**
@@ -793,6 +832,14 @@ export function useEditor(
   /** The grid guide lives in the prefs, not in the document (docs/UI.md §Editor). */
   const setShowGrid = useCallback((show: boolean) => {
     setShowGridState(show);
+  }, []);
+
+  /**
+   * Any switch interaction is an explicit choice, including switching the
+   * mobile default off. From then on the device is never consulted again.
+   */
+  const setSmartPoints = useCallback((smart: boolean) => {
+    setSmartPointsPref(smart);
   }, []);
 
   const recolourSelection = useCallback(
@@ -1132,6 +1179,7 @@ export function useEditor(
       arc,
       zoom,
       showGrid,
+      smartPoints: smartPointsPref,
       inkSwatches: [...inkSwatches],
       rounding: style.rounding,
       border: style.border,
@@ -1142,6 +1190,7 @@ export function useEditor(
     arc,
     inkSwatches,
     showGrid,
+    smartPointsPref,
     style.border,
     style.cap,
     style.join,
@@ -1219,6 +1268,8 @@ export function useEditor(
     setZoom,
     showGrid,
     setShowGrid,
+    smartPoints,
+    setSmartPoints,
     surfaceRef,
     viewportRef,
     centreView,

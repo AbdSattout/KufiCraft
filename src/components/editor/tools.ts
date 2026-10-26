@@ -32,7 +32,7 @@ import type {
 import type { Point, Rect } from "@/lib/canvas/geometry";
 import { addItems, lineItems, paintItems, penItems, removeItems } from "@/lib/canvas/ops";
 import { Arc, isItemTypeAllowed } from "@/lib/canvas/items";
-import { linePointPosition } from "@/lib/canvas/grid";
+import { linePointPosition, smartArcPoints } from "@/lib/canvas/grid";
 import {
   anchorKey,
   anchorAt,
@@ -533,14 +533,15 @@ class PenTool extends KufiTool {
  * open polyline while clicking the first one commits a closed one (`Z`). That
  * is exactly the reference app's behaviour.
  *
- * Clicks land on the nine anchors of the cell under the cursor
+ * Clicks land on the nine anchors of the fragment under the cursor
  * (`linePointAt`), so a run can turn and end inside a cell; the overlay shows
- * a dot on the anchor the next click would store. Both the ghost and the
- * committed run are resolved by `lineRun` + `lineItems`, so the preview shows
- * the *same* endpoints the click stores. A run with a diagonal part, or with
- * anchored points, is stroked; a run made only of centre points and
- * axis-aligned segments is drawn as `config.straightLinesAsSquares` says — one
- * square per cell, or one solid bar.
+ * a dot on the anchor the next click would store. In smart mode the same
+ * fragment is used but every point is its centre, which is the mobile default.
+ * Both the ghost and the committed run are resolved by `lineRun` +
+ * `lineItems`, so the preview shows the *same* endpoints the click stores. A
+ * run with a diagonal part, or with anchored points, is stroked; a run made
+ * only of centre points and axis-aligned segments is drawn as
+ * `config.straightLinesAsSquares` says — one square per cell, or one solid bar.
  */
 class LineTool extends KufiTool {
   readonly id = "line" as const;
@@ -564,7 +565,7 @@ class LineTool extends KufiTool {
   ];
 
   begin(ctx: ToolContext, state: ToolState, input: ToolInput): ToolOutcome {
-    const point = linePointAt(ctx.config, input.point);
+    const point = linePointAt(ctx.config, input.point, ctx.smartPoints);
     const points = state.kind === "line" ? state.points : [];
     const run = lineRun(points, point);
     if (!run.finished) {
@@ -581,7 +582,7 @@ class LineTool extends KufiTool {
    */
   move(ctx: ToolContext, state: ToolState, input: ToolInput): ToolOutcome {
     if (state.kind !== "none" && state.kind !== "line") return unchanged(state);
-    const hover = linePointAt(ctx.config, input.point);
+    const hover = linePointAt(ctx.config, input.point, ctx.smartPoints);
     if (state.kind === "line" && state.hover !== null && sameLinePoint(state.hover, hover)) {
       return unchanged(state);
     }
@@ -745,6 +746,9 @@ class EraserTool extends KufiTool {
  * same nine anchors the line tool uses (`arcPointAt`), on the fragment under
  * the pointer and stored whole with the centre included, because for an arc
  * endpoint an absent anchor means the legacy spring point (docs/CANVAS.md §5).
+ * With smart mode on, the tap's exact anchor is replaced by the pair rule
+ * (`smartArcPoints`): top/bottom middle for a horizontal chord, left/right
+ * middle for a vertical one, both centres otherwise.
  * Direction and size come from the tool's own controls; the Arc item class
  * owns the maths.
  *
@@ -811,6 +815,7 @@ class ArcTool extends KufiTool {
 
   override preview(ctx: ToolContext, state: ToolState): ToolPreview {
     if (state.kind !== "arc") return EMPTY_PREVIEW;
+    const pair = this.resolve(ctx, state.from ?? state.to, state.to);
     const arc =
       state.from === null ? null : this.between(ctx, state.from, state.to);
     return {
@@ -818,8 +823,8 @@ class ArcTool extends KufiTool {
       mode: "ghost",
       keys: [],
       marquee: null,
-      marker: state.from,
-      dot: state.to,
+      marker: state.from === null ? null : pair.from,
+      dot: pair.to,
     };
   }
 
@@ -832,15 +837,27 @@ class ArcTool extends KufiTool {
     return { state: NO_STATE, commit: commit([...next], ctx.selection, "قوس") };
   }
 
+  /** The endpoints the commit will store: the exact clicks or the smart pair. */
+  private resolve(
+    ctx: ToolContext,
+    from: ArcPoint,
+    to: ArcPoint,
+  ): { from: ArcPoint; to: ArcPoint } {
+    return ctx.smartPoints
+      ? smartArcPoints(from, to, ctx.arc.direction)
+      : { from, to };
+  }
+
   private between(
     ctx: ToolContext,
     from: ArcPoint,
     to: ArcPoint,
   ): ArcItem | null {
+    const pair = this.resolve(ctx, from, to);
     // The Arc class owns the geometry; `arcBetween` only supplies the style.
-    if (sameArcCell(from, to)) return null;
-    if (!Arc.isSupported(from, to)) return null;
-    return arcBetween(ctx, from, to);
+    if (sameArcCell(pair.from, pair.to)) return null;
+    if (!Arc.isSupported(pair.from, pair.to)) return null;
+    return arcBetween(ctx, pair.from, pair.to);
   }
 }
 

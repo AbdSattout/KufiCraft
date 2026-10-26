@@ -214,7 +214,9 @@ tiles paint their own fragment's box, and the line/arc geometry springs off it
 * **The nine anchors.** The editor snaps to `ANCHOR_GRID = {0, 0.5, 1}²`,
   row-major — `(0,0) (0.5,0) (1,0) / (0,0.5) (0.5,0.5) (1,0.5) / (0,1) (0.5,1) (1,1)`
   — the reference app's nine-cell geometry, now measured inside the clicked
-  fragment (§6 «Line rules»).
+  fragment (§6 «Line rules»). Smart point selection keeps the fragment but
+  chooses the centre (line) or the pair rule (arc) instead of this snap
+  (§6 «Smart point selection»).
 * **Keys.** `fragmentKey` appends `#<zone>` to a space fragment (`"2:3#1"`);
   `strokeKey` digests the point list with that fragment key and the anchor as
   before (`"2:0#1@1,1"`). Ink keys are exactly the pre-fragment strings; a space
@@ -343,7 +345,7 @@ and export.
 | --- | --- |
 | `model.ts` | re-export of `convex/lib/model.ts` |
 | `geometry.ts` | `Point`, `Rect`, frames (`baseFrame`, `quarterTurnFrame`, `composeFrames`, `mapCommands`), `zoneRect`, `cellRect`, `circularSlice`, `sectorPath`, `slicePath`, `inkUnit`, `arcCentre`, `distanceToSegment/Polyline/Arc`, rect helpers (`boundsOfPoints`, `expandRect`, `rectContains`, `rectsIntersect`, `unionRect`) |
-| `grid.ts` | `pointToCell`, `pointToAnchor` → `Anchor`, `pointToLinePoint` → `LinePoint`, `pointToArcPoint` → `LinePoint` (the centre kept), `linePointPosition`, `anchorToCell`, `cellCentre`, `isSameAxis`, `runOf(cells)` → `Run`, `cellsBetween`, `gridPaths` → `{ cellBorders, inkLines }` |
+| `grid.ts` | `pointToCell`, `pointToAnchor` → `Anchor`, `pointToLinePoint` → `LinePoint`, `pointToArcPoint` → `LinePoint` (the centre kept), `smartArcPoints` → the pair rule, `linePointPosition`, `anchorToCell`, `cellCentre`, `isSameAxis`, `runOf(cells)` → `Run`, `cellsBetween`, `gridPaths` → `{ cellBorders, inkLines }` |
 | `shapes.ts` | `KufiShape` + the ten shapes (`shapeById`, `shapeLabel`, `shapePath`, `shapeOrderIndex`, `SHAPE_ORDER`); the **same** renderer draws the canvas fragment and the toolbar icon (`tileIconPath`) |
 | `rounding.ts` | `roundingRadius`, `rotateCornerMask`, `hasRounding`, `roundCorners` (per-corner rounding generated from a shape's own commands) |
 | `border.ts` | `borderPaint` (one wider stroke of the item's own path, colour + stroke width), `borderSides`, `borderBand`, `borderClipRects` (outside-band rects for a partial tile side mask) |
@@ -544,9 +546,9 @@ name. Adding a tool = one class + one registry line.
 | --- | --- | --- | --- |
 | `select` | تحديد | `V` | click selects (shift toggles), drag on an item moves the selection (clamped to the grid; at 1:1 the pointer's signed half-cell displacement carries/borrows per fragment), drag on empty space marquee-selects |
 | `pen` | قلم | `P` | press/drag colours the fragments the pointer is moved over — every fragment it swept, and a fast drag fills all the fragments it flew over (`anchorsAlongStroke`), so speed never changes the stroke |
-| `line` | خط | `L` | **square grid only** (`creates: ["line"]`). Click sequence: click A, click B… commits an open run; click the last point again ends it, click the first one closes it. Choosing another tool also commits the clicked points; choosing `خط` again cancels them. A drag also works (pointer-up ends the *drag*, not the run). Every click snaps to one of the nine anchors of the **fragment** under the cursor (ink or space), and the overlay's dot shows the point the next click would store; a run with no diagonal segment is squares (`straightLinesAsSquares`, default) or one bar |
+| `line` | خط | `L` | **square grid only** (`creates: ["line"]`). Click sequence: click A, click B… commits an open run; click the last point again ends it, click the first one closes it. Choosing another tool also commits the clicked points; choosing `خط` again cancels them. A drag also works (pointer-up ends the *drag*, not the run). Every click snaps to one of the nine anchors of the **fragment** under the cursor (ink or space), or to its centre when smart points are on; the overlay's dot shows the point the next click would store. A run with no diagonal segment is squares (`straightLinesAsSquares`, default) or one bar |
 | `eraser` | ممحاة | `E` | click/drag removes whatever the pointer touches; a fast drag sweeps the cells it flew over (hidden items are never touched) |
-| `arc` | قوس | `A` | **square grid only** (`creates: ["arc"]`). Press-drag-release A→B, **or** click A then click B (clicking the start cell again cancels). Each endpoint snaps to one of the nine anchors of the **fragment** under the cursor (`arcPointAt`) and stores it whole — the centre included, since an absent anchor means the legacy spring point (§5); the armed start is the same dot as the hover, and the ghost always shows the arc the click commits |
+| `arc` | قوس | `A` | **square grid only** (`creates: ["arc"]`). Press-drag-release A→B, **or** click A then click B (clicking the start cell again cancels). Each endpoint snaps to one of the nine anchors of the **fragment** under the cursor (`arcPointAt`) and stores it whole — the centre included, since an absent anchor means the legacy spring point (§5); with smart points on, the pair rule replaces both exact anchors. The armed start is the same dot as the hover, and the ghost always shows the arc the click commits |
 | `hand` | يد | `H` | the one **view** tool: the pointer scrolls the canvas pane (`panScrollOffset`), `KufiTool.pans` tells the controller so, and a double click recentres the board (`centreScroll`) |
 
 * `KufiTool.creates` — the item types a tool produces. A grid that does not
@@ -618,7 +620,10 @@ retraces itself does not brush a chord.
    with a tie rounding to the higher fraction. A pointer on a space fragment
    snaps to an anchor *of that space square* and stores its zone; it never snaps
    across into the ink fragment. The stored point carries its zone and anchor;
-   the format itself accepts any `[0, 1]` fraction.
+   the format itself accepts any `[0, 1]` fraction. With **smart point
+   selection** on, the fragment is resolved the same way but the point is always
+   that fragment's centre (§6 «Smart point selection»); the centre is stored as
+   canonical absence, so the run merges like any other centre run.
 3. **The dot.** While the tool is armed (hover included — an empty run exists
    before the first click), `ToolPreview.dot` is exactly the point the next
    click would store, drawn as an open circle at that position; the preview's
@@ -655,7 +660,9 @@ retraces itself does not brush a chord.
    centre included: on an arc endpoint an absent anchor means the legacy spring
    point (§5), so dropping the centre would silently move the click onto the ink
    edge. Only anchors that are one of the nine half-multiples are produced; the
-   format accepts any fraction.
+   format accepts any fraction. With **smart point selection** on, `arcPointAt`
+   still resolves the fragment, then `smartArcPoints` replaces the exact anchors
+   of both ends with the pair rule (§6 «Smart point selection»).
 2. **The dot.** On hover (including before the first click) `ToolPreview.dot`
    is the pending endpoint; once armed, the start point is the `marker` dot and
    `dot` is the pending end. Both are painted as the same small circle (§6
@@ -666,6 +673,36 @@ retraces itself does not brush a chord.
 4. **Degenerate pairs are refused.** A same-cell pair (whatever anchors), or
    cells that share neither a row, a column nor a 45° diagonal, commits nothing
    (`Arc.isSupported`; §5).
+
+### Smart point selection
+
+`ToolContext.smartPoints` is part of the tool contract and arrives **resolved**
+(the device default or an explicit choice); the tri-state value and its
+persistence live in the browser prefs, not in the document (docs/UI.md). When it
+is on:
+
+* **Line.** Every click and hover is the centre of the fragment under the
+  pointer. The zone is still the clicked one; only the anchor inside it is
+  chosen for the user.
+* **Arc.** Both fragments are resolved from the two clicks, then
+  `smartArcPoints` chooses one anchor per endpoint, applied to both ends:
+  * same row → bottom middle for `clockwise`, top middle for
+    `counterclockwise` (the reference app's spring points, §5);
+  * same column → left middle for `clockwise`, right middle for
+    `counterclockwise`;
+  * a 45° diagonal → both fragment centres.
+* **Dots and ghosts use the resolved pair.** The arc preview resolves the same
+  pair for `marker` and `dot`, and `arcBetween` receives it, so the dot cannot
+  show a precise click that the committed arc does not use. Before a second
+  point exists the pair is same-cell and shown at the centre.
+* **Off** is the original exact behaviour: every click keeps its nearest of the
+  nine anchors, and the line/arc tools produce anchored points as before.
+
+The mode is a browser preference: absent follows the device (on for a coarse,
+hoverless pointer such as a phone or tablet; off for a laptop), any switch
+interaction stores an explicit `true`/`false`, and an explicit value is never
+overridden by the current device. The auto state is written as absence, never
+as the resolved boolean.
 
 ### Preview
 
