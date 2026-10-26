@@ -318,8 +318,17 @@ describe("a space fragment is a normal square", () => {
     for (const { preset, config } of ALL) {
       for (const zone of ZONES) {
         // The same straight run through consecutive cells, once per quadrant.
-        // The tool resolves it by cells and zones, never by the ratio: one
-        // square per cell, each on the stripe that was clicked.
+        // The split run must cover the whole band its solid bar would paint:
+        // the clicked stripe, plus the along-run space fragment that closes
+        // each cell — never a gap, never a second cross-section.
+        const from = zoneRect(config, 0, 2, zone);
+        const to = zoneRect(config, 2, 2, zone);
+        const band = {
+          x: from.x,
+          y: from.y,
+          w: to.x + to.w - from.x,
+          h: from.h,
+        };
         const items = lineItems(
           config,
           [linePoint(0, 2, zone), linePoint(2, 2, zone)],
@@ -330,17 +339,22 @@ describe("a space fragment is a normal square", () => {
           zone,
           type: "tile",
         });
+        let area = 0;
         for (const item of items) {
-          const tile = item as TileItem;
-          expect({ preset: preset.label, column: tile.column, zone: tile.zone }).toEqual({
-            preset: preset.label,
-            column: tile.column,
-            zone,
-          });
-          expect(itemBounds(config, item)).toEqual(
-            zoneRect(config, tile.column, 2, zone),
+          expect(item.type).toBe("tile");
+          const bounds = itemBounds(config, item);
+          // The cross-section is the clicked stripe…
+          expect(bounds.y).toBeCloseTo(band.y, 12);
+          expect(bounds.h).toBeCloseTo(band.h, 12);
+          // …and every fragment stays inside the run's bar.
+          expect(bounds.x).toBeGreaterThanOrEqual(band.x - 1e-9);
+          expect(bounds.x + bounds.w).toBeLessThanOrEqual(
+            band.x + band.w + 1e-9,
           );
+          area += bounds.w * bounds.h;
         }
+        // Disjoint fragments whose total area is the band: exact cover.
+        expect(area).toBeCloseTo(band.w * band.h, 9);
       }
     }
   });

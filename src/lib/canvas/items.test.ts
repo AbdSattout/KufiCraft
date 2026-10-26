@@ -478,6 +478,22 @@ describe("render", () => {
     expect(start.y).toBeCloseTo(6 * cellSize(SQUARE) + inkUnit(SQUARE), 6);
   });
 
+  it("springs a legacy diagonal off the left and bottom edge midpoints", () => {
+    const cell = cellSize(SQUARE);
+    const ink = inkUnit(SQUARE);
+    const subject = new Arc({
+      from: { column: 0, row: 6 },
+      to: { column: 4, row: 10 },
+      direction: "clockwise",
+      size: "quarter",
+    });
+    const { start, end } = subject.geometry(SQUARE);
+    // `\` down + clockwise: the start's left edge, the end's bottom edge —
+    // the same pair `arcSpringAnchors` gives the smart diagonal rule.
+    expectPointNear(start, { x: 0, y: 6 * cell + ink / 2 }, 1e-9);
+    expectPointNear(end, { x: 4 * cell + ink / 2, y: 10 * cell + ink }, 1e-9);
+  });
+
   it("spans an anchored arc exactly between its two points", () => {
     const cell = cellSize(SQUARE);
     const ink = inkUnit(SQUARE);

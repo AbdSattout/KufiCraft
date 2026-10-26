@@ -345,7 +345,7 @@ and export.
 | --- | --- |
 | `model.ts` | re-export of `convex/lib/model.ts` |
 | `geometry.ts` | `Point`, `Rect`, frames (`baseFrame`, `quarterTurnFrame`, `composeFrames`, `mapCommands`), `zoneRect`, `cellRect`, `circularSlice`, `sectorPath`, `slicePath`, `inkUnit`, `arcCentre`, `distanceToSegment/Polyline/Arc`, rect helpers (`boundsOfPoints`, `expandRect`, `rectContains`, `rectsIntersect`, `unionRect`) |
-| `grid.ts` | `pointToCell`, `pointToAnchor` → `Anchor`, `pointToLinePoint` → `LinePoint`, `pointToArcPoint` → `LinePoint` (the centre kept), `smartArcPoints` → the pair rule, `linePointPosition`, `anchorToCell`, `cellCentre`, `isSameAxis`, `runOf(cells)` → `Run`, `cellsBetween`, `gridPaths` → `{ cellBorders, inkLines }` |
+| `grid.ts` | `pointToCell`, `pointToAnchor` → `Anchor`, `pointToLinePoint` → `LinePoint`, `pointToArcPoint` → `LinePoint` (the centre kept), `smartArcPoints` → the pair rule, `arcSpringAnchors` → the reference spring pair, `linePointPosition`, `anchorToCell`, `cellCentre`, `isSameAxis`, `runOf(cells)` → `Run`, `cellsBetween`, `gridPaths` → `{ cellBorders, inkLines }` |
 | `shapes.ts` | `KufiShape` + the ten shapes (`shapeById`, `shapeLabel`, `shapePath`, `shapeOrderIndex`, `SHAPE_ORDER`); the **same** renderer draws the canvas fragment and the toolbar icon (`tileIconPath`) |
 | `rounding.ts` | `roundingRadius`, `rotateCornerMask`, `hasRounding`, `roundCorners` (per-corner rounding generated from a shape's own commands) |
 | `border.ts` | `borderPaint` (one wider stroke of the item's own path, colour + stroke width), `borderSides`, `borderBand`, `borderClipRects` (outside-band rects for a partial tile side mask) |
@@ -367,24 +367,28 @@ Every function is deterministic and side-effect free.
   class. A run whose points are all **fragment centres** follows the reference
   rules unchanged, per fragment: a run with **no diagonal segment** that spans
   at least one cell boundary is either one `line` bar in a single span, or — when
-  `config.straightLinesAsSquares` is on (default) — one square per cell along
-  every segment, each square on the zone that was clicked (the in-between cells
-  take the target point's zone, the spread `anchorsAlongLine` uses). Anything
-  with a diagonal (including a closing segment) → one `stroke` polyline;
-  `closed` adds the closing segment. `dedupeFragments` drops immediate repeats
-  of the same **cell and zone** (and the closing repeat), and a closed tiled run
-  paints the first cell once. Two fragments of the **same** cell are two
-  positions inside it — no bar or square run can span less than a cell — so they
-  are stroked. An **anchored** point (§3) sits inside its fragment, which
-  neither a bar nor a tile can express, so a run containing one is always a
-  stroked polyline through the anchors; it is merged to its two ends only when
-  it is open, straight, on the square grid, every point agrees on the anchor
-  **and zone**, and the run does not double back. A run with mixed anchors or
-  zones is never merged, so no point a designer placed is dropped. The optional
-  `style` carries the draw style's `rounding`, `border`, `cap` and `join` into
-  the items; with rounding on, a run is kept as **one** item — a `line` bar (its
-  box corners round) or a `stroke` (its turns round) — because rounding
-  independently tiled cells would notch the joins.
+  `config.straightLinesAsSquares` is on (default) — a **continuous band** of
+  tiles. Each straight leg covers the exact rectangle its solid bar would paint:
+  the cross-section comes from the canonical lower end, the along-run fragments
+  are the two zones of the cell's row/column (ink + trailing space), and the
+  first/last cells take only the fragments the bar reaches. A turn adds the
+  fragments its second leg needs at the shared cell; `dedupeFragments` keeps
+  one copy of each fragment, so no cell can be painted twice. This is why a
+  split run no longer reads as a dashed line at ratios below `1:1`: the spaces
+  between ink squares are real tiles, not gaps. Anything with a diagonal
+  (including a closing segment) → one `stroke` polyline; `closed` adds the
+  closing segment. Two fragments of the **same** cell are two positions inside
+  it — no bar or square run can span less than a cell — so they are stroked. An
+  **anchored** point (§3) sits inside its fragment, which neither a bar nor a
+  tile can express, so a run containing one is always a stroked polyline
+  through the anchors; it is merged to its two ends only when it is open,
+  straight, on the square grid, every point agrees on the anchor **and zone**,
+  and the run does not double back. A run with mixed anchors or zones is never
+  merged, so no point a designer placed is dropped. The optional `style` carries
+  the draw style's `rounding`, `border`, `cap` and `join` into the items; with
+  rounding on, a run is kept as **one** item — a `line` bar (its box corners
+  round) or a `stroke` (its turns round) — because rounding independently tiled
+  cells would notch the joins.
 * **`toOps(prev, next)`** — diffs two item lists into the backend batch
   (`remove` + `add`) around the longest common *content* prefix, so a stroke
   re-sends only the tail it touched, never the whole board.
@@ -635,8 +639,10 @@ retraces itself does not brush a chord.
    zero-length segment (two points at the same position, e.g. closing a run in
    one cell) is legal and draws nothing.
 5. **Merging.** A run of fragment-centre points follows the pre-anchor rules
-   byte for byte (§4 `lineItems`): squares or one bar, `dedupeFragments`; the
-   squares land on the clicked zones and the bar ends on the clicked fragments.
+   byte for byte (§4 `lineItems`): a continuous tile band or one bar,
+   `dedupeFragments`; the band's cross-section comes from the canonical first
+   end and its along-run space fragments fill the gaps between ink squares,
+   while the bar ends on the clicked fragments.
    Two fragments of one cell, or any non-centre anchor, make the run a stroked
    polyline, merged to its two ends only when it is open, straight, on the
    square grid, every point agrees on the anchor **and zone**, and the run does
@@ -690,7 +696,20 @@ is on:
     `counterclockwise` (the reference app's spring points, §5);
   * same column → left middle for `clockwise`, right middle for
     `counterclockwise`;
-  * a 45° diagonal → both fragment centres.
+  * a 45° diagonal **half** → both fragment centres (a true semicircle);
+  * a 45° diagonal **quarter** → the reference app's edge-midpoint spring pair
+    (`arcSpringAnchors`), so the rib starts and ends on the fragments' edges
+    instead of floating at their centres;
+  * a 45° diagonal **three-quarter** → the same edge pair **swapped between
+    the endpoints**, so each end springs from the edge that faces the other
+    fragment. The curved band is `ink` wide, so this is what makes the 270°
+    arc cross both tapped ink squares (≈85–95% of each) instead of grazing
+    them (≈45% with the unswapped pair); the ¼'s spring pair covers ≈92–96%,
+    so the three-quarter keeps the same visual weight. It also keeps the loop
+    compact — its radius is the span minus half the ink — instead of the huge
+    circle the quarter's chord would trace the long way round.
+  Both pairs are resolved by geometry, so clicking the two cells in either
+  order lands the same anchor on each physical endpoint.
 * **Dots and ghosts use the resolved pair.** The arc preview resolves the same
   pair for `marker` and `dot`, and `arcBetween` receives it, so the dot cannot
   show a precise click that the committed arc does not use. Before a second

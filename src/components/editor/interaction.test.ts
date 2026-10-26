@@ -959,7 +959,9 @@ describe("arcBetween + linePreview", () => {
     });
     expect(preview.map((item) => item.key)).toEqual([
       tileKey(1, 1, 0),
+      tileKey(1, 1, 1),
       tileKey(2, 1, 0),
+      tileKey(2, 1, 1),
       tileKey(3, 1, 0),
     ]);
     expect(preview.every((item) => item.color === square.ink)).toBe(true);

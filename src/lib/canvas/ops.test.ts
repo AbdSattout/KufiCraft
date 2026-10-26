@@ -504,7 +504,7 @@ describe("lineItems", () => {
   /** The option off: a straight run becomes one solid bar. */
   const bars = makeConfig({ straightLinesAsSquares: false });
 
-  it("draws a two-point straight run as one square per cell", () => {
+  it("fills a two-point straight run's band with ink and space fragments", () => {
     const config = makeConfig();
     const items = lineItems(
       config,
@@ -514,6 +514,9 @@ describe("lineItems", () => {
       ],
       false,
     );
+    // The ink square of every cell the bar crosses, plus the x-space stripe
+    // that closes the gap between it and the next cell. The last cell stops
+    // at its ink edge, exactly where the solid bar ends.
     expect(items).toEqual([
       {
         type: "tile",
@@ -521,6 +524,14 @@ describe("lineItems", () => {
         column: 0,
         row: 4,
         zone: 0,
+        color: config.ink,
+      },
+      {
+        type: "tile",
+        key: tileKey(0, 4, 1),
+        column: 0,
+        row: 4,
+        zone: 1,
         color: config.ink,
       },
       {
@@ -533,12 +544,39 @@ describe("lineItems", () => {
       },
       {
         type: "tile",
+        key: tileKey(1, 4, 1),
+        column: 1,
+        row: 4,
+        zone: 1,
+        color: config.ink,
+      },
+      {
+        type: "tile",
         key: tileKey(2, 4, 0),
         column: 2,
         row: 4,
         zone: 0,
         color: config.ink,
       },
+    ]);
+  });
+
+  it("fills a vertical split run with the y-space fragments", () => {
+    const config = makeConfig();
+    const items = lineItems(
+      config,
+      [
+        { column: 2, row: 0 },
+        { column: 2, row: 2 },
+      ],
+      false,
+    );
+    expect(items.map((item) => item.key)).toEqual([
+      tileKey(2, 0, 0),
+      tileKey(2, 0, 2),
+      tileKey(2, 1, 0),
+      tileKey(2, 1, 2),
+      tileKey(2, 2, 0),
     ]);
   });
 
@@ -596,7 +634,7 @@ describe("lineItems", () => {
     );
   });
 
-  it("splits each straight leg of a polyline into squares", () => {
+  it("fills each straight leg of a polyline, turn included", () => {
     const items = lineItems(
       makeConfig(),
       [
@@ -606,11 +644,17 @@ describe("lineItems", () => {
       ],
       false,
     );
+    // The horizontal leg fills rows 0 with zone 0/1; the vertical leg adds the
+    // y-space fragments it needs at the shared corner cell.
     expect(items.map((item) => item.key)).toEqual([
       tileKey(0, 0, 0),
+      tileKey(0, 0, 1),
       tileKey(1, 0, 0),
+      tileKey(1, 0, 1),
       tileKey(2, 0, 0),
+      tileKey(2, 0, 2),
       tileKey(2, 1, 0),
+      tileKey(2, 1, 2),
       tileKey(2, 2, 0),
     ]);
   });
@@ -642,7 +686,7 @@ describe("lineItems", () => {
     expect(items[0].type).toBe("stroke");
   });
 
-  it("outlines a closed axis-aligned run with squares", () => {
+  it("outlines a closed axis-aligned run with continuous fragments", () => {
     const items = lineItems(
       makeConfig(),
       [
@@ -653,15 +697,25 @@ describe("lineItems", () => {
       ],
       true,
     );
+    // Each side is the bar's band; the shared corner cells take the union of
+    // the two legs' fragments, and no fragment is painted twice.
     expect(items.map((item) => item.key)).toEqual([
       tileKey(0, 0, 0),
+      tileKey(0, 0, 1),
       tileKey(1, 0, 0),
+      tileKey(1, 0, 1),
       tileKey(2, 0, 0),
+      tileKey(2, 0, 2),
       tileKey(2, 1, 0),
+      tileKey(2, 1, 2),
       tileKey(2, 2, 0),
       tileKey(1, 2, 0),
+      tileKey(1, 2, 1),
       tileKey(0, 2, 0),
+      tileKey(0, 2, 1),
       tileKey(0, 1, 0),
+      tileKey(0, 1, 2),
+      tileKey(0, 0, 2),
     ]);
   });
 
@@ -732,10 +786,26 @@ describe("lineItems", () => {
       },
       {
         type: "tile",
+        key: tileKey(0, 0, 1),
+        column: 0,
+        row: 0,
+        zone: 1,
+        color: "#00ff00",
+      },
+      {
+        type: "tile",
         key: tileKey(1, 0, 0),
         column: 1,
         row: 0,
         zone: 0,
+        color: "#00ff00",
+      },
+      {
+        type: "tile",
+        key: tileKey(1, 0, 1),
+        column: 1,
+        row: 0,
+        zone: 1,
         color: "#00ff00",
       },
       {
@@ -770,7 +840,7 @@ describe("lineItems", () => {
       undefined,
       { border: { width: 2, color: "#000000", sides: BORDER_TOP } },
     );
-    expect(squares).toHaveLength(3);
+    expect(squares).toHaveLength(5);
     for (const square of squares) {
       expect(square.border).toEqual({ width: 2, color: "#000000" });
       expect(square.border).not.toHaveProperty("sides");
@@ -787,7 +857,8 @@ describe("lineItems", () => {
       ],
       false,
     );
-    expect(squares).toHaveLength(6);
+    // Five full cells (ink + trailing space) and the last cell's ink only.
+    expect(squares).toHaveLength(11);
     expect(squares.every((item) => item.color === "#101010")).toBe(true);
     // A diagonal is a polyline, and it carries the same resolved colour.
     const stroke = lineItems(
@@ -1023,10 +1094,10 @@ describe("lineItems with anchored points", () => {
   /** The same config with the bar option off, for the bar cases below. */
   const barConfig = makeConfig({ straightLinesAsSquares: false });
 
-  it("draws squares over the space fragments a run was clicked on", () => {
-    // The same run as the ink one above, clicked on the x-space stripe: one
-    // square per cell, in that stripe's zone (the in-between cell takes the
-    // target's zone).
+  it("draws the same continuous band on the space fragments it was clicked on", () => {
+    // The same run as the ink one above, clicked on the x-space stripe: the
+    // band starts inside the first cell's space and runs to the last cell's
+    // far edge, so every full cell contributes both of its ink-row fragments.
     const spaceRun = [linePoint(0, 4, 1), linePoint(2, 4, 1)];
     expect(lineItems(config, spaceRun, false)).toEqual([
       {
@@ -1039,10 +1110,26 @@ describe("lineItems with anchored points", () => {
       },
       {
         type: "tile",
+        key: tileKey(1, 4, 0),
+        column: 1,
+        row: 4,
+        zone: 0,
+        color: config.ink,
+      },
+      {
+        type: "tile",
         key: tileKey(1, 4, 1),
         column: 1,
         row: 4,
         zone: 1,
+        color: config.ink,
+      },
+      {
+        type: "tile",
+        key: tileKey(2, 4, 0),
+        column: 2,
+        row: 4,
+        zone: 0,
         color: config.ink,
       },
       {
@@ -1054,14 +1141,21 @@ describe("lineItems with anchored points", () => {
         color: config.ink,
       },
     ]);
-    // …and a mixed run keeps each clicked fragment's zone.
+    // A mixed run fills the union of its legs' bands; no clicked fragment is
+    // dropped, and the turn's shared cell keeps both stripes.
     expect(
       lineItems(
         config,
         [linePoint(0, 4), linePoint(1, 4, 1), linePoint(2, 4)],
         false,
       ).map((item) => item.key),
-    ).toEqual([tileKey(0, 4, 0), tileKey(1, 4, 1), tileKey(2, 4, 0)]);
+    ).toEqual([
+      tileKey(0, 4, 0),
+      tileKey(0, 4, 1),
+      tileKey(1, 4, 0),
+      tileKey(1, 4, 1),
+      tileKey(2, 4, 0),
+    ]);
   });
 
   it("draws the same space run as one bar over its fragments", () => {
@@ -1160,13 +1254,14 @@ describe("the equal 1:1 cell", () => {
       w: inkUnit(config),
       h: inkUnit(config),
     });
-    // …so a run of same-zone neighbours is *disconnected* here, exactly as it
-    // is at every denser preset — the ratio never changes what touches.
+    // …so bare same-zone neighbours are *disconnected* here, exactly as at
+    // every denser preset. The line tool's split run bridges them with the
+    // following space fragment (asserted below).
     const first = zoneRect(config, 0, 0, 0);
     expect(first.x + first.w).toBeLessThan(zoneRect(config, 1, 0, 0).x);
   });
 
-  it("still resolves the document ink on the line tool", () => {
+  it("still resolves the document ink and fills spaces on the line tool", () => {
     const config = makeConfig({ ratio: RATIO_PRESETS[0].ratio });
     const items = lineItems(
       config,
@@ -1176,11 +1271,17 @@ describe("the equal 1:1 cell", () => {
       ],
       false,
     );
+    // At 1:1 the gap is half a cell wide, so ignoring the space fragment
+    // would read as a dotted line.
     expect(items.map((item) => item.key)).toEqual([
       tileKey(0, 0, 0),
+      tileKey(0, 0, 1),
       tileKey(1, 0, 0),
+      tileKey(1, 0, 1),
       tileKey(2, 0, 0),
+      tileKey(2, 0, 1),
       tileKey(3, 0, 0),
+      tileKey(3, 0, 1),
       tileKey(4, 0, 0),
     ]);
     expect(items.every((item) => item.color === config.ink)).toBe(true);

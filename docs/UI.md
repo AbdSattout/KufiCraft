@@ -324,8 +324,11 @@ default when the primary pointer is coarse and cannot hover (a phone or tablet)
 and off on a laptop; the rule is `(hover: none) and (pointer: coarse)`. With it
 on, a line always uses the clicked fragment's centre; an arc uses the bottom/top
 middle for a same-row chord (clockwise/counterclockwise), the left/right middle
-for a same-column chord, and both fragment centres otherwise. Off keeps the
-exact nine-anchor click. The setting is tri-state on disk: absent means “follow
+for a same-column chord, both fragment centres for a diagonal half, the
+reference edge-midpoint pair for a diagonal quarter, and that pair swapped
+between the endpoints (each on the edge facing the other fragment) for a
+diagonal three-quarter. Off keeps the exact nine-anchor click.
+The setting is tri-state on disk: absent means “follow
 the device”, while a switch interaction writes an explicit `true`/`false` and
 from then on the device is never consulted. An automatic default is written as
 **absence**, never as the resolved boolean, so moving from a phone to a laptop
@@ -333,9 +336,11 @@ does not silently become an override. The hint says the value lives in this
 browser only.
 
 In that same خيارات اللوحة section, **تقطيع الخطوط** is the line tool's shape:
-on (the default) it draws a run with no diagonal segment as one square per cell
-— the reference app's cut-up straight line; off, that run is a single solid
-`line` bar. It never affects what is already drawn.
+on (the default) it cuts a run with no diagonal segment into fragment tiles
+that cover the run's whole band — the ink squares **and** the space strips
+between them, so the line stays continuous while each fragment remains
+separately erasable; off, that run is a single solid `line` bar. It never
+affects what is already drawn.
 
 There is exactly **one** fill control, in the drawing half of the sidebar above
 the style and board sections. With nothing selected it is **لون الحبر**: the

@@ -618,11 +618,11 @@ describe("smartArcPoints", () => {
   it("puts a same-row chord on the bottom or top middle by direction", () => {
     const from = linePoint(1, 1);
     const to = linePoint(4, 1);
-    expect(smartArcPoints(from, to, "clockwise")).toEqual({
+    expect(smartArcPoints(from, to, "clockwise", "half")).toEqual({
       from: { column: 1, row: 1, anchor: { x: 0.5, y: 1 } },
       to: { column: 4, row: 1, anchor: { x: 0.5, y: 1 } },
     });
-    expect(smartArcPoints(from, to, "counterclockwise")).toEqual({
+    expect(smartArcPoints(from, to, "counterclockwise", "half")).toEqual({
       from: { column: 1, row: 1, anchor: { x: 0.5, y: 0 } },
       to: { column: 4, row: 1, anchor: { x: 0.5, y: 0 } },
     });
@@ -631,40 +631,167 @@ describe("smartArcPoints", () => {
   it("puts a same-column chord on the left or right middle by direction", () => {
     const from = linePoint(1, 1);
     const to = linePoint(1, 4);
-    expect(smartArcPoints(from, to, "clockwise")).toEqual({
+    expect(smartArcPoints(from, to, "clockwise", "half")).toEqual({
       from: { column: 1, row: 1, anchor: { x: 0, y: 0.5 } },
       to: { column: 1, row: 4, anchor: { x: 0, y: 0.5 } },
     });
-    expect(smartArcPoints(from, to, "counterclockwise")).toEqual({
+    expect(smartArcPoints(from, to, "counterclockwise", "half")).toEqual({
       from: { column: 1, row: 1, anchor: { x: 1, y: 0.5 } },
       to: { column: 1, row: 4, anchor: { x: 1, y: 0.5 } },
     });
   });
 
-  it("uses both fragment centres for a diagonal chord", () => {
+  it("uses both fragment centres for a diagonal half", () => {
     expect(
-      smartArcPoints(linePoint(1, 1), linePoint(4, 4), "clockwise"),
+      smartArcPoints(linePoint(1, 1), linePoint(4, 4), "clockwise", "half"),
     ).toEqual({
       from: { column: 1, row: 1, anchor: { x: 0.5, y: 0.5 } },
       to: { column: 4, row: 4, anchor: { x: 0.5, y: 0.5 } },
     });
   });
 
+  it("springs a diagonal quarter off the edge pair, whichever way it is clicked", () => {
+    const from = linePoint(1, 1);
+    const to = linePoint(4, 4);
+    // "\" down + clockwise: the left end springs off its left edge, the right
+    // end off its bottom edge — the reference app's diagonal spring points.
+    expect(smartArcPoints(from, to, "clockwise", "quarter")).toEqual({
+      from: { column: 1, row: 1, anchor: { x: 0, y: 0.5 } },
+      to: { column: 4, row: 4, anchor: { x: 0.5, y: 1 } },
+    });
+    // The pair is resolved by geometry, so clicking backwards attaches the
+    // same anchor to the same physical endpoint.
+    expect(smartArcPoints(to, from, "clockwise", "quarter")).toEqual({
+      from: { column: 4, row: 4, anchor: { x: 0.5, y: 1 } },
+      to: { column: 1, row: 1, anchor: { x: 0, y: 0.5 } },
+    });
+  });
+
+  it("mirrors the diagonal edge pair for the other orientation and direction", () => {
+    // "/" down + clockwise: bottom-middle on the left, right-middle on the right.
+    expect(
+      smartArcPoints(linePoint(1, 4), linePoint(4, 1), "clockwise", "quarter"),
+    ).toEqual({
+      from: { column: 1, row: 4, anchor: { x: 0.5, y: 1 } },
+      to: { column: 4, row: 1, anchor: { x: 1, y: 0.5 } },
+    });
+    // "\" down + counterclockwise: top-middle, right-middle.
+    expect(
+      smartArcPoints(
+        linePoint(1, 1),
+        linePoint(4, 4),
+        "counterclockwise",
+        "quarter",
+      ),
+    ).toEqual({
+      from: { column: 1, row: 1, anchor: { x: 0.5, y: 0 } },
+      to: { column: 4, row: 4, anchor: { x: 1, y: 0.5 } },
+    });
+    // "/" down + counterclockwise: left-middle, top-middle.
+    expect(
+      smartArcPoints(
+        linePoint(1, 4),
+        linePoint(4, 1),
+        "counterclockwise",
+        "quarter",
+      ),
+    ).toEqual({
+      from: { column: 1, row: 4, anchor: { x: 0, y: 0.5 } },
+      to: { column: 4, row: 1, anchor: { x: 0.5, y: 0 } },
+    });
+  });
+
+  it("turns the diagonal edge pair inward for a three-quarter", () => {
+    // "\" down + clockwise: the quarter springs off left/bottom, so the
+    // three-quarter swaps the pair — each end sits on the edge facing the
+    // other fragment. The band then crosses both ink squares instead of just
+    // grazing them, and the 270° loop stays compact.
+    expect(
+      smartArcPoints(
+        linePoint(1, 1),
+        linePoint(4, 4),
+        "clockwise",
+        "threeQuarter",
+      ),
+    ).toEqual({
+      from: { column: 1, row: 1, anchor: { x: 0.5, y: 1 } },
+      to: { column: 4, row: 4, anchor: { x: 0, y: 0.5 } },
+    });
+    // "\" down + counterclockwise: top/right become bottom/left.
+    expect(
+      smartArcPoints(
+        linePoint(1, 1),
+        linePoint(4, 4),
+        "counterclockwise",
+        "threeQuarter",
+      ),
+    ).toEqual({
+      from: { column: 1, row: 1, anchor: { x: 1, y: 0.5 } },
+      to: { column: 4, row: 4, anchor: { x: 0.5, y: 0 } },
+    });
+    // The same physical endpoint keeps its inward anchor when clicked backwards.
+    expect(
+      smartArcPoints(
+        linePoint(4, 4),
+        linePoint(1, 1),
+        "clockwise",
+        "threeQuarter",
+      ),
+    ).toEqual({
+      from: { column: 4, row: 4, anchor: { x: 0, y: 0.5 } },
+      to: { column: 1, row: 1, anchor: { x: 0.5, y: 1 } },
+    });
+    // "/" down + clockwise: the quarter springs off bottom/right, so the
+    // three-quarter swaps to right/bottom — still the edges facing the other
+    // fragment, and mirrored coverage.
+    expect(
+      smartArcPoints(
+        linePoint(1, 4),
+        linePoint(4, 1),
+        "clockwise",
+        "threeQuarter",
+      ),
+    ).toEqual({
+      from: { column: 1, row: 4, anchor: { x: 1, y: 0.5 } },
+      to: { column: 4, row: 1, anchor: { x: 0.5, y: 1 } },
+    });
+  });
+
   it("keeps each endpoint's own fragment, zone included", () => {
     expect(
-      smartArcPoints(linePoint(1, 1, 3), linePoint(4, 1, 2), "clockwise"),
+      smartArcPoints(linePoint(1, 1, 3), linePoint(4, 1, 2), "clockwise", "half"),
     ).toEqual({
       from: { column: 1, row: 1, zone: 3, anchor: { x: 0.5, y: 1 } },
       to: { column: 4, row: 1, zone: 2, anchor: { x: 0.5, y: 1 } },
     });
   });
 
+  it("keeps the zones on a diagonal edge pair", () => {
+    expect(
+      smartArcPoints(linePoint(1, 1, 3), linePoint(4, 4, 2), "clockwise", "quarter"),
+    ).toEqual({
+      from: { column: 1, row: 1, zone: 3, anchor: { x: 0, y: 0.5 } },
+      to: { column: 4, row: 4, zone: 2, anchor: { x: 0.5, y: 1 } },
+    });
+  });
+
   it("falls back to the centre for a same-cell pair", () => {
     expect(
-      smartArcPoints(linePoint(2, 3), linePoint(2, 3), "clockwise"),
+      smartArcPoints(linePoint(2, 3), linePoint(2, 3), "clockwise", "quarter"),
     ).toEqual({
       from: { column: 2, row: 3, anchor: { x: 0.5, y: 0.5 } },
       to: { column: 2, row: 3, anchor: { x: 0.5, y: 0.5 } },
+    });
+  });
+
+  it("keeps the centre for an unsupported pair", () => {
+    // Two across, one down: no arc can be committed, so the hover dots stay
+    // at the fragment centres instead of jumping to a diagonal edge pair.
+    expect(
+      smartArcPoints(linePoint(1, 1), linePoint(3, 2), "clockwise", "quarter"),
+    ).toEqual({
+      from: { column: 1, row: 1, anchor: { x: 0.5, y: 0.5 } },
+      to: { column: 3, row: 2, anchor: { x: 0.5, y: 0.5 } },
     });
   });
 });

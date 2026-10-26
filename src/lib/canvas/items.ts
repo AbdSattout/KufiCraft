@@ -91,7 +91,7 @@ import {
 import type { CircularSlice, PathCmd, Point, Rect } from "./geometry";
 import { borderBand, borderClipRects, borderPaint, borderSides } from "./border";
 import type { BorderPaint } from "./border";
-import { cellCentre, linePointPosition } from "./grid";
+import { arcSpringAnchors, cellCentre, linePointPosition } from "./grid";
 import { roundCorners, roundingRadius } from "./rounding";
 import { shapeById, shapePath } from "./shapes";
 
@@ -1282,23 +1282,12 @@ export class Arc extends KufiItem {
    * used before anchors existed, for ink and space fragments alike.
    */
   private fallbackAnchors(clockwise: boolean): { start: InkPoint; end: InkPoint } {
-    if (this.from.row === this.to.row) {
-      const y = clockwise ? 1 : 0;
-      return { start: { x: 0.5, y }, end: { x: 0.5, y } };
-    }
-    if (this.from.column === this.to.column) {
-      const x = clockwise ? 0 : 1;
-      return { start: { x, y: 0.5 }, end: { x, y: 0.5 } };
-    }
-    const down = this.to.row > this.from.row;
-    if (clockwise) {
-      return down
-        ? { start: { x: 0, y: 0.5 }, end: { x: 0.5, y: 1 } }
-        : { start: { x: 0.5, y: 1 }, end: { x: 1, y: 0.5 } };
-    }
-    return down
-      ? { start: { x: 0.5, y: 0 }, end: { x: 1, y: 0.5 } }
-      : { start: { x: 0, y: 0.5 }, end: { x: 0.5, y: 0 } };
+    const pair = arcSpringAnchors(
+      this.from,
+      this.to,
+      clockwise ? "clockwise" : "counterclockwise",
+    );
+    return { start: pair.from, end: pair.to };
   }
 
   render(config: ProjectConfig): Rendered {

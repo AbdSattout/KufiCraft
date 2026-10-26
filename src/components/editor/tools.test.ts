@@ -394,7 +394,7 @@ describe("LineTool", () => {
     expect(expectLine(third.state).points).toHaveLength(3);
   });
 
-  it("draws an axis-aligned run as one square per cell", () => {
+  it("fills an axis-aligned run with ink and space fragments", () => {
     const ctx = context();
     const first = beginTool("line", ctx, NO_STATE, input(pointOf(1, 1)));
     const second = beginTool("line", ctx, first.state, input(pointOf(3, 1)));
@@ -402,9 +402,13 @@ describe("LineTool", () => {
 
     expect(out.state).toBe(NO_STATE);
     expect(out.commit?.label).toBe("خط");
+    // The x-space stripe after each ink square closes the gap between cells;
+    // the last cell stops at its ink edge, where the solid bar would end.
     expect(out.commit?.items).toEqual([
       makeTile({ column: 1, row: 1, zone: 0, color: CONFIG.ink }),
+      makeTile({ column: 1, row: 1, zone: 1, color: CONFIG.ink }),
       makeTile({ column: 2, row: 1, zone: 0, color: CONFIG.ink }),
+      makeTile({ column: 2, row: 1, zone: 1, color: CONFIG.ink }),
       makeTile({ column: 3, row: 1, zone: 0, color: CONFIG.ink }),
     ]);
   });
@@ -426,30 +430,36 @@ describe("LineTool", () => {
     });
   });
 
-  it("draws on space fragments exactly as on ink ones", () => {
+  it("draws the same continuous band on space fragments as on ink ones", () => {
     const ctx = context();
     let state = beginTool("line", ctx, NO_STATE, input(fragmentPointOf(1, 1, 1))).state;
     state = beginTool("line", ctx, state, input(fragmentPointOf(3, 1, 1))).state;
     const out = beginTool("line", ctx, state, input(fragmentPointOf(3, 1, 1)));
 
     expect(out.state).toBe(NO_STATE);
-    // The same squares the ink run draws — on the x-space stripe the designer
-    // clicked, with the in-between cell taking the run's target zone.
+    // Clicked on the x-space stripe: the band starts inside the first cell's
+    // space and ends at the last cell's far edge, so the full cells between
+    // contribute both ink-row fragments.
     expect(out.commit?.items).toEqual([
       makeTile({ column: 1, row: 1, zone: 1, color: CONFIG.ink }),
+      makeTile({ column: 2, row: 1, zone: 0, color: CONFIG.ink }),
       makeTile({ column: 2, row: 1, zone: 1, color: CONFIG.ink }),
+      makeTile({ column: 3, row: 1, zone: 0, color: CONFIG.ink }),
       makeTile({ column: 3, row: 1, zone: 1, color: CONFIG.ink }),
     ]);
   });
 
-  it("keeps each clicked fragment's zone in a mixed run", () => {
+  it("fills a mixed-zone run's band without dropping a clicked fragment", () => {
     const ctx = context();
     let state = beginTool("line", ctx, NO_STATE, input(pointOf(1, 1))).state;
     state = beginTool("line", ctx, state, input(fragmentPointOf(3, 1, 1))).state;
     const out = beginTool("line", ctx, state, input(fragmentPointOf(3, 1, 1)));
     expect(out.commit?.items.map((item) => item.key)).toEqual([
       tileKey(1, 1, 0),
+      tileKey(1, 1, 1),
+      tileKey(2, 1, 0),
       tileKey(2, 1, 1),
+      tileKey(3, 1, 0),
       tileKey(3, 1, 1),
     ]);
   });
@@ -463,8 +473,10 @@ describe("LineTool", () => {
     const out = beginTool("line", ctx, state, input(pointOf(1, 1)));
 
     expect(out.state).toBe(NO_STATE);
-    expect(out.commit?.items).toHaveLength(12);
+    // Four continuous bands; shared corner fragments are not painted twice.
+    expect(out.commit?.items).toHaveLength(24);
     expect(out.commit?.items.every((item) => item.type === "tile")).toBe(true);
+    expect(new Set(out.commit?.items.map((item) => item.key)).size).toBe(24);
   });
 
   it("commits a closed run with a diagonal part as a stroke", () => {
@@ -487,8 +499,8 @@ describe("LineTool", () => {
     const preview = previewTool("line", ctx, hovered.state);
 
     expect(preview.mode).toBe("ghost");
-    // The previewed run is the same squares the commit will paint.
-    expect(preview.items).toHaveLength(3);
+    // The previewed run is the same continuous band the commit will paint.
+    expect(preview.items).toHaveLength(5);
     expect(preview.items.every((item) => item.type === "tile")).toBe(true);
     // The marker is the actual first point, not its whole cell.
     expect(preview.marker).toEqual({ column: 1, row: 1 });
@@ -649,7 +661,9 @@ describe("LineTool", () => {
     const out = leaveTool("line", "pen", ctx, second.state);
     expect(out.commit?.items).toEqual([
       makeTile({ column: 1, row: 1, zone: 0, color: CONFIG.ink }),
+      makeTile({ column: 1, row: 1, zone: 1, color: CONFIG.ink }),
       makeTile({ column: 2, row: 1, zone: 0, color: CONFIG.ink }),
+      makeTile({ column: 2, row: 1, zone: 1, color: CONFIG.ink }),
       makeTile({ column: 3, row: 1, zone: 0, color: CONFIG.ink }),
     ]);
   });
@@ -810,8 +824,11 @@ describe("ArcTool", () => {
     });
   });
 
-  it("uses both fragment centres for a smart diagonal", () => {
-    const ctx = context([], { smartPoints: true });
+  it("uses both fragment centres for a smart diagonal half", () => {
+    const ctx = context([], {
+      smartPoints: true,
+      arc: { direction: "clockwise", size: "half" },
+    });
     const armed = beginTool(
       "arc",
       ctx,
@@ -835,6 +852,79 @@ describe("ArcTool", () => {
       type: "arc",
       from: { column: 1, row: 1, anchor: { x: 0.5, y: 0.5 } },
       to: { column: 4, row: 4, anchor: { x: 0.5, y: 0.5 } },
+    });
+  });
+
+  it("springs a smart diagonal quarter from the edge pair", () => {
+    const ctx = context([], {
+      smartPoints: true,
+      arc: { direction: "clockwise", size: "quarter" },
+    });
+    const armed = beginTool(
+      "arc",
+      ctx,
+      NO_STATE,
+      input(anchorPointOf(1, 1, 0, 0)),
+    ).state;
+    const moved = moveTool(
+      "arc",
+      ctx,
+      armed,
+      input(anchorPointOf(4, 4, 1, 1)),
+    );
+    // The dots preview the same edge pair the commit stores.
+    expect(moved.state.kind).toBe("arc");
+    const preview = previewTool("arc", ctx, moved.state);
+    expect(preview.marker).toMatchObject({ anchor: { x: 0, y: 0.5 } });
+    expect(preview.dot).toMatchObject({ anchor: { x: 0.5, y: 1 } });
+
+    const out = beginTool(
+      "arc",
+      ctx,
+      moved.state,
+      input(anchorPointOf(4, 4, 1, 1)),
+    );
+    expect(out.commit?.items[0]).toMatchObject({
+      type: "arc",
+      from: { column: 1, row: 1, anchor: { x: 0, y: 0.5 } },
+      to: { column: 4, row: 4, anchor: { x: 0.5, y: 1 } },
+      size: "quarter",
+    });
+  });
+
+  it("turns a smart diagonal three-quarter inward toward the other fragment", () => {
+    const ctx = context([], {
+      smartPoints: true,
+      arc: { direction: "clockwise", size: "threeQuarter" },
+    });
+    const armed = beginTool(
+      "arc",
+      ctx,
+      NO_STATE,
+      input(anchorPointOf(1, 1, 0, 0)),
+    ).state;
+    const moved = moveTool(
+      "arc",
+      ctx,
+      armed,
+      input(anchorPointOf(4, 4, 1, 1)),
+    );
+    expect(moved.state.kind).toBe("arc");
+    const preview = previewTool("arc", ctx, moved.state);
+    expect(preview.marker).toMatchObject({ anchor: { x: 0.5, y: 1 } });
+    expect(preview.dot).toMatchObject({ anchor: { x: 0, y: 0.5 } });
+
+    const out = beginTool(
+      "arc",
+      ctx,
+      moved.state,
+      input(anchorPointOf(4, 4, 1, 1)),
+    );
+    expect(out.commit?.items[0]).toMatchObject({
+      type: "arc",
+      from: { column: 1, row: 1, anchor: { x: 0.5, y: 1 } },
+      to: { column: 4, row: 4, anchor: { x: 0, y: 0.5 } },
+      size: "threeQuarter",
     });
   });
 

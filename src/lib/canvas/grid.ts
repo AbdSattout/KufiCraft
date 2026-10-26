@@ -32,6 +32,7 @@ import {
 import type {
   Anchor,
   ArcDirection,
+  ArcSize,
   Cell,
   InkPoint,
   LinePoint,
@@ -248,13 +249,71 @@ export function pointToArcPoint(config: ProjectConfig, point: Point): LinePoint 
 }
 
 /**
+ * The reference app's **spring anchors** for an arc pair, one per endpoint, in
+ * the order given. A same-row chord springs off the bottom (clockwise) or top
+ * (counterclockwise) middle; a same-column chord off the left or right middle;
+ * a 45° diagonal uses the two fragment-edge midpoints that face the chord
+ * (`kufi.js` 285‑311). This is the anchor rule an anchor-less arc falls back to
+ * (`Arc.fallbackAnchors`) and the smart rule for a diagonal quarter /
+ * three-quarter rib.
+ *
+ * The diagonal pair is declared in the Arc class's canonical left-to-right
+ * order and then returned in the caller's order, so a pair clicked backwards
+ * still lands the same anchor on the same physical endpoint.
+ */
+export function arcSpringAnchors(
+  from: Cell,
+  to: Cell,
+  direction: ArcDirection,
+): { from: InkPoint; to: InkPoint } {
+  if (from.row === to.row) {
+    const y = direction === "clockwise" ? 1 : 0;
+    return { from: { x: 0.5, y }, to: { x: 0.5, y } };
+  }
+  if (from.column === to.column) {
+    const x = direction === "clockwise" ? 0 : 1;
+    return { from: { x, y: 0.5 }, to: { x, y: 0.5 } };
+  }
+  const fromIsLeft = from.column < to.column;
+  const down = fromIsLeft ? to.row > from.row : from.row > to.row;
+  let left: InkPoint;
+  let right: InkPoint;
+  if (down) {
+    if (direction === "clockwise") {
+      left = { x: 0, y: 0.5 };
+      right = { x: 0.5, y: 1 };
+    } else {
+      left = { x: 0.5, y: 0 };
+      right = { x: 1, y: 0.5 };
+    }
+  } else if (direction === "clockwise") {
+    left = { x: 0.5, y: 1 };
+    right = { x: 1, y: 0.5 };
+  } else {
+    left = { x: 0, y: 0.5 };
+    right = { x: 0.5, y: 0 };
+  }
+  return fromIsLeft ? { from: left, to: right } : { from: right, to: left };
+}
+
+/**
  * Smart anchors for an **arc pair**, one per endpoint, in that endpoint's own
  * fragment. A same-row chord springs off the bottom (clockwise) or top
  * (counterclockwise) middle; a same-column chord off the left or right middle;
- * anything else — the 45° diagonals an arc supports — uses both fragment
- * centres. The row/column choices are the reference app's spring points
- * (`Arc.fallbackAnchors`); the diagonal is deliberately the centre, which is
- * the simple "else" rule of smart mode.
+ * a diagonal **half** arc is a true semicircle, so it uses both fragment
+ * centres.
+ *
+ * A diagonal **quarter** uses the reference app's edge-midpoint pair
+ * (`arcSpringAnchors`). Because the curved band is `ink` wide, that chord makes
+ * the quarter's band cross both tapped ink squares (≈92–96% of each), which is
+ * the look the reference app produced.
+ *
+ * A diagonal **three-quarter** uses the same pair **swapped**: each endpoint
+ * springs from the edge that faces the other fragment. The 270° band then
+ * crosses the two ink squares the same way (≈85–95%), instead of grazing them
+ * (≈45% with the unswapped pair) or throwing a huge loop far outside the pair
+ * (the ¼ chord drawn the long way round). The loop itself stays compact:
+ * its radius is the span minus half the ink.
  *
  * The tap's exact anchor is ignored, but its fragment (`zone`) is preserved:
  * smart mode loosens the position inside a fragment, never the fragment the
@@ -264,27 +323,27 @@ export function smartArcPoints(
   from: LinePoint,
   to: LinePoint,
   direction: ArcDirection,
+  size: ArcSize,
 ): { from: LinePoint; to: LinePoint } {
-  const anchor = smartArcAnchor(from, to, direction);
+  const sameCell = from.column === to.column && from.row === to.row;
+  const axis = from.row === to.row || from.column === to.column;
+  const diagonal =
+    from.row !== to.row &&
+    from.column !== to.column &&
+    Math.abs(from.row - to.row) === Math.abs(from.column - to.column);
+  let anchors: { from: InkPoint; to: InkPoint };
+  if (sameCell || (!axis && (!diagonal || size === "half"))) {
+    anchors = { from: CENTRE_ANCHOR, to: CENTRE_ANCHOR };
+  } else if (diagonal && size === "threeQuarter") {
+    const spring = arcSpringAnchors(from, to, direction);
+    anchors = { from: spring.to, to: spring.from };
+  } else {
+    anchors = arcSpringAnchors(from, to, direction);
+  }
   return {
-    from: arcPoint(from.column, from.row, from.zone, anchor),
-    to: arcPoint(to.column, to.row, to.zone, anchor),
+    from: arcPoint(from.column, from.row, from.zone, anchors.from),
+    to: arcPoint(to.column, to.row, to.zone, anchors.to),
   };
-}
-
-function smartArcAnchor(
-  from: LinePoint,
-  to: LinePoint,
-  direction: ArcDirection,
-): InkPoint {
-  if (from.row === to.row && from.column === to.column) return CENTRE_ANCHOR;
-  if (from.row === to.row) {
-    return { x: 0.5, y: direction === "clockwise" ? 1 : 0 };
-  }
-  if (from.column === to.column) {
-    return { x: direction === "clockwise" ? 0 : 1, y: 0.5 };
-  }
-  return CENTRE_ANCHOR;
 }
 
 /**

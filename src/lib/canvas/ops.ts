@@ -33,9 +33,12 @@ import type {
   ShapeId,
   StrokeCap,
   StrokeJoin,
+  Zone,
 } from "./model";
+import { zoneRect } from "./geometry";
+import type { Rect } from "./geometry";
 import { runOf } from "./grid";
-import { makeLine, makeStroke, makeTile } from "./items";
+import { Line, makeLine, makeStroke, makeTile } from "./items";
 
 export interface CanvasState {
   readonly items: readonly CanvasItem[];
@@ -343,13 +346,14 @@ export function penItems(
  * pre-anchor tool could make — follows the reference app's rules unchanged: a
  * run with **no diagonal segment** that spans at least one cell boundary is
  * either one solid `line` bar (the two endpoints) or, when
- * `config.straightLinesAsSquares` is on (its default), one square per cell
- * along every segment. Anything with a diagonal part becomes one stroked
- * polyline, exactly like the old app.
+ * `config.straightLinesAsSquares` is on (its default), a continuous band of
+ * squares: the ink fragments along the run **and** the space fragments that
+ * close the gaps between them. Anything with a diagonal part becomes one
+ * stroked polyline, exactly like the old app.
  *
  * Fragments are first class here (`docs/CANVAS.md` §4): each point's own
  * fragment decides where its square or bar end sits, so a run clicked on space
- * fragments draws squares / a bar over those space squares exactly like an ink
+ * fragments draws a band / bar over those space squares exactly like an ink
  * run. Two fragments of the **same** cell are two positions inside it, which
  * only a stroke can express — no bar or square run can span less than a cell.
  *
@@ -472,16 +476,25 @@ function mergesToEnds(
 }
 
 /**
- * One square per cell along every axis-aligned segment of the run — the
- * reference app's `line()` (which emitted a `square` shape per cell whenever a
- * straight line was drawn). Returns `null` as soon as a segment is diagonal,
- * leaving the run to the polyline path.
+ * The run's own band, split into the fragments that cover it — the reference
+ * app's `line()` cut into squares, without the gaps the old one-per-cell rule
+ * left between the ink squares (`straightLinesAsSquares`).
  *
- * Each square sits on a **fragment**: the segment's own points keep their
- * zones, and a cell in between takes the target point's zone — the same spread
- * `anchorsAlongLine` uses for in-between anchors. A cell is painted once, by
- * the first segment that reaches it, so a closed run's junction keeps the
- * zone it was clicked in.
+ * A straight leg is exactly the band its solid `line` bar would paint, so the
+ * split run must cover the same rectangle with tiles: the ink fragment of
+ * every cell it crosses **and** the following space fragment on that cell's
+ * own row/column. For an ink (zone 0) horizontal run that is `zone 0` plus
+ * `zone 1` per full cell; a vertical run uses `zone 0` plus `zone 2`; a run
+ * clicked on a space stripe uses the two fragments of that stripe (`2`+`3` or
+ * `1`+`3`). The first and last cell only take the fragments the bar reaches,
+ * so the split run starts and ends where the solid bar does.
+ *
+ * The band's cross-section comes from the **canonical** first end, exactly
+ * like `Line.bar`; the along-axis walk keeps the click sequence's order, so a
+ * run drawn backwards still starts at its lower end. A fragment is painted
+ * once: the second leg of a turn can add the fragments the first leg did not
+ * need at the shared cell, but never duplicates them. Returns `null` as soon
+ * as a segment is diagonal, leaving the run to the polyline path.
  */
 function straightRunSquares(
   config: ProjectConfig,
@@ -497,31 +510,71 @@ function straightRunSquares(
   if (closed && points.length > 2) {
     segments.push([points[points.length - 1], points[0]]);
   }
-  const along: LinePoint[] = [];
+  const items: CanvasItem[] = [];
   const seen = new Set<string>();
-  for (const [from, to] of segments) {
-    if (from.column !== to.column && from.row !== to.row) return null;
-    const step = Math.sign(to.column - from.column) || Math.sign(to.row - from.row);
-    const length = Math.abs(to.column - from.column) + Math.abs(to.row - from.row);
+  for (const [start, end] of segments) {
+    if (start.column !== end.column && start.row !== end.row) return null;
+    // `Line` owns the canonical ends and the bar rectangle; using both here
+    // keeps the split run and the solid run byte-for-byte consistent.
+    const line = new Line({ from: start, to: end });
+    const band = line.bar(config);
+    const horizontal = line.from.row === line.to.row;
+    const crossSection = (horizontal
+      ? zoneOf(line.from) & 2
+      : zoneOf(line.from) & 1) as Zone;
+    // A horizontal run walks columns and can take the x-space stripe of a
+    // cell (bit 1); a vertical run walks rows and can take the y-space stripe
+    // (bit 2). The cross-section bit is fixed for the whole leg.
+    const alongBits: readonly Zone[] = horizontal ? [0, 1] : [0, 2];
+    const step = horizontal
+      ? Math.sign(end.column - start.column)
+      : Math.sign(end.row - start.row);
+    const length = horizontal
+      ? Math.abs(end.column - start.column)
+      : Math.abs(end.row - start.row);
     for (let offset = 0; offset <= length; offset++) {
-      const cell =
-        from.column === to.column
-          ? { column: from.column, row: from.row + step * offset }
-          : { column: from.column + step * offset, row: from.row };
-      // A closed run returns to its first cell; a cell is painted once.
-      const id = `${cell.column}:${cell.row}`;
-      if (seen.has(id)) continue;
-      seen.add(id);
-      const source = offset === 0 ? from : to;
-      along.push(linePoint(cell.column, cell.row, source.zone));
+      const column = horizontal
+        ? start.column + step * offset
+        : start.column;
+      const row = horizontal
+        ? start.row
+        : start.row + step * offset;
+      for (const bit of alongBits) {
+        const zone = (crossSection | bit) as Zone;
+        if (!fragmentCoversBand(config, column, row, zone, band)) continue;
+        const item = tileFor(
+          config,
+          { column, row, zone },
+          { color, border },
+        );
+        // A turn meets its previous leg in the same cell; each fragment is
+        // painted once, so the join keeps the union of both bands.
+        if (seen.has(item.key)) continue;
+        seen.add(item.key);
+        items.push(item);
+      }
     }
   }
-  return along.map((point) =>
-    tileFor(
-      config,
-      { column: point.column, row: point.row, zone: zoneOf(point) },
-      { color, border },
-    ),
+  return items;
+}
+
+/** Whether `zone`'s fragment of `(column, row)` has area inside `band`. */
+function fragmentCoversBand(
+  config: ProjectConfig,
+  column: number,
+  row: number,
+  zone: Zone,
+  band: Rect,
+): boolean {
+  const rect = zoneRect(config, column, row, zone);
+  const epsilon = 1e-9;
+  return (
+    Math.min(rect.x + rect.w, band.x + band.w) -
+      Math.max(rect.x, band.x) >
+      epsilon &&
+    Math.min(rect.y + rect.h, band.y + band.h) -
+      Math.max(rect.y, band.y) >
+      epsilon
   );
 }
 

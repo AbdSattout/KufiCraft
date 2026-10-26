@@ -541,7 +541,8 @@ class PenTool extends KufiTool {
  * `lineItems`, so the preview shows the *same* endpoints the click stores. A
  * run with a diagonal part, or with anchored points, is stroked; a run made
  * only of centre points and axis-aligned segments is drawn as
- * `config.straightLinesAsSquares` says — one square per cell, or one solid bar.
+ * `config.straightLinesAsSquares` says — a continuous band of fragments (the
+ * ink squares plus the spaces between them), or one solid bar.
  */
 class LineTool extends KufiTool {
   readonly id = "line" as const;
@@ -748,7 +749,10 @@ class EraserTool extends KufiTool {
  * endpoint an absent anchor means the legacy spring point (docs/CANVAS.md §5).
  * With smart mode on, the tap's exact anchor is replaced by the pair rule
  * (`smartArcPoints`): top/bottom middle for a horizontal chord, left/right
- * middle for a vertical one, both centres otherwise.
+ * middle for a vertical one, both centres for a diagonal **half**, the
+ * reference edge-midpoint pair for a diagonal **quarter**, and that pair
+ * swapped (each end on the edge facing the other fragment) for a diagonal
+ * **three-quarter**.
  * Direction and size come from the tool's own controls; the Arc item class
  * owns the maths.
  *
@@ -844,7 +848,7 @@ class ArcTool extends KufiTool {
     to: ArcPoint,
   ): { from: ArcPoint; to: ArcPoint } {
     return ctx.smartPoints
-      ? smartArcPoints(from, to, ctx.arc.direction)
+      ? smartArcPoints(from, to, ctx.arc.direction, ctx.arc.size)
       : { from, to };
   }
 
